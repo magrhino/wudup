@@ -4,22 +4,27 @@ import hashlib
 import json
 import unittest
 import urllib.error
-from io import BytesIO
+from contextlib import redirect_stderr, redirect_stdout
+from io import BytesIO, StringIO
 from unittest import mock
 
 from tests.test_python_digest_verifier import FakeDocker, StaticResolver, index_doc
 from tests.update_from_wud_helpers import (
+    UpdateFromWudRunnerTestCase,
     manifest_image,
     manifest_index,
 )
 
 from wudup.digest_verifier import (
+    DigestCheckResult,
+    DigestResolveResult,
     DigestVerifier,
     ManifestIntegrityError,
     RegistryHttpManifestResolver,
     parse_registry_image,
 )
 from wudup.platforms import ImagePlatform
+from wudup.updater_digest_pin import digest_pin_update_from_values
 
 
 def body_digest(body: bytes, algorithm: str = "sha256") -> str:
@@ -283,3 +288,142 @@ class ManifestIntegrityTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.reason, "repo-digest-match")
         fetch.assert_not_called()
+
+
+class UpdaterManifestIntegrityTests(UpdateFromWudRunnerTestCase):
+    def test_mixed_preflight_failures_keep_per_entry_audit_reasons(self) -> None:
+        corrupt_line = "repo/corrupt:latest@sha256:expected\n"
+        self.wud_file.write_text(
+            "repo/stale:latest@sha256:old\n" + corrupt_line,
+            encoding="utf-8",
+        )
+        self.make_stack(
+            "app",
+            [
+                ("stale", "repo/stale:latest", "cid-stale"),
+                ("corrupt", "repo/corrupt:latest", "cid-corrupt"),
+            ],
+        )
+        for name in ("stale", "corrupt"):
+            self.set_image_state(
+                f"repo/{name}:latest", "sha256:local", "sha256:local-manifest"
+            )
+        verifier = mock.Mock()
+        verifier.verify_tag_digest.side_effect = lambda image, _expected: (
+            DigestResolveResult(False, "failed", "stale-digest", digest="sha256:moved")
+            if image == "repo/stale:latest"
+            else DigestResolveResult(False, "failed", "manifest-integrity-mismatch")
+        )
+        runner = self.make_runner(digest_verifier=verifier, db_path=self.db_path)
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            status = runner.run()
+
+        reasons = {
+            "stale": "stale-pending-digest",
+            "corrupt": "manifest-integrity-mismatch",
+        }
+        self.assertEqual(status, 1)
+        self.assertNotRegex(self.calls(), r"compose .* (pull|up)\b")
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), corrupt_line)
+        events = self.db_rows("SELECT service_name, metadata_json FROM update_events")
+        self.assertEqual(
+            {
+                row["service_name"]: json.loads(row["metadata_json"])["reason"]
+                for row in events
+            },
+            reasons,
+        )
+        pending = self.db_rows(
+            "SELECT service_name, status_reason FROM pending_updates"
+        )
+        self.assertEqual(
+            {row["service_name"]: row["status_reason"] for row in pending}, reasons
+        )
+        self.assertEqual(
+            {failure.services: failure.reason for failure in runner.failures},
+            {(name,): reason for name, reason in reasons.items()},
+        )
+
+    def test_digest_pin_integrity_failure_is_not_overwritten_by_an_image_alias(
+        self,
+    ) -> None:
+        verifier = mock.Mock()
+        failed = DigestCheckResult(False, "failed", "manifest-integrity-mismatch")
+        verifier.verify.side_effect = [
+            failed,
+            DigestCheckResult(True, "verified", "repo-digest-match"),
+        ]
+        runner = self.make_runner(digest_verifier=verifier)
+        update = digest_pin_update_from_values(
+            old_image="acme/app:latest",
+            resolved_tag="latest",
+            planned_digest="sha256:" + "a" * 64,
+            services=("app",),
+        )
+        result, matched = runner.lifecycle._verify_digest_pin_images(
+            update,
+            ("acme/app:latest", "docker.io/acme/app:latest"),
+        )
+        self.assertTrue(matched)
+        self.assertEqual(result, failed)
+        verifier.verify.assert_called_once()
+
+    def prepare_update(self) -> tuple[str, str, bytes]:
+        image = "quay.io/acme/app:latest"
+        body = manifest_body()
+        expected = body_digest(body)
+        self.wud_file.write_text(f"{image}@{expected}\n", encoding="utf-8")
+        self.make_stack("app", [("app", image, "cid-app")])
+        self.set_image_state(image, "sha256:old", "sha256:old-manifest")
+        self.set_image_after_pull(image, "sha256:wrong", "sha256:wrong-manifest")
+        return image, expected, body
+
+    def test_integrity_failure_stops_preflight_before_pull(self) -> None:
+        _image, expected, _body = self.prepare_update()
+        runner = self.make_runner(db_path=self.db_path)
+        runner.digest_verifier = DigestVerifier(runner.docker)
+        with (
+            mock.patch(
+                "wudup.digest_verifier.urllib.request.urlopen",
+                return_value=response(manifest_body("sha256:wrong"), expected),
+            ),
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()),
+        ):
+            status = runner.run()
+        self.assertEqual(status, 1)
+        self.assertNotRegex(self.calls(), r"compose .* (pull|up)\b")
+        self.assertIn(expected, self.wud_file.read_text())
+        events = self.db_rows("SELECT status, metadata_json FROM update_events")
+        self.assertEqual(events[0]["status"], "failure")
+        self.assertEqual(
+            json.loads(events[0]["metadata_json"])["reason"],
+            "manifest-integrity-mismatch",
+        )
+
+    def test_postpull_integrity_failure_prevents_recreation_and_cleanup(self) -> None:
+        _image, expected, body = self.prepare_update()
+        runner = self.make_runner(db_path=self.db_path)
+        runner.digest_verifier = DigestVerifier(runner.docker)
+        with (
+            mock.patch(
+                "wudup.digest_verifier.urllib.request.urlopen",
+                side_effect=[
+                    response(body),
+                    response(manifest_body("sha256:wrong"), expected),
+                ],
+            ),
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()),
+        ):
+            status = runner.run()
+        self.assertEqual(status, 1)
+        self.assertRegex(self.calls(), r"compose .* pull\b")
+        self.assertNotRegex(self.calls(), r"compose .* up\b")
+        self.assertIn(expected, self.wud_file.read_text())
+        events = self.db_rows("SELECT status, metadata_json FROM update_events")
+        self.assertEqual(events[0]["status"], "failure")
+        self.assertEqual(
+            json.loads(events[0]["metadata_json"])["reason"],
+            "expected-digest-not-reached",
+        )

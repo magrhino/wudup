@@ -103,6 +103,15 @@ class _LifecycleDigestMixin:
             if result.ok:
                 self.preflight_digest_outcomes.viable.add(requirement_key)
                 continue
+            if result.reason == "manifest-integrity-mismatch":
+                ok = False
+                self.preflight_digest_outcomes.failed.add(requirement_key)
+                self.log.error(
+                    f"[{stack.name}] Digest preflight failed for line {line_no}: "
+                    "the registry manifest failed its integrity check. "
+                    "No update was applied; check the registry before retrying."
+                )
+                continue
             if result.reason != "stale-digest" or not result.digest:
                 self.preflight_digest_outcomes.viable.add(requirement_key)
                 self.log.warning(
@@ -308,7 +317,7 @@ class _LifecycleDigestMixin:
                 image,
                 update.planned_digest,
             )
-            if digest_result.ok:
+            if digest_result.ok or digest_result.reason == "manifest-integrity-mismatch":
                 break
         return digest_result, matched
 
