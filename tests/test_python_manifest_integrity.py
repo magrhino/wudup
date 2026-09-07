@@ -89,8 +89,9 @@ class ManifestIntegrityTests(unittest.TestCase):
                     return_value=response(body, header),
                 ),
             ):
+                resolver = RegistryHttpManifestResolver()
                 with self.assertRaises(ManifestIntegrityError):
-                    RegistryHttpManifestResolver().fetch(image, self.expected)
+                    resolver.fetch(image, self.expected)
 
     def test_invalid_json_does_not_hide_proven_integrity_failure(self) -> None:
         with mock.patch(
@@ -157,10 +158,10 @@ class ManifestIntegrityTests(unittest.TestCase):
                 response(manifest_body()),
             ],
         ):
+            resolver = RegistryHttpManifestResolver()
+            image = parse_registry_image(self.image)
             with self.assertRaises(ManifestIntegrityError):
-                RegistryHttpManifestResolver().fetch(
-                    parse_registry_image(self.image), self.expected
-                )
+                resolver.fetch(image, self.expected)
 
     def test_different_valid_header_algorithm_preserves_requested_identity(
         self,
