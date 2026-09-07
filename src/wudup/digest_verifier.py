@@ -279,14 +279,9 @@ class RegistryHttpManifestResolver:
             )
         except OSError as exc:
             raise ManifestLookupError(f"registry request failed for {url}: {exc}") from exc
-        if reference:
-            # Authenticate the original bytes before parsing; JSON reserialization
-            # changes the content-addressed identity, and invalid JSON may be tampered.
-            advertised = _header_value(headers, "Docker-Content-Digest")
-            requested = reference if ":" in reference else ""
-            for digest in (requested, advertised):
-                if digest:
-                    _verify_manifest_digest(body, digest)
+        # Authenticate the original bytes before parsing; JSON reserialization
+        # changes the content-addressed identity, and invalid JSON may be tampered.
+        _verify_response_digests(body, headers, reference)
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -297,13 +292,7 @@ class RegistryHttpManifestResolver:
             raise ManifestLookupError(
                 f"registry response was not a JSON object for {url}"
             )
-        if reference and isinstance(payload.get("manifests"), list):
-            for child in payload["manifests"]:
-                if not isinstance(child, Mapping) or not _valid_manifest_digest(child.get("digest")):
-                    raise ManifestIntegrityError(
-                        "Registry manifest integrity check failed: an image index "
-                        "contains an invalid child digest. Check the registry before retrying."
-                    )
+        _verify_index_child_digests(payload, reference)
         return headers, payload, body
 
     def _token(self, challenge: str) -> str:
@@ -979,6 +968,27 @@ class DigestVerifier:
             return self._fetch(image, reference)
         except ManifestLookupError:
             return None
+
+
+def _verify_response_digests(
+    body: bytes, headers: Mapping[str, str], reference: str,
+) -> None:
+    if reference:
+        advertised = _header_value(headers, "Docker-Content-Digest")
+        requested = reference if ":" in reference else ""
+        for digest in (requested, advertised):
+            if digest:
+                _verify_manifest_digest(body, digest)
+
+
+def _verify_index_child_digests(payload: Mapping[str, Any], reference: str) -> None:
+    if reference and isinstance(payload.get("manifests"), list):
+        for child in payload["manifests"]:
+            if not isinstance(child, Mapping) or not _valid_manifest_digest(child.get("digest")):
+                raise ManifestIntegrityError(
+                    "Registry manifest integrity check failed: an image index "
+                    "contains an invalid child digest. Check the registry before retrying."
+                )
 
 
 def _manifest_digest(body: bytes, algorithm: str = "sha256") -> str:
