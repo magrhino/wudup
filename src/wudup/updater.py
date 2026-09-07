@@ -504,9 +504,13 @@ class UpdateFromWudRunner(
             for _stack_index, line_no, _image in self.preflight_digest_outcomes.viable
         }
         definitively_stale_lines = stale_lines - viable_lines
+        integrity_failed_lines = {
+            line_no
+            for _stack_index, line_no, _image in self.preflight_digest_outcomes.failed
+        }
         self.preflight_skipped_pending_line_numbers = {
             match.target.line_no for match in matches
-        } - definitively_stale_lines
+        } - definitively_stale_lines - integrity_failed_lines
         return {
             stack.index: stale_statuses.get(
                 stack.index,

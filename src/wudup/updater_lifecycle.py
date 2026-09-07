@@ -102,34 +102,52 @@ class StackLifecycleExecutor(
         stack: ComposeStack,
         matches: Sequence[Match],
     ) -> StackStatus | None:
-        if not self._preflight_expected_digests(stack, matches):
-            stale_matches = tuple(
+        if self._preflight_expected_digests(stack, matches):
+            return None
+        for outcome in ("stale", "failed"):
+            failed_matches = tuple(
                 match
                 for match in matches
-                if self._preflight_expected_digest_outcome(match) == "stale"
+                if self._preflight_expected_digest_outcome(match) == outcome
             )
-            scope = self._update_scope(stack, stale_matches)
+            if not failed_matches:
+                continue
+            integrity_failed = outcome == "failed"
+            reason = (
+                "manifest-integrity-mismatch" if integrity_failed
+                else STALE_PENDING_DIGEST_REASON
+            )
+            note = (
+                "Registry manifest integrity check failed before any Compose or "
+                "Docker update; check the registry before retrying."
+                if integrity_failed else
+                "Stale pending digest detected before any Compose or Docker "
+                "update; refresh or replace it before retrying."
+            )
+            scope = self._update_scope(stack, failed_matches)
             self._record_failure(
                 stack,
-                stale_matches,
+                failed_matches,
                 phase="preflight",
-                reason=STALE_PENDING_DIGEST_REASON,
+                reason=reason,
                 services=scope.pull_services,
-                note=(
-                    "Stale pending digest detected before any Compose or Docker "
-                    "update; refresh or replace it before retrying."
-                ),
+                note=note,
             )
             self._progress(
                 "preflight",
                 "failure",
+                f"[{stack.name}] {note}" if integrity_failed else
                 f"[{stack.name}] Pending WUD digest is stale; no update was applied.",
                 stack=stack.name,
                 services=scope.pull_services,
-                matches=stale_matches,
+                matches=failed_matches,
             )
-            return StackStatus("failure", STALE_PENDING_DIGEST_REASON)
-        return None
+        return StackStatus(
+            "failure",
+            "manifest-integrity-mismatch"
+            if self.preflight_digest_outcomes.failed_in_stack(stack.index)
+            else STALE_PENDING_DIGEST_REASON,
+        )
 
     def _build_stack_update_state(
         self,

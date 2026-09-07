@@ -425,13 +425,14 @@ def _event_status_for_match(
         match.stack.index,
         StackStatus("failure", "missing"),
     )
-    if match.target.line_no in runner.preflight_skipped_pending_line_numbers:
-        reason = (
-            STALE_PENDING_DIGEST_REASON
-            if runner._preflight_expected_digest_outcome(match) == "stale"
-            else "preflight-skipped"
-        )
+    reason = {
+        "stale": STALE_PENDING_DIGEST_REASON,
+        "failed": "manifest-integrity-mismatch",
+    }.get(runner._preflight_expected_digest_outcome(match))
+    if reason:
         return StackStatus("failure", reason)
+    if match.target.line_no in runner.preflight_skipped_pending_line_numbers:
+        return StackStatus("failure", "preflight-skipped")
     if status.status != "failure" or not runner._expected_digest_failed_in_stack(
         match.stack
     ):
