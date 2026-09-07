@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -65,6 +67,10 @@ class ManifestLookupError(RuntimeError):
     """Raised when a registry manifest cannot be resolved or parsed."""
 
 
+class ManifestIntegrityError(RuntimeError):
+    """Raised when manifest bytes do not match their claimed identity."""
+
+
 class ManifestResolver(Protocol):
     def fetch(self, image: RegistryImageRef, reference: str) -> ManifestDocument:
         """Return a manifest or index document for ``image`` and ``reference``."""
@@ -92,6 +98,7 @@ class ManifestDocument:
     digest: str
     media_type: str
     payload: Mapping[str, Any]
+    raw_body: bytes = b""
 
     def is_index(self) -> bool:
         return self.media_type in INDEX_MEDIA_TYPES or isinstance(
@@ -233,12 +240,13 @@ class RegistryHttpManifestResolver:
 
     def fetch(self, image: RegistryImageRef, reference: str) -> ManifestDocument:
         url = f"https://{image.http_registry}/v2/{image.repo}/manifests/{reference}"
-        headers, payload = self._request_json(url)
+        headers, payload, body = self._request_json(url, reference=reference)
         return ManifestDocument(
             source=f"registry-http:{image.http_registry}",
-            digest=_header_value(headers, "Docker-Content-Digest"),
+            digest=reference if ":" in reference else _manifest_digest(body),
             media_type=_content_type(_header_value(headers, "Content-Type")),
             payload=payload,
+            raw_body=body,
         )
 
     def _request_json(
@@ -247,7 +255,8 @@ class RegistryHttpManifestResolver:
         *,
         accept: str = MANIFEST_ACCEPT,
         token: str = "",
-    ) -> tuple[Mapping[str, str], Mapping[str, Any]]:
+        reference: str = "",
+    ) -> tuple[Mapping[str, str], Mapping[str, Any], bytes]:
         request = urllib.request.Request(url)
         request.add_header("Accept", accept)
         if token:
@@ -266,9 +275,18 @@ class RegistryHttpManifestResolver:
                 url,
                 accept=accept,
                 token=self._token(challenge),
+                reference=reference,
             )
         except OSError as exc:
             raise ManifestLookupError(f"registry request failed for {url}: {exc}") from exc
+        if reference:
+            # Authenticate the original bytes before parsing; JSON reserialization
+            # changes the content-addressed identity, and invalid JSON may be tampered.
+            advertised = _header_value(headers, "Docker-Content-Digest")
+            requested = reference if ":" in reference else ""
+            for digest in (requested, advertised):
+                if digest:
+                    _verify_manifest_digest(body, digest)
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -279,7 +297,14 @@ class RegistryHttpManifestResolver:
             raise ManifestLookupError(
                 f"registry response was not a JSON object for {url}"
             )
-        return headers, payload
+        if reference and isinstance(payload.get("manifests"), list):
+            for child in payload["manifests"]:
+                if not isinstance(child, Mapping) or not _valid_manifest_digest(child.get("digest")):
+                    raise ManifestIntegrityError(
+                        "Registry manifest integrity check failed: an image index "
+                        "contains an invalid child digest. Check the registry before retrying."
+                    )
+        return headers, payload, body
 
     def _token(self, challenge: str) -> str:
         cached = self._tokens.get(challenge)
@@ -303,7 +328,7 @@ class RegistryHttpManifestResolver:
         }
         separator = "&" if urllib.parse.urlparse(realm).query else "?"
         url = realm + (separator + urllib.parse.urlencode(query) if query else "")
-        _headers, payload = self._request_json(url, accept="application/json")
+        _headers, payload, _body = self._request_json(url, accept="application/json")
         token = payload.get("token")
         if not isinstance(token, str) or not token:
             raise ManifestLookupError(
@@ -367,6 +392,15 @@ class DigestVerifier:
         self.fallback_resolver = fallback_resolver or DockerManifestResolver(docker)
 
     def verify(self, image: str, expected: str) -> DigestCheckResult:
+        try:
+            return self._verify(image, expected)
+        except ManifestIntegrityError as exc:
+            return DigestCheckResult(
+                ok=False, status=_STATUS_FAILED,
+                reason="manifest-integrity-mismatch", error=str(exc),
+            )
+
+    def _verify(self, image: str, expected: str) -> DigestCheckResult:
         repo_digests = tuple(self.docker.image_repo_digests(image))
         local_image_id = self.docker.image_id(image)
         if any(digest.rsplit("@", 1)[-1] == expected for digest in repo_digests):
@@ -450,6 +484,15 @@ class DigestVerifier:
         )
 
     def resolve_tag_digest(self, image: str) -> DigestResolveResult:
+        try:
+            return self._resolve_tag_digest(image)
+        except ManifestIntegrityError as exc:
+            return DigestResolveResult(
+                ok=False, status=_STATUS_FAILED,
+                reason="manifest-integrity-mismatch", error=str(exc),
+            )
+
+    def _resolve_tag_digest(self, image: str) -> DigestResolveResult:
         registry_image = parse_registry_image(image)
         if registry_image is None:
             return DigestResolveResult(
@@ -485,6 +528,15 @@ class DigestVerifier:
         )
 
     def verify_tag_digest(self, image: str, expected: str) -> DigestResolveResult:
+        try:
+            return self._verify_tag_digest(image, expected)
+        except ManifestIntegrityError as exc:
+            return DigestResolveResult(
+                ok=False, status=_STATUS_FAILED,
+                reason="manifest-integrity-mismatch", error=str(exc),
+            )
+
+    def _verify_tag_digest(self, image: str, expected: str) -> DigestResolveResult:
         expected = normalize_digest(expected)
         if not expected:
             return DigestResolveResult(
@@ -681,13 +733,16 @@ class DigestVerifier:
                 registry_image,
                 reported_digest if use_reported_digest else registry_image.tag,
             )
-        except ManifestLookupError as exc:
+        except (ManifestLookupError, ManifestIntegrityError) as exc:
             return _resolved_subject(
                 registry_image,
                 reported_digest,
                 platform,
                 platform_source,
-                identity_status=_subject_error_status(str(exc)),
+                identity_status=(
+                    "mismatch" if isinstance(exc, ManifestIntegrityError)
+                    else _subject_error_status(str(exc))
+                ),
                 error=str(exc),
             )
         return registry_image, reported_digest, document
@@ -702,7 +757,13 @@ class DigestVerifier:
         tag_digest: str,
     ) -> ResolvedImageSubject:
         if not tag_digest:
-            tag_digest = self._resolve_index_digest(registry_image)
+            try:
+                tag_digest = self._resolve_index_digest(registry_image)
+            except ManifestIntegrityError as exc:
+                return _resolved_subject(
+                    registry_image, reported_digest, platform, platform_source,
+                    identity_status="mismatch", error=str(exc),
+                )
         if tag_digest and reported_digest == tag_digest:
             return _resolve_reported_index_subject(
                 registry_image,
@@ -918,6 +979,26 @@ class DigestVerifier:
             return self._fetch(image, reference)
         except ManifestLookupError:
             return None
+
+
+def _manifest_digest(body: bytes, algorithm: str = "sha256") -> str:
+    return f"{algorithm}:{hashlib.new(algorithm, body).hexdigest()}"
+
+
+def _valid_manifest_digest(digest: object) -> bool:
+    return isinstance(digest, str) and re.fullmatch(
+        r"sha256:[0-9a-f]{64}|sha512:[0-9a-f]{128}", digest,
+    ) is not None
+
+
+def _verify_manifest_digest(body: bytes, digest: str) -> None:
+    algorithm, _separator, _encoded = digest.partition(":")
+    if not _valid_manifest_digest(digest) or _manifest_digest(body, algorithm) != digest:
+        raise ManifestIntegrityError(
+            "Registry manifest integrity check failed: the response does not match "
+            "its requested or advertised digest. No update can be verified from "
+            "this response; check the registry before retrying."
+        )
 
 
 def _tag_document_digest(tag_document: ManifestDocument) -> str:
