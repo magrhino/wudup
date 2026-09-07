@@ -30,6 +30,7 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 | `WUD_LOCK_TIMEOUT` | `30` | Seconds to wait for the shared todo-file lock. |
 | `WUD_TIMEZONE` | `UTC` | IANA timezone name, such as `America/Chicago`, used for WebUI auto-update policy schedules. |
 | `WUD_COMPOSE_IGNORE_PATHS` | empty | Comma-separated relative directory names or paths excluded from Compose discovery. When unset in the WebUI, the managed Settings value can control this. |
+| `WUD_REGISTRY_AUTH_ORIGINS` | `{}` | JSON mapping of registry HTTPS origins to explicitly trusted separate token-server HTTPS origins. See [Registry Authentication](wiki/digest-verification.md#registry-authentication). Set in the WUDup process environment. |
 | `WUD_DIGEST_PIN_UPDATES` | `false` | Opt-in digest-pin mode for approved tag updates. Environment configuration overrides the managed WebUI setting. |
 | `OUT_UID` / `OUT_GID` | unset | Optional owner for rewritten todo files and updater logs. `OUT_GUID` is accepted as an alias for `OUT_GID`. |
 

@@ -30,6 +30,31 @@ fetches the child manifest from the registry and compares its config digest to
 the local Docker image ID. If those match, the requested platform digest is
 verified.
 
+## Registry Authentication
+
+The direct registry client uses HTTPS with certificate verification. Token
+challenges may use the registry's own origin, or Docker Hub's `auth.docker.io`
+service. For other separate token services, explicitly authorize the HTTPS
+origin for that registry in the WUDup process environment (example only):
+
+```bash
+export WUD_REGISTRY_AUTH_ORIGINS='{"https://registry.example:5000":["https://auth.example:8443"]}'
+```
+
+Each origin includes its port when non-default. This setting trusts that token
+server for the named registry only. Same-origin token requests reuse the
+registry connection's resolved address. Explicit registries and configured token
+services support RFC1918, loopback, and IPv6 ULA addresses; link-local, multicast,
+and unspecified destinations are refused. Docker Hub's default token service
+must resolve to public addresses.
+
+The client does not follow redirects or use environment HTTP proxies. Configure
+a direct endpoint; Docker manifest fallback remains available for registries
+that require other authentication or network arrangements. Each HTTPS request
+has a total deadline of five seconds (20 seconds in the diagnostic probe),
+including DNS and response reads. Token responses are limited to 64 KiB and
+manifest responses to 4 MiB. A short-lived Python subprocess enforces the deadline.
+
 ## Failure Policy
 
 GHCR digest verification is treated as trusted and fail-closed. If the updater

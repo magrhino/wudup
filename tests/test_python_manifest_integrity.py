@@ -3,9 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
-import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
-from io import BytesIO, StringIO
+from io import StringIO
 from unittest import mock
 
 from tests.test_python_digest_verifier import FakeDocker, StaticResolver, index_doc
@@ -36,14 +35,9 @@ def manifest_body(config: str = "sha256:local") -> bytes:
     return json.dumps(manifest_image(config), indent=2).encode() + b"\n"
 
 
-def response(body: bytes, digest: str = "") -> mock.MagicMock:
-    result = mock.MagicMock()
-    result.__enter__.return_value = result
-    result.read.return_value = body
-    result.headers = {}
-    if digest:
-        result.headers["Docker-Content-Digest"] = digest
-    return result
+def response(body: bytes, digest: str = "") -> tuple[int, dict[str, str], bytes, str]:
+    headers = {"Docker-Content-Digest": digest} if digest else {}
+    return 200, headers, body, "8.8.8.8"
 
 
 class ManifestIntegrityTests(unittest.TestCase):
@@ -68,7 +62,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(registry=registry),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     return_value=response(manifest_body(), self.expected),
                 ),
             ):
@@ -85,7 +79,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(header=header),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     return_value=response(body, header),
                 ),
             ):
@@ -95,7 +89,7 @@ class ManifestIntegrityTests(unittest.TestCase):
 
     def test_invalid_json_does_not_hide_proven_integrity_failure(self) -> None:
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             return_value=response(b"not JSON", self.expected),
         ):
             self.assert_integrity_failure(
@@ -107,7 +101,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(header=header),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     return_value=response(manifest_body(), header),
                 ),
             ):
@@ -126,7 +120,7 @@ class ManifestIntegrityTests(unittest.TestCase):
                 with (
                     self.subTest(algorithm=algorithm, header=header),
                     mock.patch(
-                        "wudup.digest_verifier.urllib.request.urlopen",
+                        "wudup.digest_verifier.request_bytes",
                         return_value=response(body, header),
                     ),
                 ):
@@ -135,7 +129,7 @@ class ManifestIntegrityTests(unittest.TestCase):
                     self.assertEqual(document.digest, digest)
                     self.assertEqual(document.payload, json.loads(body))
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             return_value=response(body),
         ):
             result = self.verifier.verify(self.image, body_digest(body))
@@ -143,15 +137,14 @@ class ManifestIntegrityTests(unittest.TestCase):
         self.assertEqual(result.reason, "registry-tag-manifest-match")
 
     def test_auth_retry_preserves_requested_digest_validation(self) -> None:
-        unauthorized = urllib.error.HTTPError(
-            "https://quay.io/v2/acme/app/manifests/digest",
+        unauthorized = (
             401,
-            "unauthorized",
             {"WWW-Authenticate": 'Bearer realm="https://quay.io/token"'},
-            BytesIO(),
+            b"",
+            "8.8.8.8",
         )
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             side_effect=[
                 unauthorized,
                 response(b'{"token":"test"}'),
@@ -169,7 +162,7 @@ class ManifestIntegrityTests(unittest.TestCase):
         body = manifest_body()
         expected = body_digest(body)
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             return_value=response(body, body_digest(body, "sha512")),
         ):
             document = RegistryHttpManifestResolver().fetch(
@@ -186,7 +179,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(expected=expected),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     side_effect=[response(index), response(child)],
                 ),
             ):
@@ -203,7 +196,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(expected=expected),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     side_effect=[response(index), response(child), response(child)],
                 ) as fetch,
             ):
@@ -215,7 +208,7 @@ class ManifestIntegrityTests(unittest.TestCase):
     def test_resolution_and_subject_entrypoints_fail_on_forged_manifest(self) -> None:
         platform = ImagePlatform(os="linux", architecture="amd64")
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             return_value=response(manifest_body(), self.expected),
         ):
             self.assert_integrity_failure(self.verifier.resolve_tag_digest(self.image))
@@ -238,7 +231,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(child_digest=child_digest),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     side_effect=[response(index), response(manifest_body())],
                 ) as fetch,
             ):
@@ -249,7 +242,7 @@ class ManifestIntegrityTests(unittest.TestCase):
             with (
                 self.subTest(child_digest=child_digest),
                 mock.patch(
-                    "wudup.digest_verifier.urllib.request.urlopen",
+                    "wudup.digest_verifier.request_bytes",
                     return_value=response(index),
                 ),
             ):
@@ -266,7 +259,7 @@ class ManifestIntegrityTests(unittest.TestCase):
         )
         verifier = DigestVerifier(FakeDocker(), primary_resolver=resolver)
         with mock.patch(
-            "wudup.digest_verifier.urllib.request.urlopen",
+            "wudup.digest_verifier.request_bytes",
             return_value=response(manifest_body(), self.expected),
         ):
             self.assert_integrity_failure(verifier.resolve_tag_digest(self.image))
@@ -284,7 +277,7 @@ class ManifestIntegrityTests(unittest.TestCase):
         verifier = DigestVerifier(
             FakeDocker(repo_digests=(f"quay.io/acme/app@{self.expected}",))
         )
-        with mock.patch("wudup.digest_verifier.urllib.request.urlopen") as fetch:
+        with mock.patch("wudup.digest_verifier.request_bytes") as fetch:
             result = verifier.verify(self.image, self.expected)
         self.assertTrue(result.ok)
         self.assertEqual(result.reason, "repo-digest-match")
@@ -385,7 +378,7 @@ class UpdaterManifestIntegrityTests(UpdateFromWudRunnerTestCase):
         runner.digest_verifier = DigestVerifier(runner.docker)
         with (
             mock.patch(
-                "wudup.digest_verifier.urllib.request.urlopen",
+                "wudup.digest_verifier.request_bytes",
                 return_value=response(manifest_body("sha256:wrong"), expected),
             ),
             redirect_stdout(StringIO()),
@@ -408,7 +401,7 @@ class UpdaterManifestIntegrityTests(UpdateFromWudRunnerTestCase):
         runner.digest_verifier = DigestVerifier(runner.docker)
         with (
             mock.patch(
-                "wudup.digest_verifier.urllib.request.urlopen",
+                "wudup.digest_verifier.request_bytes",
                 side_effect=[
                     response(body),
                     response(manifest_body("sha256:wrong"), expected),

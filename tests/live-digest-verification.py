@@ -8,23 +8,21 @@ and compares Docker's local image metadata with registry manifest data.
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-MANIFEST_ACCEPT = ", ".join(
-    (
-        "application/vnd.oci.image.index.v1+json",
-        "application/vnd.docker.distribution.manifest.list.v2+json",
-        "application/vnd.oci.image.manifest.v1+json",
-        "application/vnd.docker.distribution.manifest.v2+json",
-    )
+# Keep the directly executable probe usable without an editable install.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from wudup.digest_verifier import (
+    ManifestIntegrityError,
+    ManifestLookupError,
+    RegistryHttpManifestResolver,
+    RegistryImageRef,
 )
+
 INDEX_MEDIA_TYPES = {
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -228,68 +226,18 @@ def find_matching_child_config(
 
 
 def fetch_manifest(ref: ImageRef) -> ManifestDocument:
-    url = f"https://{ref.registry}/v2/{ref.repo}/manifests/{ref.reference}"
-    request = urllib.request.Request(url)
-    request.add_header("Accept", MANIFEST_ACCEPT)
     try:
-        return read_manifest_response(urllib.request.urlopen(request, timeout=20), url)
-    except urllib.error.HTTPError as exc:
-        if exc.code != 401:
-            raise ProbeError(f"registry request failed for {url}: {exc}") from exc
-        token = fetch_bearer_token(exc.headers.get("WWW-Authenticate", ""))
-        retry = urllib.request.Request(url)
-        retry.add_header("Accept", MANIFEST_ACCEPT)
-        retry.add_header("Authorization", f"Bearer {token}")
-        try:
-            return read_manifest_response(urllib.request.urlopen(retry, timeout=20), url)
-        except (OSError, urllib.error.URLError) as retry_exc:
-            raise ProbeError(f"authenticated registry request failed for {url}: {retry_exc}") from retry_exc
-    except (OSError, urllib.error.URLError) as exc:
-        raise ProbeError(f"registry request failed for {url}: {exc}") from exc
-
-
-def read_manifest_response(response: Any, url: str) -> ManifestDocument:
-    with response:
-        body = response.read()
-        digest = header_value(response.headers, "Docker-Content-Digest")
-        media_type = content_type(header_value(response.headers, "Content-Type"))
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ProbeError(f"registry response was not JSON for {url}") from exc
-    if not isinstance(payload, dict):
-        raise ProbeError(f"registry response was not a JSON object for {url}")
-    if not digest:
-        raise ProbeError(f"registry response did not include Docker-Content-Digest for {url}")
-    return ManifestDocument(digest=digest, media_type=media_type, payload=payload)
-
-
-def fetch_bearer_token(challenge: str) -> str:
-    scheme, _, rest = challenge.partition(" ")
-    if scheme.lower() != "bearer" or not rest:
-        raise ProbeError(f"unsupported registry auth challenge: {challenge}")
-    values = urllib.request.parse_keqv_list(urllib.request.parse_http_list(rest))
-    realm = values.get("realm")
-    if not realm:
-        raise ProbeError(f"registry auth challenge did not include a realm: {challenge}")
-    query = {
-        key: value
-        for key in ("service", "scope")
-        if isinstance((value := values.get(key)), str) and value
-    }
-    separator = "&" if urllib.parse.urlparse(realm).query else "?"
-    url = realm + (separator + urllib.parse.urlencode(query) if query else "")
-    request = urllib.request.Request(url)
-    request.add_header("Accept", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ProbeError(f"registry token request failed for {url}: {exc}") from exc
-    token = payload.get("token") if isinstance(payload, dict) else None
-    if not isinstance(token, str) or not token:
-        raise ProbeError(f"registry token response did not include a token for {url}")
-    return token
+        document = RegistryHttpManifestResolver(timeout=20).fetch(
+            RegistryImageRef(ref.registry, ref.registry, ref.repo, ref.reference),
+            ref.reference,
+        )
+    except (ManifestLookupError, ManifestIntegrityError) as exc:
+        raise ProbeError(str(exc)) from exc
+    if not document.digest:
+        raise ProbeError("Registry response did not include Docker-Content-Digest.")
+    return ManifestDocument(
+        digest=document.digest, media_type=document.media_type, payload=dict(document.payload),
+    )
 
 
 def parse_image_ref(image: str) -> ImageRef:
@@ -366,18 +314,6 @@ def print_result(result: ProbeResult) -> None:
         "  registry config proves local platform image       : "
         f"{yes_no(result.config_matches_local_image)}"
     )
-
-
-def header_value(headers: Any, name: str) -> str:
-    wanted = name.lower()
-    for key, value in headers.items():
-        if key.lower() == wanted:
-            return value
-    return ""
-
-
-def content_type(value: str) -> str:
-    return value.split(";", 1)[0].strip()
 
 
 def yes_no(value: bool) -> str:
