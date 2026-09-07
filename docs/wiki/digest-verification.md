@@ -43,10 +43,10 @@ export WUD_REGISTRY_AUTH_ORIGINS='{"https://registry.example:5000":["https://aut
 
 Each origin includes its port when non-default. This setting trusts that token
 server for the named registry only. Same-origin token requests reuse the
-registry connection's resolved address. Explicit registries and configured token
-services support RFC1918, loopback, and IPv6 ULA addresses; link-local, multicast,
-and unspecified destinations are refused. Docker Hub's default token service
-must resolve to public addresses.
+registry connection's resolved address. Explicit registries other than Docker Hub
+and configured token services support RFC1918, loopback, and IPv6 ULA addresses.
+Link-local, multicast, and unspecified destinations are refused. Docker Hub's
+manifest endpoints and default token service must resolve to public addresses.
 
 The client does not follow redirects or use environment HTTP proxies. Configure
 a direct endpoint; Docker manifest fallback remains available for registries

@@ -108,6 +108,8 @@ def test_public_auth_and_cache_are_scoped_to_registry():
         assert token_request.args[0].startswith("https://auth.docker.io/token?service=")
         assert token_request.kwargs["limit"] == registry_http.MAX_TOKEN_BYTES
         assert not token_request.kwargs["allow_private"]
+        assert not request.call_args_list[0].kwargs["allow_private"]
+        assert not request.call_args_list[2].kwargs["allow_private"]
         assert request.call_args_list[2].kwargs["peer"] == PUBLIC
         assert (
             request.call_args_list[2].kwargs["headers"]["Authorization"]
@@ -135,6 +137,7 @@ def test_private_same_origin_is_pinned_to_original_peer():
         ],
     ) as request:
         resolver._request_json("https://registry.example:5000/v2/app/manifests/latest")
+    assert request.call_args_list[0].kwargs["allow_private"]
     for call in request.call_args_list[1:]:
         assert call.kwargs["peer"] == PRIVATE
         assert call.kwargs["allow_private"]
@@ -271,6 +274,57 @@ def fake_transport(
         registry_http.http.client, "HTTPSConnection", mock.Mock(return_value=connection)
     )
     return connect, context, connection, response
+
+
+@pytest.fixture
+def inline_registry_worker(monkeypatch):
+    """Run the real transport policy in-process with mocked DNS and sockets."""
+
+    def run_worker(_command, *, input, **_options):
+        reply = registry_http._worker_request(json.loads(input))
+        return mock.Mock(returncode=0, stdout=json.dumps(reply))
+
+    monkeypatch.setattr(registry_http.subprocess, "run", run_worker)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["registry-1.docker.io", "docker.io", "index.docker.io", "REGISTRY-1.DOCKER.IO."],
+)
+@pytest.mark.parametrize(
+    "addresses", [("127.0.0.1",), (PRIVATE,), ("::ffff:127.0.0.1",), (PUBLIC, PRIVATE)]
+)
+def test_docker_hub_manifest_rejects_private_dns_before_connect(
+    monkeypatch, inline_registry_worker, host, addresses,
+):
+    connect, _, _, _ = fake_transport(monkeypatch, body=b"{}", addresses=addresses)
+    resolver = RegistryHttpManifestResolver()
+    url = f"https://{host}/v2/library/alpine/manifests/latest"
+
+    with pytest.raises(ManifestLookupError, match="unauthorized network address"):
+        resolver._request_json(url)
+
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("host", "address"),
+    [
+        ("registry-1.docker.io", PUBLIC),
+        ("registry.example", PRIVATE),
+        ("localhost", "127.0.0.1"),
+    ],
+)
+def test_manifest_preserves_public_hub_and_explicit_private_registries(
+    monkeypatch, inline_registry_worker, host, address,
+):
+    connect, _, _, _ = fake_transport(monkeypatch, body=b"{}", addresses=(address,))
+    resolver = RegistryHttpManifestResolver()
+
+    _, payload, _body = resolver._request_json(f"https://{host}/v2/app/manifests/latest")
+
+    assert payload == {}
+    connect.assert_called_once_with((address, 443), timeout=resolver.timeout)
 
 
 def test_transport_pins_dns_preserves_tls_name_and_ignores_proxy(monkeypatch):

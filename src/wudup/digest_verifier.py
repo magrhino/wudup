@@ -265,8 +265,9 @@ class RegistryHttpManifestResolver:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
+            allow_private = https_origin(url)[0] not in DOCKER_HUB_REGISTRIES
             status, response_headers, body, peer = request_bytes(
-                url, headers=headers, timeout=self.timeout, allow_private=True,
+                url, headers=headers, timeout=self.timeout, allow_private=allow_private,
             )
             if status == 401 and not token:
                 token = self._token(
@@ -275,7 +276,7 @@ class RegistryHttpManifestResolver:
                 headers["Authorization"] = f"Bearer {token}"
                 status, response_headers, body, _ = request_bytes(
                     url, headers=headers, timeout=self.timeout, peer=peer,
-                    allow_private=True,
+                    allow_private=allow_private,
                 )
             if status != 200:
                 raise ManifestLookupError(f"Registry manifest request failed (HTTP {status}).")
