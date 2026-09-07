@@ -17,6 +17,8 @@ from typing import Any
 # Keep the directly executable probe usable without an editable install.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from wudup.digest_verifier import (
+    DOCKER_HUB_HTTP_REGISTRY,
+    DOCKER_HUB_REGISTRIES,
     ManifestIntegrityError,
     ManifestLookupError,
     RegistryHttpManifestResolver,
@@ -253,6 +255,9 @@ def parse_image_ref(image: str) -> ImageRef:
         repo_tag = image
         if "/" not in repo_tag:
             repo_tag = f"library/{repo_tag}"
+
+    if registry.lower() in DOCKER_HUB_REGISTRIES:
+        registry = DOCKER_HUB_HTTP_REGISTRY
 
     repo, tag_sep, tag = repo_tag.rpartition(":")
     if not tag_sep or "/" in tag:

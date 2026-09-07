@@ -391,7 +391,14 @@ def test_request_deadline_kills_stalled_worker(monkeypatch, tmp_path):
     assert time.monotonic() - start < 3
 
 
-def test_live_probe_uses_production_policy():
+@pytest.mark.parametrize("image_ref", [
+    "alpine:3.20",
+    "docker.io/library/alpine:3.20",
+    "index.docker.io/library/alpine:3.20",
+    "registry-1.docker.io/library/alpine:3.20",
+    "DOCKER.IO/library/alpine:3.20",
+])
+def test_live_probe_uses_production_policy(image_ref):
     path = Path(__file__).with_name("live-digest-verification.py")
     spec = importlib.util.spec_from_file_location("digest_probe_test", path)
     module = importlib.util.module_from_spec(spec)
@@ -409,8 +416,11 @@ def test_live_probe_uses_production_policy():
             ),
         ) as request:
             with pytest.raises(module.ProbeError):
-                module.fetch_manifest(module.parse_image_ref("alpine:3.20"))
+                module.fetch_manifest(module.parse_image_ref(image_ref))
         assert request.call_count == 1
+        assert request.call_args.args[0] == (
+            "https://registry-1.docker.io/v2/library/alpine/manifests/3.20"
+        )
         with mock.patch.object(
             digest_verifier,
             "request_bytes",
@@ -419,7 +429,7 @@ def test_live_probe_uses_production_policy():
             ),
         ):
             with pytest.raises(module.ProbeError, match="integrity check failed"):
-                module.fetch_manifest(module.parse_image_ref("alpine:3.20"))
+                module.fetch_manifest(module.parse_image_ref(image_ref))
         image = parse_registry_image("alpine:3.20")
         assert image.http_registry == "registry-1.docker.io"
     finally:
