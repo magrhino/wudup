@@ -5,9 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -16,6 +13,13 @@ from .command import CommandError
 from .docker_cli import DockerCli
 from .images import normalize_digest, strip_digest
 from .platforms import ImagePlatform, platform_from_parts, platform_value
+from .registry_http import (
+    MAX_TOKEN_BYTES,
+    RegistryRequestError,
+    https_origin,
+    request_bytes,
+    token_url,
+)
 
 GHCR_REGISTRY = "ghcr.io"
 DOCKER_HUB_REGISTRIES = frozenset(
@@ -236,7 +240,7 @@ class RegistryHttpManifestResolver:
 
     def __init__(self, *, timeout: float = DEFAULT_REGISTRY_TIMEOUT) -> None:
         self.timeout = timeout
-        self._tokens: dict[str, str] = {}
+        self._tokens: dict[tuple[tuple[str, int], str], str] = {}
 
     def fetch(self, image: RegistryImageRef, reference: str) -> ManifestDocument:
         url = f"https://{image.http_registry}/v2/{image.repo}/manifests/{reference}"
@@ -257,73 +261,70 @@ class RegistryHttpManifestResolver:
         token: str = "",
         reference: str = "",
     ) -> tuple[Mapping[str, str], Mapping[str, Any], bytes]:
-        request = urllib.request.Request(url)
-        request.add_header("Accept", accept)
+        headers = {"Accept": accept}
         if token:
-            request.add_header("Authorization", f"Bearer {token}")
+            headers["Authorization"] = f"Bearer {token}"
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read()
-                headers = {key: value for key, value in response.headers.items()}
-        except urllib.error.HTTPError as exc:
-            if exc.code != 401 or token:
-                raise ManifestLookupError(
-                    f"registry request failed for {url}: {exc}"
-                ) from exc
-            challenge = exc.headers.get("WWW-Authenticate", "")
-            return self._request_json(
-                url,
-                accept=accept,
-                token=self._token(challenge),
-                reference=reference,
+            allow_private = https_origin(url)[0] not in DOCKER_HUB_REGISTRIES
+            status, response_headers, body, peer = request_bytes(
+                url, headers=headers, timeout=self.timeout, allow_private=allow_private,
             )
-        except OSError as exc:
-            raise ManifestLookupError(f"registry request failed for {url}: {exc}") from exc
-        # Authenticate the original bytes before parsing; JSON reserialization
-        # changes the content-addressed identity, and invalid JSON may be tampered.
-        _verify_response_digests(body, headers, reference)
+            if status == 401 and not token:
+                token = self._token(
+                    _header_value(response_headers, "WWW-Authenticate"), url, peer,
+                )
+                headers["Authorization"] = f"Bearer {token}"
+                status, response_headers, body, _ = request_bytes(
+                    url, headers=headers, timeout=self.timeout, peer=peer,
+                    allow_private=allow_private,
+                )
+            if status != 200:
+                raise ManifestLookupError(
+                    f"Registry manifest request failed (HTTP {status}). "
+                    "Check that the image/tag exists and that you have access to it."
+                )
+        except RegistryRequestError as exc:
+            raise ManifestLookupError(str(exc)) from exc
+        # Verify the original bytes before JSON parsing or child selection.
+        _verify_response_digests(body, response_headers, reference)
+        payload = self._json_payload(body)
+        _verify_index_child_digests(payload, reference)
+        return response_headers, payload, body
+
+    @staticmethod
+    def _json_payload(body: bytes) -> Mapping[str, Any]:
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ManifestLookupError(
-                f"registry response was not valid JSON for {url}"
-            ) from exc
+            raise ManifestLookupError("Registry response was not valid JSON.") from exc
         if not isinstance(payload, Mapping):
-            raise ManifestLookupError(
-                f"registry response was not a JSON object for {url}"
-            )
-        _verify_index_child_digests(payload, reference)
-        return headers, payload, body
+            raise ManifestLookupError("Registry response was not a JSON object.")
+        return payload
 
-    def _token(self, challenge: str) -> str:
-        cached = self._tokens.get(challenge)
+    def _token(self, challenge: str, registry_url: str, peer: str) -> str:
+        url, configured_private = token_url(challenge, registry_url)
+        origin = https_origin(registry_url)
+        key = (origin, challenge)
+        cached = self._tokens.get(key)
         if cached:
             return cached
-        scheme, _sep, rest = challenge.partition(" ")
-        if scheme.lower() != "bearer" or not rest:
+        same_origin = https_origin(url) == origin
+        status, _headers, body, _peer = request_bytes(
+            url, headers={"Accept": "application/json"}, timeout=self.timeout,
+            limit=MAX_TOKEN_BYTES, peer=peer if same_origin else "",
+            allow_private=same_origin or configured_private,
+        )
+        if status != 200:
             raise ManifestLookupError(
-                f"unsupported registry auth challenge: {challenge}"
+                f"Registry token request failed (HTTP {status}). "
+                "Check the registry authentication settings and credentials."
             )
-        values = urllib.request.parse_keqv_list(urllib.request.parse_http_list(rest))
-        realm = values.get("realm")
-        if not realm:
-            raise ManifestLookupError(
-                f"registry auth challenge did not include a realm: {challenge}"
-            )
-        query = {
-            key: value
-            for key in ("service", "scope")
-            if isinstance((value := values.get(key)), str) and value
-        }
-        separator = "&" if urllib.parse.urlparse(realm).query else "?"
-        url = realm + (separator + urllib.parse.urlencode(query) if query else "")
-        _headers, payload, _body = self._request_json(url, accept="application/json")
-        token = payload.get("token")
+        token = self._json_payload(body).get("token")
         if not isinstance(token, str) or not token:
-            raise ManifestLookupError(
-                f"registry token response for {url} did not include a token"
-            )
-        self._tokens[challenge] = token
+            raise ManifestLookupError("Registry token response did not include a token.")
+        if len(self._tokens) >= 64:
+            self._tokens.clear()
+        self._tokens[key] = token
         return token
 
 
