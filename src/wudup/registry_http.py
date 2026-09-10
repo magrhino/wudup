@@ -131,9 +131,11 @@ def request_bytes(
         raise RegistryRequestError(
             "Registry request failed: timeout must be positive and finite."
         )
+    # Only application-owned paths belong in argv; request data stays in JSON stdin.
     try:
+        worker_command = (sys.executable, "-I", str(Path(__file__).resolve()))
         result = subprocess.run(
-            [sys.executable, "-I", str(Path(__file__).resolve())],
+            worker_command,
             input=json.dumps(
                 {
                     "url": url,
@@ -145,6 +147,7 @@ def request_bytes(
                 }
             ),
             capture_output=True,
+            shell=False,
             text=True,
             timeout=timeout,
             check=False,

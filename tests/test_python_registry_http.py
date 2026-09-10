@@ -413,6 +413,28 @@ def test_failed_connections_cannot_fall_back_to_unvalidated_dns(monkeypatch):
     connection.request.assert_not_called()
 
 
+@pytest.mark.parametrize("payload", ["$(id)", "`id`", ";id", "'quoted'"])
+def test_request_data_cannot_change_worker_command(payload):
+    url = f"{REGISTRY}?value={payload}"
+    headers = {"Authorization": f"Bearer {payload}", "X-Example": payload}
+    reply = {"status": 200, "headers": {}, "body": "e30=", "peer": PUBLIC}
+    with mock.patch.object(
+        registry_http.subprocess, "run",
+        return_value=mock.Mock(returncode=0, stdout=json.dumps(reply)),
+    ) as run:
+        result = registry_http.request_bytes(url, headers=headers, timeout=1)
+
+    run.assert_called_once()
+    assert run.call_args.args == (
+        (sys.executable, "-I", str(Path(registry_http.__file__).resolve())),
+    )
+    assert run.call_args.kwargs["shell"] is False
+    request_data = json.loads(run.call_args.kwargs["input"])
+    assert request_data["url"] == url
+    assert request_data["headers"] == headers
+    assert result == (200, {}, b"{}", PUBLIC)
+
+
 def test_request_deadline_kills_stalled_worker(monkeypatch, tmp_path):
     worker = tmp_path / "stalled.py"
     worker.write_text("import time\ntime.sleep(30)\n")
