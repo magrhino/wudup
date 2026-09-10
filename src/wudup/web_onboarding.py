@@ -96,7 +96,7 @@ def api_onboarding_dismiss(request: Request) -> OnboardingDismissResponse:
     settings = _settings(request)
     dismissed_at = utc_timestamp()
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with conn:
                 _set_web_setting(conn, ONBOARDING_DISMISSED_AT_KEY, dismissed_at)
@@ -122,7 +122,7 @@ def api_update_core_update_tour(
 ) -> CoreUpdateTourResponse:
     settings = _settings(request)
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with conn:
                 return set_core_update_tour_state(
@@ -311,7 +311,7 @@ def set_core_update_tour_state(
 
 def onboarding_dismissed_at(settings: WebSettings) -> str:
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             return _web_setting(conn, ONBOARDING_DISMISSED_AT_KEY)
     except (OSError, sqlite3.Error, DatabaseError) as exc:

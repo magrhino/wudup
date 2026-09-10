@@ -158,7 +158,7 @@ def api_pending_cleanup(
 
         removed = _validated_cleanup_lines(payload, payload_lines, cleanup)
         try:
-            with open_db(settings.config.db_path) as conn:
+            with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
                 init_db(conn)
                 with _immediate_transaction(conn):
                     audit_run_id = _insert_pending_cleanup_audit(
@@ -274,7 +274,7 @@ def api_pending_removal(
 
         removed = _validated_removal_lines(payload, payload_lines, plan)
         try:
-            with open_db(settings.config.db_path) as conn:
+            with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
                 init_db(conn)
                 with _immediate_transaction(conn):
                     audit_run_id = _insert_pending_removal_audit(

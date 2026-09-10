@@ -458,6 +458,7 @@ def initialize_pending_observation_cache(settings: WebSettings) -> None:
         try:
             web_wud_observation_store.replace_pending_observations(
                 settings.config.db_path,
+                owner_uid=settings.config.out_uid,
                 source=_observation_store_source(settings),
                 observations=(),
             )
@@ -473,6 +474,7 @@ def initialize_pending_observation_cache(settings: WebSettings) -> None:
         source = _observation_store_source(settings)
         stored = web_wud_observation_store.load_pending_observations(
             settings.config.db_path,
+            owner_uid=settings.config.out_uid,
             source=source,
         )
     except (OSError, ValueError, sqlite3.Error, DatabaseError) as exc:
@@ -522,6 +524,7 @@ def checkpoint_pending_observation_cache(settings: WebSettings) -> None:
         try:
             web_wud_observation_store.replace_pending_observations(
                 settings.config.db_path,
+                owner_uid=settings.config.out_uid,
                 source=_observation_store_source(settings),
                 observations=stored,
             )

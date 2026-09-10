@@ -237,7 +237,7 @@ def api_update_managed_settings(
 
     updates = _validated_managed_setting_updates(payload, settings)
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with conn:
                 before = _managed_settings_entries_from_conn(conn, settings)

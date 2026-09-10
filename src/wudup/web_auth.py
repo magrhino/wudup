@@ -500,7 +500,7 @@ def _safe_exception_detail(
 
 
 def _prepare_web_auth_state(settings: WebSettings) -> str:
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         user_count = _web_user_count(conn)
         if user_count > 0:
@@ -522,7 +522,7 @@ def _setup_required(settings: WebSettings) -> bool:
     if settings.dev_no_auth:
         return False
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             return _web_user_count(conn) == 0
     except (OSError, sqlite3.Error, DatabaseError) as exc:
@@ -544,7 +544,7 @@ def _claim_initial_admin(
 ) -> tuple[int, str]:
     now = utc_timestamp()
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 if _web_user_count(conn) > 0:
@@ -602,7 +602,7 @@ def issue_admin_recovery_claim(
     expires_at = _utc_timestamp_after(SETUP_CLAIM_MAX_AGE_SECONDS)
     disabled_password_hash = _password_hasher().hash(secrets.token_urlsafe(96))
     try:
-        with open_db(db_path) as conn:
+        with open_db(db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 user = _active_admin_user(conn, normalized)
@@ -670,7 +670,7 @@ def _redeem_admin_recovery_claim(
 ) -> tuple[int, str]:
     now = utc_timestamp()
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 expected_hash = _web_setting(conn, RESET_ADMIN_CLAIM_HASH_KEY)
@@ -775,7 +775,7 @@ def _verify_web_user(
     if not normalized:
         return None
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             user = conn.execute(
                 """
@@ -1014,7 +1014,7 @@ def _create_web_session(
     now = utc_timestamp()
     expires_at = _utc_timestamp_after(SESSION_MAX_AGE_SECONDS)
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with conn:
                 # Recovery either changes the hash first, or revokes this session
@@ -1069,7 +1069,7 @@ def _session_user(
     if not session_id:
         return None
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             row = conn.execute(
                 """
@@ -1107,7 +1107,7 @@ def _revoke_web_session(settings: WebSettings, session_id: str) -> None:
     if not session_id:
         return
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with conn:
                 conn.execute(

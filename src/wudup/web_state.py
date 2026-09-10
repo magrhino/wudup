@@ -178,7 +178,7 @@ def api_state_operation(
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 return _apply_state_operation(conn, settings, request, payload)

@@ -1272,7 +1272,7 @@ def _seed_release_note_cache(settings: WebSettings) -> None:
     )
     source_resolver = _demo_release_source_resolver(settings, wud_metadata)
     target_tag_resolver = web_wud_api.target_tag_resolver_from_metadata(wud_metadata)
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         refresh_release_notes(
             conn,
