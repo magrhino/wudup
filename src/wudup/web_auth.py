@@ -181,8 +181,14 @@ def api_setup_claim(
     username = _normalize_username(payload.username)
     if not username:
         raise HTTPException(status_code=422, detail="username is required")
-    user_id = _claim_initial_admin(settings, payload.claim, username, payload.password)
-    session_id = _create_web_session(settings, user_id=user_id, request=request)
+    user_id, password_hash = _claim_initial_admin(
+        settings, payload.claim, username, payload.password
+    )
+    session_id = _create_web_session(
+        settings, user_id=user_id, password_hash=password_hash, request=request
+    )
+    if session_id is None:
+        raise _auth_failed()
     _set_session_cookie(response, session_id, request, settings)
     return _auth_session_response(
         settings,
@@ -219,8 +225,16 @@ def api_auth_login(
     if user is None:
         _record_login_failure(request, settings, username)
         raise _auth_failed()
+    session_id = _create_web_session(
+        settings,
+        user_id=int(user["id"]),
+        password_hash=str(user["password_hash"]),
+        request=request,
+    )
+    if session_id is None:
+        _record_login_failure(request, settings, username)
+        raise _auth_failed()
     _clear_login_throttle(request, settings, username)
-    session_id = _create_web_session(settings, user_id=int(user["id"]), request=request)
     _set_session_cookie(response, session_id, request, settings)
     return _auth_session_response(
         settings,
@@ -239,13 +253,17 @@ def api_auth_reset_admin_claim(
     username = _normalize_username(payload.username)
     if not username:
         raise HTTPException(status_code=422, detail="username is required")
-    user_id = _redeem_admin_recovery_claim(
+    user_id, password_hash = _redeem_admin_recovery_claim(
         settings,
         claim=payload.claim,
         username=username,
         password=payload.password,
     )
-    session_id = _create_web_session(settings, user_id=user_id, request=request)
+    session_id = _create_web_session(
+        settings, user_id=user_id, password_hash=password_hash, request=request
+    )
+    if session_id is None:
+        raise _auth_failed()
     _set_session_cookie(response, session_id, request, settings)
     return _auth_session_response(
         settings,
@@ -523,7 +541,7 @@ def _claim_initial_admin(
     claim: str,
     username: str,
     password: str,
-) -> int:
+) -> tuple[int, str]:
     now = utc_timestamp()
     try:
         with open_db(settings.config.db_path) as conn:
@@ -555,7 +573,7 @@ def _claim_initial_admin(
                 )
                 _delete_web_setting(conn, SETUP_CLAIM_HASH_KEY)
                 _delete_web_setting(conn, SETUP_CLAIM_EXPIRES_KEY)
-                return int(cursor.lastrowid)
+                return int(cursor.lastrowid), password_hash
     except HTTPException:
         raise
     except sqlite3.IntegrityError as exc:
@@ -649,7 +667,7 @@ def _redeem_admin_recovery_claim(
     claim: str,
     username: str,
     password: str,
-) -> int:
+) -> tuple[int, str]:
     now = utc_timestamp()
     try:
         with open_db(settings.config.db_path) as conn:
@@ -697,6 +715,7 @@ def _redeem_admin_recovery_claim(
                         status_code=403,
                         detail="admin recovery claim is invalid",
                     )
+                password_hash = _password_hasher().hash(password)
                 conn.execute(
                     """
                     UPDATE web_users
@@ -704,7 +723,7 @@ def _redeem_admin_recovery_claim(
                         password_updated_at = ?
                     WHERE id = ?
                     """,
-                    (_password_hasher().hash(password), now, user_id),
+                    (password_hash, now, user_id),
                 )
                 _delete_admin_recovery_claim(conn)
                 _insert_auth_audit(
@@ -721,7 +740,7 @@ def _redeem_admin_recovery_claim(
                         "password_updated_at": now,
                     },
                 )
-                return user_id
+                return user_id, password_hash
     except HTTPException:
         raise
     except (OSError, sqlite3.Error, DatabaseError) as exc:
@@ -777,23 +796,12 @@ def _verify_web_user(
                 )
             except (InvalidHashError, VerificationError, VerifyMismatchError):
                 return None
-            if verified and _password_hasher().check_needs_rehash(
+            if not verified:
+                return None
+            if _password_hasher().check_needs_rehash(
                 str(user["password_hash"])
             ):
-                with conn:
-                    conn.execute(
-                        """
-                        UPDATE web_users
-                        SET password_hash = ?,
-                            password_updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            _password_hasher().hash(password),
-                            utc_timestamp(),
-                            user["id"],
-                        ),
-                    )
+                return _rehash_web_user(conn, user, password)
             return user
     except (OSError, sqlite3.Error, DatabaseError) as exc:
         raise HTTPException(
@@ -804,6 +812,46 @@ def _verify_web_user(
                 exc,
             ),
         ) from exc
+
+
+def _rehash_web_user(
+    conn: sqlite3.Connection,
+    user: sqlite3.Row,
+    password: str,
+) -> sqlite3.Row | None:
+    with conn:
+        cursor = conn.execute(
+            """
+            UPDATE web_users
+            SET password_hash = ?,
+                password_updated_at = ?
+            WHERE id = ?
+              AND password_hash = ?
+              AND disabled_at IS NULL
+            """,
+            (
+                _password_hasher().hash(password),
+                utc_timestamp(),
+                user["id"],
+                user["password_hash"],
+            ),
+        )
+        # Capture the current credential before releasing the write transaction.
+        user = conn.execute(
+            "SELECT * FROM web_users WHERE id = ?", (user["id"],)
+        ).fetchone()
+    if cursor.rowcount == 1:
+        return user
+    # Another login may have rehashed the same password. Verify the current
+    # credential before allowing session issuance.
+    if user is None or user["disabled_at"] is not None:
+        return None
+    try:
+        if not _password_hasher().verify(user["password_hash"], password):
+            return None
+    except (InvalidHashError, VerificationError, VerifyMismatchError):
+        return None
+    return user
 
 
 def _auth_failed() -> HTTPException:
@@ -959,8 +1007,9 @@ def _create_web_session(
     settings: WebSettings,
     *,
     user_id: int,
+    password_hash: str,
     request: Request,
-) -> str:
+) -> str | None:
     session_id = secrets.token_urlsafe(48)
     now = utc_timestamp()
     expires_at = _utc_timestamp_after(SESSION_MAX_AGE_SECONDS)
@@ -968,7 +1017,9 @@ def _create_web_session(
         with open_db(settings.config.db_path) as conn:
             init_db(conn)
             with conn:
-                conn.execute(
+                # Recovery either changes the hash first, or revokes this session
+                # after insertion. The credential check and insert must be atomic.
+                cursor = conn.execute(
                     """
                     INSERT INTO web_sessions (
                         id_hash,
@@ -978,17 +1029,24 @@ def _create_web_session(
                         expires_at,
                         user_agent_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    SELECT ?, id, ?, ?, ?, ?
+                    FROM web_users
+                    WHERE id = ?
+                      AND password_hash = ?
+                      AND disabled_at IS NULL
                     """,
                     (
                         _secret_hash(session_id),
-                        user_id,
                         now,
                         now,
                         expires_at,
                         _user_agent_hash(request),
+                        user_id,
+                        password_hash,
                     ),
                 )
+                if cursor.rowcount != 1:
+                    return None
     except (OSError, sqlite3.Error, DatabaseError) as exc:
         raise HTTPException(
             status_code=500,
