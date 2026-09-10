@@ -279,7 +279,10 @@ class RegistryHttpManifestResolver:
                     allow_private=allow_private,
                 )
             if status != 200:
-                raise ManifestLookupError(f"Registry manifest request failed (HTTP {status}).")
+                raise ManifestLookupError(
+                    f"Registry manifest request failed (HTTP {status}). "
+                    "Check that the image/tag exists and that you have access to it."
+                )
         except RegistryRequestError as exc:
             raise ManifestLookupError(str(exc)) from exc
         # Verify the original bytes before JSON parsing or child selection.
@@ -312,7 +315,10 @@ class RegistryHttpManifestResolver:
             allow_private=same_origin or configured_private,
         )
         if status != 200:
-            raise ManifestLookupError(f"Registry token request failed (HTTP {status}).")
+            raise ManifestLookupError(
+                f"Registry token request failed (HTTP {status}). "
+                "Check the registry authentication settings and credentials."
+            )
         token = self._json_payload(body).get("token")
         if not isinstance(token, str) or not token:
             raise ManifestLookupError("Registry token response did not include a token.")

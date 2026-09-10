@@ -144,6 +144,21 @@ def test_private_same_origin_is_pinned_to_original_peer():
         assert call.kwargs["allow_private"]
 
 
+def test_manifest_http_error_includes_image_recovery_guidance():
+    resolver = RegistryHttpManifestResolver()
+    with mock.patch.object(digest_verifier, "request_bytes", return_value=(404, {}, b"", PUBLIC)):
+        with pytest.raises(ManifestLookupError, match=r"manifest request failed \(HTTP 404\).*image/tag.*access"):
+            resolver._request_json(REGISTRY)
+
+
+def test_token_http_error_includes_authentication_recovery_guidance():
+    resolver = RegistryHttpManifestResolver()
+    auth = challenge("https://auth.docker.io/token")
+    with mock.patch.object(digest_verifier, "request_bytes", return_value=(403, {}, b"", PUBLIC)):
+        with pytest.raises(ManifestLookupError, match=r"token request failed \(HTTP 403\).*authentication.*credentials"):
+            resolver._token(auth, REGISTRY, PUBLIC)
+
+
 def test_explicit_private_token_server(monkeypatch):
     monkeypatch.setenv(
         registry_http.AUTH_ORIGINS_ENV,
