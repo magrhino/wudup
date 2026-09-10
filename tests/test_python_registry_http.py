@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import socket
+import ssl
 import sys
 import time
 from pathlib import Path
@@ -261,7 +262,7 @@ def fake_transport(
     raw = mock.Mock()
     connect = mock.Mock(return_value=raw)
     monkeypatch.setattr(socket, "create_connection", connect)
-    context = mock.Mock()
+    context = mock.Mock(minimum_version=ssl.TLSVersion.MINIMUM_SUPPORTED)
     monkeypatch.setattr(
         registry_http.ssl, "create_default_context", mock.Mock(return_value=context)
     )
@@ -337,6 +338,30 @@ def test_transport_pins_dns_preserves_tls_name_and_ignores_proxy(monkeypatch):
     assert context.wrap_socket.call_args.kwargs["server_hostname"] == "auth.docker.io"
     socket.getaddrinfo.assert_called_once()
     connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize("initial,expected", [
+    (ssl.TLSVersion.MINIMUM_SUPPORTED, ssl.TLSVersion.TLSv1_2),
+    (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_2),
+    (ssl.TLSVersion.TLSv1_3, ssl.TLSVersion.TLSv1_3),
+])
+def test_transport_enforces_tls_floor_before_handshake(monkeypatch, initial, expected):
+    context = ssl.create_default_context()
+    context.minimum_version = initial
+    fake_transport(monkeypatch)
+    monkeypatch.setattr(registry_http.ssl, "create_default_context", lambda: context)
+
+    def wrap_socket(_raw, *, server_hostname):
+        assert context.minimum_version == expected
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname
+        assert server_hostname == "auth.docker.io"
+        return mock.Mock()
+
+    wrap = mock.Mock(side_effect=wrap_socket)
+    monkeypatch.setattr(context, "wrap_socket", wrap)
+    registry_http._worker_request(worker_options())
+    wrap.assert_called_once()
 
 
 def test_pinned_private_peer_does_not_resolve_again(monkeypatch):

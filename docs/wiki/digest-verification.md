@@ -32,7 +32,7 @@ verified.
 
 ## Registry Authentication
 
-The direct registry client uses HTTPS with certificate verification. Token
+The direct registry client requires TLS 1.2 or newer with certificate verification. Token
 challenges may use the registry's own origin, or Docker Hub's `auth.docker.io`
 service. For other separate token services, explicitly authorize the HTTPS
 origin for that registry in the WUDup process environment (example only):

@@ -206,6 +206,7 @@ def _worker_request(options: dict[str, Any]) -> dict[str, Any]:
     for address in addresses:
         _validate_address(address, options["allow_private"])
     context = ssl.create_default_context()
+    context.minimum_version = max(context.minimum_version, ssl.TLSVersion.TLSv1_2)
     connection = http.client.HTTPSConnection(
         host, port, timeout=options["timeout"], context=context
     )
