@@ -159,8 +159,9 @@ def test_explicit_private_token_server(monkeypatch):
     )
     assert url.startswith("https://auth.example:8443/token?")
     assert private
+    auth = challenge("https://auth.example:8443/token")
     with pytest.raises(RegistryRequestError, match="unrelated"):
-        registry_http.token_url(challenge("https://auth.example:8443/token"), REGISTRY)
+        registry_http.token_url(auth, REGISTRY)
 
 
 @pytest.mark.parametrize(
@@ -168,8 +169,9 @@ def test_explicit_private_token_server(monkeypatch):
 )
 def test_bad_config_fails_closed(monkeypatch, config):
     monkeypatch.setenv(registry_http.AUTH_ORIGINS_ENV, config)
+    auth = challenge("https://auth.docker.io/token")
     with pytest.raises(RegistryRequestError, match="JSON origin mapping"):
-        registry_http.token_url(challenge("https://auth.docker.io/token"), REGISTRY)
+        registry_http.token_url(auth, REGISTRY)
 
 
 @pytest.mark.parametrize(
@@ -194,8 +196,9 @@ def test_bad_token_response_does_not_recurse(status, body):
             ),
         ],
     ) as request:
+        resolver = RegistryHttpManifestResolver()
         with pytest.raises(ManifestLookupError):
-            RegistryHttpManifestResolver()._request_json(REGISTRY)
+            resolver._request_json(REGISTRY)
     assert request.call_count == 2
 
 
@@ -373,16 +376,18 @@ def test_pinned_private_peer_does_not_resolve_again(monkeypatch):
 
 def test_mixed_dns_answers_fail_before_connect(monkeypatch):
     connect, _, _, _ = fake_transport(monkeypatch, addresses=(PUBLIC, PRIVATE))
+    options = worker_options()
     with pytest.raises(RegistryRequestError, match="network address"):
-        registry_http._worker_request(worker_options())
+        registry_http._worker_request(options)
     connect.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 def test_redirects_never_followed(monkeypatch, status):
     connect, _, connection, response = fake_transport(monkeypatch, status=status)
+    options = worker_options()
     with pytest.raises(RegistryRequestError, match="redirect"):
-        registry_http._worker_request(worker_options())
+        registry_http._worker_request(options)
     connect.assert_called_once()
     connection.request.assert_called_once()
     response.read.assert_not_called()
@@ -390,8 +395,9 @@ def test_redirects_never_followed(monkeypatch, status):
 
 def test_oversize_body_is_rejected_without_unbounded_read(monkeypatch):
     _, _, connection, response = fake_transport(monkeypatch, body=b"x" * 100)
+    options = worker_options()
     with pytest.raises(RegistryRequestError, match="permitted size"):
-        registry_http._worker_request(worker_options())
+        registry_http._worker_request(options)
     response.read.assert_called_once_with(33)
     connection.close.assert_called_once()
 
@@ -401,8 +407,9 @@ def test_failed_connections_cannot_fall_back_to_unvalidated_dns(monkeypatch):
         monkeypatch, addresses=(PUBLIC, "8.8.4.4", PUBLIC)
     )
     connect.side_effect = OSError("offline")
+    options = worker_options()
     with pytest.raises(OSError):
-        registry_http._worker_request(worker_options())
+        registry_http._worker_request(options)
     connection.request.assert_not_called()
 
 
@@ -430,6 +437,7 @@ def test_live_probe_uses_production_policy(image_ref):
     sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
+        ref = module.parse_image_ref(image_ref)
         with mock.patch.object(
             digest_verifier,
             "request_bytes",
@@ -441,7 +449,7 @@ def test_live_probe_uses_production_policy(image_ref):
             ),
         ) as request:
             with pytest.raises(module.ProbeError):
-                module.fetch_manifest(module.parse_image_ref(image_ref))
+                module.fetch_manifest(ref)
         assert request.call_count == 1
         assert request.call_args.args[0] == (
             "https://registry-1.docker.io/v2/library/alpine/manifests/3.20"
@@ -454,7 +462,7 @@ def test_live_probe_uses_production_policy(image_ref):
             ),
         ):
             with pytest.raises(module.ProbeError, match="integrity check failed"):
-                module.fetch_manifest(module.parse_image_ref(image_ref))
+                module.fetch_manifest(ref)
         image = parse_registry_image("alpine:3.20")
         assert image.http_registry == "registry-1.docker.io"
     finally:
