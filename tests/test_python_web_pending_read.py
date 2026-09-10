@@ -307,6 +307,7 @@ def test_pending_endpoint_preserves_updates_across_degraded_wud_rows(
         "The last WUD update check failed for 9 containers. "
         "9 updates use results from the last successful WUD check."
     )
+    assert degraded_body["warnings"] == [degraded_body["source"]["detail"]]
     retained = [
         item
         for item in degraded_body["items"]
