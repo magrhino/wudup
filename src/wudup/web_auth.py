@@ -801,37 +801,7 @@ def _verify_web_user(
             if _password_hasher().check_needs_rehash(
                 str(user["password_hash"])
             ):
-                with conn:
-                    cursor = conn.execute(
-                        """
-                        UPDATE web_users
-                        SET password_hash = ?,
-                            password_updated_at = ?
-                        WHERE id = ?
-                          AND password_hash = ?
-                          AND disabled_at IS NULL
-                        """,
-                        (
-                            _password_hasher().hash(password),
-                            utc_timestamp(),
-                            user["id"],
-                            user["password_hash"],
-                        ),
-                    )
-                    # Read our rehash before releasing the write transaction.
-                    user = conn.execute(
-                        "SELECT * FROM web_users WHERE id = ?", (user["id"],)
-                    ).fetchone()
-                if cursor.rowcount != 1:
-                    # Another login may have rehashed the same password. Verify
-                    # the current credential before allowing session issuance.
-                    if user is None or user["disabled_at"] is not None:
-                        return None
-                    try:
-                        if not _password_hasher().verify(user["password_hash"], password):
-                            return None
-                    except (InvalidHashError, VerificationError, VerifyMismatchError):
-                        return None
+                return _rehash_web_user(conn, user, password)
             return user
     except (OSError, sqlite3.Error, DatabaseError) as exc:
         raise HTTPException(
@@ -842,6 +812,46 @@ def _verify_web_user(
                 exc,
             ),
         ) from exc
+
+
+def _rehash_web_user(
+    conn: sqlite3.Connection,
+    user: sqlite3.Row,
+    password: str,
+) -> sqlite3.Row | None:
+    with conn:
+        cursor = conn.execute(
+            """
+            UPDATE web_users
+            SET password_hash = ?,
+                password_updated_at = ?
+            WHERE id = ?
+              AND password_hash = ?
+              AND disabled_at IS NULL
+            """,
+            (
+                _password_hasher().hash(password),
+                utc_timestamp(),
+                user["id"],
+                user["password_hash"],
+            ),
+        )
+        # Capture the current credential before releasing the write transaction.
+        user = conn.execute(
+            "SELECT * FROM web_users WHERE id = ?", (user["id"],)
+        ).fetchone()
+    if cursor.rowcount == 1:
+        return user
+    # Another login may have rehashed the same password. Verify the current
+    # credential before allowing session issuance.
+    if user is None or user["disabled_at"] is not None:
+        return None
+    try:
+        if not _password_hasher().verify(user["password_hash"], password):
+            return None
+    except (InvalidHashError, VerificationError, VerifyMismatchError):
+        return None
+    return user
 
 
 def _auth_failed() -> HTTPException:
