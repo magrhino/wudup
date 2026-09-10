@@ -242,7 +242,7 @@ def _api_source(
     detail = snapshot.status.detail if degraded else ""
     warnings = parsed.warnings
     if degraded:
-        warnings = (f"WUD API pending source degraded: {detail}", *warnings)
+        warnings = (detail, *warnings)
     return PendingSourceResult(
         configured=configured,
         active="api",
