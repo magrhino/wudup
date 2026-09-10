@@ -85,7 +85,7 @@ def test_first_run_setup_claim_serializes_concurrent_claims(
 
     def claim_admin(username: str) -> tuple[str, int | str]:
         try:
-            user_id = web_auth_module._claim_initial_admin(
+            user_id, _password_hash = web_auth_module._claim_initial_admin(
                 settings,
                 claim,
                 username,
