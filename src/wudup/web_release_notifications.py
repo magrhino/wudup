@@ -156,7 +156,7 @@ def start_release_notification_scheduler(
     existing_thread = app.state.web_release_notification_thread
     if existing_thread is not None and existing_thread.is_alive():
         return existing_thread
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
     stop_event = Event()
     app.state.web_release_notification_stop = stop_event
@@ -687,7 +687,7 @@ def _release_note_infos(
     source: _NotificationSource,
 ) -> dict[int, ReleaseNoteInfo]:
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             infos = refresh_release_notes(
                 conn,
@@ -1604,7 +1604,7 @@ def _insert_release_notification_test_audit_start(
         destination,
         status="running",
     )
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             cursor = conn.execute(
@@ -1647,7 +1647,7 @@ def _finish_release_notification_test_audit(
         status=status,
         error=error,
     )
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             conn.execute(
@@ -1749,7 +1749,7 @@ def _insert_release_notification_audit_start(
         sent_batch_count=0,
         actor_type=actor_type,
     )
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             cursor = conn.execute(
@@ -1800,7 +1800,7 @@ def _finish_release_notification_audit(
         error=error,
         actor_type=actor_type,
     )
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             conn.execute(
@@ -1875,7 +1875,7 @@ def _record_release_notification_history(
     status: str,
 ) -> None:
     config = _release_notification_config(response)
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             for item in items:
@@ -1917,7 +1917,7 @@ def _reserve_release_notification_history(
 ) -> ReleaseNotificationResponse:
     config = _release_notification_config(response)
     items: list[ReleaseNotificationItem] = []
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             for item in response.items:

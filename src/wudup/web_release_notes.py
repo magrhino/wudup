@@ -127,7 +127,7 @@ def api_refresh_release_notes(request: Request) -> ReleaseNotesResponse:
     if isinstance(context, ReleaseNotesResponse):
         return context
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             items = refresh_release_notes(
                 conn,

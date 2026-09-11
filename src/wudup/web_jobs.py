@@ -662,6 +662,7 @@ def _checkpoint_file_selection_completions(
         return
     web_file_selection_store.checkpoint_completed_update_selections(
         settings.config.db_path,
+        owner_uid=settings.config.out_uid,
         pending_file=settings.config.wud_out_file,
         scoped=bool(runner.options.update_selections),
         previous=runner.options.completed_update_selections,

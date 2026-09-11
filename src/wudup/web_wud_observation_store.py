@@ -32,10 +32,11 @@ def load_pending_observations(
     db_path: str | Path,
     *,
     source: str,
+    owner_uid: int | None = None,
 ) -> tuple[StoredPendingObservation, ...]:
     if str(db_path) == ":memory:":
         return ()
-    with open_db(db_path) as conn:
+    with open_db(db_path, owner_uid=owner_uid) as conn:
         init_db(conn)
         row = conn.execute(
             """
@@ -69,6 +70,7 @@ def replace_pending_observations(
     *,
     source: str,
     observations: Sequence[StoredPendingObservation],
+    owner_uid: int | None = None,
 ) -> None:
     if str(db_path) == ":memory:":
         return
@@ -85,7 +87,7 @@ def replace_pending_observations(
             ],
         }
     )
-    with open_db(db_path) as conn:
+    with open_db(db_path, owner_uid=owner_uid) as conn:
         init_db(conn)
         with conn:
             conn.execute(

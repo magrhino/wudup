@@ -947,7 +947,7 @@ def _refresh_retag_github_latest_candidates(
     if not targets:
         return None
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             refresh_release_notes(
                 conn,
@@ -1946,7 +1946,7 @@ def _record_successful_retag_known_images(
 ) -> None:
     if not updates:
         return
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         for item in updates:
             if item.known_image_service_key_ambiguous:
@@ -1975,7 +1975,7 @@ def _insert_retag_audit_run(
     *,
     status: str,
 ) -> int:
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         return insert_update_run(
             conn,
@@ -2000,7 +2000,7 @@ def _finish_retag_audit_run(
     successful_update_ids = {
         _retag_update_identity(item) for item in successful_updates
     }
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         now = utc_timestamp()
         for item in build.updates:

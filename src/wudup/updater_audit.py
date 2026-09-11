@@ -187,7 +187,7 @@ def start_audit(
     try:
         audit_db_path = db_path(runner.options, runner.environ)
         chown_parent = sqlite_parent_missing(audit_db_path)
-        conn = connect_db(audit_db_path)
+        conn = connect_db(audit_db_path, owner_uid=runner.owner.uid)
         runner.audit_db_path = audit_db_path
         init_db(conn)
         runner.audit_conn = conn

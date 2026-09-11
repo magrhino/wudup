@@ -310,7 +310,7 @@ def _record_self_update_audit(
     status: SelfUpdateResponse,
 ) -> int:
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 return _insert_self_update_audit(
@@ -394,7 +394,7 @@ def api_prepare_self_update(
             )
 
         try:
-            with open_db(settings.config.db_path) as conn:
+            with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
                 init_db(conn)
                 with _immediate_transaction(conn):
                     audit_run_id = _insert_self_update_audit(
@@ -499,7 +499,7 @@ def api_restart_container(
         )
 
     try:
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             with _immediate_transaction(conn):
                 audit_run_id = _insert_container_restart_audit(
@@ -1377,7 +1377,7 @@ def _update_self_update_audit(
     metadata_extra: Mapping[str, Any] | None = None,
 ) -> None:
     now = utc_timestamp()
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             metadata = _self_update_audit_metadata(conn, run_id)
@@ -1437,7 +1437,7 @@ def _update_container_restart_audit(
     error: str = "",
 ) -> None:
     now = utc_timestamp()
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             metadata = _container_restart_audit_metadata(conn, run_id)

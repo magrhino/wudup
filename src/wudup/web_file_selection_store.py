@@ -94,6 +94,7 @@ def replace_completed_update_selections(
     *,
     pending_file: Path,
     selections: Sequence[CompletedUpdateSelection],
+    owner_uid: int | None = None,
 ) -> None:
     if str(db_path) == ":memory:":
         raise FileSelectionStoreError(
@@ -104,7 +105,7 @@ def replace_completed_update_selections(
         for item in selections
         if item.target_key and item.completion_id
     }
-    with open_db(db_path) as conn:
+    with open_db(db_path, owner_uid=owner_uid) as conn:
         init_db(conn)
         with conn:
             if not unique:
@@ -147,6 +148,7 @@ def checkpoint_completed_update_selections(
     previous: Sequence[CompletedUpdateSelection],
     successful: Sequence[CompletedUpdateSelection],
     discovered: Sequence[CompletedUpdateSelection],
+    owner_uid: int | None = None,
 ) -> None:
     try:
         text = pending_file.read_text(encoding="utf-8")
@@ -183,6 +185,7 @@ def checkpoint_completed_update_selections(
             db_path,
             pending_file=pending_file,
             selections=retained,
+            owner_uid=owner_uid,
         )
     except Exception as exc:  # noqa: BLE001 - expose only the sanitized failure.
         _raise_checkpoint_error(exc)

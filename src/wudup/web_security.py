@@ -283,7 +283,7 @@ def _run_security_scan_job(
             runner=CommandRunner(env=settings.command_env),
         )
         verifier = default_digest_verifier(settings)
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             for request in context.requests:
                 info = _scan_request(

@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
+from collections import deque
 from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -43,29 +46,164 @@ from .digest_provenance import (
 )
 
 
-def connect_db(path: str | Path) -> sqlite3.Connection:
+def connect_db(path: str | Path, *, owner_uid: int | None = None) -> sqlite3.Connection:
     """Open a SQLite connection with WUDup defaults applied."""
 
     db_path = Path(path)
     if str(db_path) != ":memory:":
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        db_path = _prepare_private_database(db_path, owner_uid=owner_uid)
 
     conn = sqlite3.connect(db_path, timeout=5.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
+def _check_database_directory(
+    metadata: os.stat_result, trusted_uids: set[int], *, ancestor: bool
+) -> None:
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid not in trusted_uids
+        or (
+            metadata.st_mode & 0o022
+            and not (ancestor and metadata.st_mode & stat.S_ISVTX)
+        )
+    ):
+        raise OSError(
+            "Could not protect the database directory. Set WUD_DB_PATH to a "
+            "private directory whose ancestors are owned by root, the WUDup "
+            "account, or configured OUT_UID, without group/other write access "
+            "except on sticky ancestors."
+        )
+
+
+def _private_database_directory(path: Path, trusted_uids: set[int]) -> Path:
+    # Validate from root before descending, including aliases and their targets.
+    # Resolving first could hide an attacker-owned directory or chained alias.
+    absolute = path.absolute()
+    directory = Path(absolute.anchor)
+    pending = deque(absolute.parts[1:])
+    links = 0
+    _check_database_directory(directory.lstat(), trusted_uids, ancestor=bool(pending))
+    while pending:
+        component = pending.popleft()
+        if component == "..":
+            directory = directory.parent
+            continue
+        candidate = directory / component
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            # Intermediate parents stay traversable for the configured UID
+            # handoff. Recheck even if another creator wins the mkdir race.
+            candidate.mkdir(mode=0o755 if pending else 0o700, exist_ok=True)
+            metadata = candidate.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            links += 1
+            if metadata.st_uid not in trusted_uids or links > 40:
+                raise OSError(
+                    "Could not protect the database directory: an untrusted or "
+                    "looping symbolic link was found. Set WUD_DB_PATH to a "
+                    "directory owned by the WUDup account or configured OUT_UID."
+                )
+            target = Path(os.readlink(candidate))
+            if target.is_absolute():
+                directory = Path(target.anchor)
+                pending.extendleft(reversed(target.parts[1:]))
+            else:
+                pending.extendleft(reversed(target.parts))
+            continue
+        _check_database_directory(metadata, trusted_uids, ancestor=bool(pending))
+        directory = candidate
+    _check_database_directory(directory.lstat(), trusted_uids, ancestor=False)
+    return directory
+
+
+def _prepare_private_database(path: Path, *, owner_uid: int | None = None) -> Path:
+    trusted_uids = {0, os.geteuid()}
+    if owner_uid is not None:
+        trusted_uids.add(owner_uid)
+    path = _private_database_directory(path.parent, trusted_uids) / path.name
+    try:
+        # SQLite's Unix driver inherits the database mode for new journals,
+        # WAL and SHM files. Set it before SQLite can persist any secrets.
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            candidate = Path(f"{path}{suffix}")
+            try:
+                metadata = candidate.lstat()
+            except FileNotFoundError:
+                if suffix:
+                    continue
+                raise
+            if suffix and metadata.st_nlink == 0:
+                continue  # A concurrent SQLite close already unlinked this file.
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_uid not in trusted_uids
+            ):
+                raise OSError("Database files must be regular files without links")
+            # Do not open/close existing database descriptors: doing so can
+            # release POSIX locks held by another SQLite connection in-process.
+            if stat.S_IMODE(metadata.st_mode) != 0o600:
+                try:
+                    candidate.chmod(0o600, follow_symlinks=False)
+                except FileNotFoundError:
+                    if suffix:
+                        continue  # SQLite may remove a sidecar on another close.
+                    raise
+            try:
+                actual = candidate.lstat()
+            except FileNotFoundError:
+                if suffix:
+                    continue
+                raise
+            if suffix and actual.st_nlink == 0:
+                continue
+            if (
+                not stat.S_ISREG(actual.st_mode)
+                or actual.st_nlink != 1
+                or actual.st_uid not in trusted_uids
+                or stat.S_IMODE(actual.st_mode) != 0o600
+                or (
+                    not suffix
+                    and (actual.st_dev, actual.st_ino) != (metadata.st_dev, metadata.st_ino)
+                )
+            ):
+                raise OSError("Database file permissions could not be verified")
+    except OSError as exc:
+        raise OSError(
+            "Could not protect the database files. Use regular files owned by "
+            "root, the WUDup account, or configured OUT_UID, without symbolic "
+            "or hard links, and ensure the WUDup account can set "
+            "owner-only permissions (0600)."
+        ) from exc
+    return path
+
+
 @contextmanager
-def open_db(path: str | Path) -> Generator[sqlite3.Connection, None, None]:
+def open_db(
+    path: str | Path, *, owner_uid: int | None = None
+) -> Generator[sqlite3.Connection, None, None]:
     """Open a SQLite connection, yield it, and close it on exit.
 
     Use this for request-scoped or test-scoped connections that should be
     closed deterministically.  For long-lived connections that must survive
     across multiple call-sites, use :func:`connect_db` directly.
     """
-    conn = connect_db(path)
+    conn = connect_db(path, owner_uid=owner_uid)
     try:
         yield conn
     finally:

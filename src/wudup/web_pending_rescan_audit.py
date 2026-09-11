@@ -40,7 +40,7 @@ def insert_pending_rescan_audit_start(
         watched_count=0,
         line_numbers=line_numbers,
     )
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with _immediate_transaction(conn):
             cursor = conn.execute(
@@ -172,7 +172,7 @@ def _update_pending_rescan_audit(
     run_status: str,
     metadata: dict[str, Any],
 ) -> None:
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             conn.execute(

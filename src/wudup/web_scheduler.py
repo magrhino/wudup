@@ -81,7 +81,7 @@ def start_auto_update_scheduler(
     existing_thread = app.state.web_auto_update_thread
     if existing_thread is not None and existing_thread.is_alive():
         return existing_thread
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
     stop_event = Event()
     app.state.web_auto_update_stop = stop_event
@@ -139,7 +139,7 @@ def _auto_update_tick(
         started_at = now_utc
     started_at_utc = started_at.astimezone(timezone.utc)
 
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         candidate = _auto_update_candidate(
             conn,
@@ -161,7 +161,7 @@ def _auto_update_tick(
     try:
         locked_now_utc = now_utc if now is not None else datetime.now(timezone.utc)
         locked_now_utc = locked_now_utc.astimezone(timezone.utc)
-        with open_db(settings.config.db_path) as conn:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             candidate = _auto_update_candidate(
                 conn,
@@ -772,7 +772,7 @@ def _update_auto_update_schedule_runs(
     error: str = "",
 ) -> None:
     now = utc_timestamp()
-    with open_db(settings.config.db_path) as conn:
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with conn:
             for schedule_key in schedule_keys:

@@ -123,7 +123,7 @@ def test_auto_update_scheduler_start_replaces_stopped_event(
     )
     settings = SimpleNamespace(
         mutations_enabled=True,
-        config=SimpleNamespace(db_path=tmp_path / "state" / "wud.sqlite"),
+        config=SimpleNamespace(db_path=tmp_path / "state" / "wud.sqlite", out_uid=None),
     )
     observed_stop_states: list[bool] = []
 
