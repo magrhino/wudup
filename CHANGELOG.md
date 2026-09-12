@@ -4,6 +4,29 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.59.6](https://github.com/magrhino/wudup/compare/v0.59.5...v0.59.6) (2026-09-11)
+
+
+### Bug Fixes
+
+* **auth:** bind session issuance to verified credentials ([#656](https://github.com/magrhino/wudup/issues/656)) ([6a5f5cc](https://github.com/magrhino/wudup/commit/6a5f5cca26e8c4a57f31b354b688ae819a5fc71f))
+* **compose:** prevent image replacement during recreation ([#643](https://github.com/magrhino/wudup/issues/643)) ([5de4f19](https://github.com/magrhino/wudup/commit/5de4f19269803526dad25d970a0a92da895c634c))
+* **db:** enforce private sqlite storage and trusted owners ([#657](https://github.com/magrhino/wudup/issues/657)) ([354687b](https://github.com/magrhino/wudup/commit/354687bc1e9a76763233d189053f81cb5fa00949))
+* **digest:** verify registry manifests before applying updates ([#645](https://github.com/magrhino/wudup/issues/645)) ([2f4a1f8](https://github.com/magrhino/wudup/commit/2f4a1f8147ad0e35ad5c4c84136dd89c84c952f0))
+* **registry:** restrict authentication requests ([#653](https://github.com/magrhino/wudup/issues/653)) ([bb68851](https://github.com/magrhino/wudup/commit/bb68851ff8ed926ba660639df1ab33dd164d393d))
+* **webui:** clarify failed WUD update checks ([#641](https://github.com/magrhino/wudup/issues/641)) ([24c3c97](https://github.com/magrhino/wudup/commit/24c3c97d21d14befd5c9bc5d7b67f2999d2602fd))
+* **wud:** align degraded warning with source detail ([#655](https://github.com/magrhino/wudup/issues/655)) ([802432e](https://github.com/magrhino/wudup/commit/802432e2a9946a79c898519d7feb937a9c0f191d))
+
+
+### Dependencies
+
+* **deps-dev:** bump @vue/test-utils ([#651](https://github.com/magrhino/wudup/issues/651)) ([22146f3](https://github.com/magrhino/wudup/commit/22146f3c13415afe6449a30f2459c11503d79a5b))
+* **deps-dev:** bump ruff in the python-development group ([#648](https://github.com/magrhino/wudup/issues/648)) ([090c858](https://github.com/magrhino/wudup/commit/090c85853109c5adea68ed2b9b86df21140ea09c))
+* **deps:** bump argon2-cffi-bindings from 25.1.0 to 26.1.0 ([#649](https://github.com/magrhino/wudup/issues/649)) ([fc8f9a4](https://github.com/magrhino/wudup/commit/fc8f9a4d7955bbbc3516ebd177dc8c4f7631835b))
+* **deps:** bump click in the python-production group ([#647](https://github.com/magrhino/wudup/issues/647)) ([f8d79d7](https://github.com/magrhino/wudup/commit/f8d79d78aa38970c29f5825273b3f6c3d57b65b3))
+* **deps:** bump the github-actions group with 5 updates ([#652](https://github.com/magrhino/wudup/issues/652)) ([fc5c250](https://github.com/magrhino/wudup/commit/fc5c250fefc17da939926f6d033f8484e729f05f))
+* **deps:** bump the npm-production group in /webui with 4 updates ([#650](https://github.com/magrhino/wudup/issues/650)) ([413965b](https://github.com/magrhino/wudup/commit/413965b00389c1c9f51f0fd86bdd1912340dd5f2))
+
 ## [0.59.5](https://github.com/magrhino/wudup/compare/v0.59.4...v0.59.5) (2026-09-06)
 
 
