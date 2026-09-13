@@ -128,6 +128,7 @@ smoke_default_web_health(){
   HEALTH_TMP="$(mktemp -d "${TMPDIR:-/tmp}/wud-health-test.XXXXXX")"
   HEALTH_CONTAINER="wudup-health-${RUN_ID_COMPONENT}-$$"
   mkdir -p "$HEALTH_TMP/host-docker" "$HEALTH_TMP/out" "$HEALTH_TMP/logs"
+  chmod 700 "$HEALTH_TMP/logs"
   touch "$HEALTH_TMP/out/images.todo"
 
   run_with_timeout 60 docker run -d \
@@ -137,6 +138,8 @@ smoke_default_web_health(){
     -v "$HEALTH_TMP/host-docker:/host/docker" \
     -v "$HEALTH_TMP/out:/out" \
     -v "$HEALTH_TMP/logs:/logs" \
+    -e OUT_UID="$(id -u)" \
+    -e OUT_GID="$(id -g)" \
     "$IMAGE"
   run wait_for_default_web_health
 }

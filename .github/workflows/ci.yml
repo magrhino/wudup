@@ -100,7 +100,9 @@ jobs:
               - 'Dockerfile'
               - '.dockerignore'
               - 'entrypoint.sh'
+              - 'pyproject.toml'
               - 'requirements.txt'
+              - 'src/wudup/**'
               - 'docs/examples/docker-compose*.yml'
               - 'bin/*'
               - 'wud/*'
@@ -352,11 +354,20 @@ jobs:
       - changes
     if: >-
       ${{
-        needs.changes.outputs.skip_ci != 'true' &&
         (
-          (github.event_name == 'workflow_dispatch' && inputs.run_docker) ||
-          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:docker')) ||
-          needs.changes.outputs.docker == 'true'
+          github.event_name == 'pull_request' &&
+          (
+            startsWith(github.event.pull_request.head.ref, 'release-please--branches--') ||
+            contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+          )
+        ) ||
+        (
+          needs.changes.outputs.skip_ci != 'true' &&
+          (
+            (github.event_name == 'workflow_dispatch' && inputs.run_docker) ||
+            (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:docker')) ||
+            needs.changes.outputs.docker == 'true'
+          )
         )
       }}
 
