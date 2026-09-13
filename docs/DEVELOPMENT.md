@@ -160,7 +160,8 @@ wudup web --host 127.0.0.1 --port 7417 --static-dir webui/dist
 CI runs on pull requests targeting `main` and pushes to `main`. The default path
 is intentionally Linux-only to keep private repository Actions usage predictable.
 The `python-tests` and `webui-checks` jobs generate coverage reports and upload
-them to Codecov. Pull requests with `[skip ci]` in the title skip CI jobs, and
+them to Codecov. Pull requests with `[skip ci]` in the title skip CI jobs except
+the Docker build smoke test on Release Please PRs, and
 direct `docs:` or `chore:` commits to `main` skip CI and Release Please jobs.
 Merged Release Please PRs can still run the release automation needed to tag the
 release.
@@ -171,7 +172,10 @@ Optional checks are available when broader coverage is useful:
   `run_macos=true`, to run the macOS test job.
 - Add the `ci:docker` pull request label, manually dispatch CI with
   `run_docker=true`, or change image-impacting files to run the Docker build
-  smoke test.
+  smoke test. This includes `src/wudup/**`, `pyproject.toml`, `requirements.txt`,
+  Dockerfile/entrypoint changes, and the container test scripts. Release Please
+  PRs always run this check. CI and release validation both call
+  `tests/container-build.sh`, which includes the WebUI startup smoke test.
 - Manually dispatch CI with `run_webui_smoke=true`, or change files under
   `webui/`, to run the Playwright Chromium WebUI smoke tests.
 - Add the `ci:e2e` pull request label, or manually dispatch CI with
