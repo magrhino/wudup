@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.59.7](https://github.com/magrhino/wudup/compare/v0.59.6...v0.59.7) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ci:** validate container startup before releases ([#658](https://github.com/magrhino/wudup/issues/658)) ([2e8fe35](https://github.com/magrhino/wudup/commit/2e8fe35b4ba948b2541b6c935c65a9f1dcc4b195))
+
 ## [0.59.6](https://github.com/magrhino/wudup/compare/v0.59.5...v0.59.6) (2026-09-11)
 
 
