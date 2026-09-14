@@ -180,6 +180,64 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
                 ("failed", "stale-pending-digest"),
             ],
         )
+    def test_shared_exclusion_attributes_skip_to_blocked_stack(self) -> None:
+        self.wud_file.write_text(
+            "repo/excluded:1.0 tag=2.0\n"
+            "ghcr.io/acme/stale:latest@sha256:stale\n",
+            encoding="utf-8",
+        )
+        healthy_stack = self.make_stack(
+            "a-healthy", [("app", "repo/excluded:1.0", "cid-healthy")]
+        )
+        exclusion_stack = self.make_stack(
+            "z-blocked",
+            [
+                ("app", "repo/excluded:1.0", "cid-excluded"),
+                ("stale", "ghcr.io/acme/stale:latest", "cid-stale"),
+            ],
+        )
+        self.set_image_state(
+            "ghcr.io/acme/stale:latest",
+            "sha256:old",
+            "sha256:old-index",
+        )
+        self.set_manifest_stdout(
+            "ghcr.io/acme/stale:latest",
+            manifest_index_digest("sha256:moved", "sha256:moved-child"),
+        )
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/excluded:1.0 tag=2.0\n",
+        )
+        compose_text = (exclusion_stack / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("wud.tag.exclude", compose_text)
+        self.assertIn("wud.tag.exclude", (healthy_stack / "docker-compose.yml").read_text())
+        self.assertNotRegex(self.calls(), r"/z-blocked\tcompose -f .* (?:pull|stop|up -d)")
+        self.assertRegex(self.calls(), r"/a-healthy\tcompose -f .* up -d")
+        self.assertIn("Completed with 1 failure(s). Failed: z-blocked/stale.", result.stderr)
+        self.assertIn("Skipped exclusions: z-blocked/app (stack preflight failed).", result.stderr)
+        self.assertNotIn("Failed: a-healthy", result.stderr)
+        pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
+        self.assertEqual(pending[0]["stack_name"], "z-blocked")
+        self.assertEqual(pending[0]["service_name"], "app")
+        self.assertEqual(
+            [(row["status"], row["status_reason"]) for row in pending],
+            [
+                ("failed", "preflight-skipped"),
+                ("failed", "stale-pending-digest"),
+            ],
+        )
     def test_exclude_tag_line_does_not_recreate_already_excluded_service(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])

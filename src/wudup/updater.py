@@ -251,7 +251,7 @@ class UpdateFromWudRunner(
                 if update.stack.index not in stack_statuses
             ])
             exclusion_statuses.update({
-                update.source_line: StackStatus("failure", "preflight-skipped")
+                (update.stack.index, update.source_line): StackStatus("failure", "preflight-skipped")
                 for update in exclusion_updates
                 if update.stack.index in stack_statuses
             })
@@ -525,7 +525,7 @@ class UpdateFromWudRunner(
         matches: Sequence[Match],
         stack_statuses: Mapping[int, StackStatus],
         exclusion_updates: Sequence[TagExclusionUpdate],
-        exclusion_statuses: Mapping[int, StackStatus],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
         lock: DirectoryLock,
     ) -> None:
         opts = self.options
@@ -540,7 +540,7 @@ class UpdateFromWudRunner(
             update.source_line
             for update in exclusion_updates
             if exclusion_statuses.get(
-                update.source_line,
+                (update.stack.index, update.source_line),
                 StackStatus("failure", "missing"),
             ).status
             != "success"
@@ -617,7 +617,7 @@ class UpdateFromWudRunner(
         matches: Sequence[Match],
         stack_statuses: Mapping[int, StackStatus],
         exclusion_updates: Sequence[TagExclusionUpdate],
-        exclusion_statuses: Mapping[int, StackStatus],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
         exclusion_failures: Sequence[tuple[WudTarget, str]],
     ) -> int:
         updater_audit.mark_successful_pending(self, matches, stack_statuses)
@@ -635,12 +635,14 @@ class UpdateFromWudRunner(
         ) + sum(
             1
             for status in exclusion_statuses.values()
-            if status.status != "success"
+            if status.status != "success" and status.reason != "preflight-skipped"
         ) + len(exclusion_failures)
-        if fail_count:
+        if fail_count or any(
+            status.reason == "preflight-skipped" for status in exclusion_statuses.values()
+        ):
             updater_audit.finish_audit_run(self, "failure")
             error_report = self._write_error_report()
-            summary = self._failure_summary(fail_count)
+            summary = self._failure_summary(fail_count, exclusion_updates, exclusion_statuses)
             if error_report is not None:
                 self.log.error(
                     f"{summary} "

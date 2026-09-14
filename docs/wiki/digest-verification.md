@@ -17,7 +17,10 @@ Before updating, digest preflight checks each selected stack. A stale digest or
 manifest integrity failure blocks only the affected Compose stack; other stacks
 continue updating. Services in the blocked stack stay unchanged together. The
 final summary names failed services and identifies stale updates to refresh
-before retrying. Stale pending lines are removed unless another matched image
+before retrying. Tag exclusions blocked by stack preflight are listed separately
+as skipped, rather than counted as additional failures. When an exclusion spans
+multiple stacks, its pending audit entry identifies a failed or skipped stack
+if any part remains incomplete. Stale pending lines are removed unless another matched image
 still needs the same line.
 
 ## Verification Sources
