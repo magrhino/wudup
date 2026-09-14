@@ -128,7 +128,8 @@ smoke_default_web_health(){
   HEALTH_TMP="$(mktemp -d "${TMPDIR:-/tmp}/wud-health-test.XXXXXX")"
   HEALTH_CONTAINER="wudup-health-${RUN_ID_COMPONENT}-$$"
   mkdir -p "$HEALTH_TMP/host-docker" "$HEALTH_TMP/out" "$HEALTH_TMP/logs"
-  chmod 700 "$HEALTH_TMP/logs"
+  # Exercise automatic repair of a pre-created, group-writable database mount.
+  chmod 770 "$HEALTH_TMP/logs"
   touch "$HEALTH_TMP/out/images.todo"
 
   run_with_timeout 60 docker run -d \

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from itertools import product
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -147,6 +148,7 @@ class DatabasePermissionsTests(unittest.TestCase):
         from wudup.web import create_app
 
         self.path.parent.mkdir()
+        self.path.parent.chmod(0o770)
         with self.foreign_owner(self.path.parent):
             app = create_app(environ={
                 "WUD_DB_PATH": str(self.path),
@@ -154,6 +156,7 @@ class DatabasePermissionsTests(unittest.TestCase):
                 "OUT_GID": str(os.getgid()),
             })
         self.assertTrue(app.state.web_setup_claim)
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
         with open_db(self.path) as conn:
             self.assertGreater(conn.execute("SELECT count(*) FROM web_settings").fetchone()[0], 0)
 
@@ -163,14 +166,14 @@ class DatabasePermissionsTests(unittest.TestCase):
         with self.assertRaisesRegex(OSError, "untrusted or looping"):
             connect_db(alias / self.path.name)
 
-    def test_permissive_umask_creates_private_files_before_secret_persistence(self) -> None:
+    def test_umask_creates_usable_directories_and_private_files(self) -> None:
         # Keep process-wide umask changes out of the threaded test process too.
         script = """
 import os, sys
 from pathlib import Path
 from unittest.mock import patch
 from wudup.db import open_db, init_db
-os.umask(int(sys.argv[2], 8))
+original_umask = os.umask(int(sys.argv[2], 8))
 path = Path(sys.argv[1])
 with patch('wudup.db.os.umask', side_effect=AssertionError('global umask change')):
     for _ in range(2):
@@ -183,13 +186,55 @@ with patch('wudup.db.os.umask', side_effect=AssertionError('global umask change'
                 assert Path(f'{path}{suffix}').stat().st_mode & 0o777 == 0o600
             assert conn.execute('SELECT value FROM web_settings').fetchone()[0] == 'example-only-secret'
 assert path.parent.stat().st_mode & 0o777 == 0o700
+os.umask(original_umask)  # Restore access for subprocess coverage's exit-time writes.
 """
-        for mask in ("000", "022", "077"):
+        for mask in ("000", "022", "077", "777"):
             with self.subTest(umask=mask):
                 path = self.root / mask / "nested" / "state" / "wud.sqlite"
                 subprocess.run([sys.executable, "-c", script, str(path), mask], check=True)
                 for parent in (path.parent.parent, path.parent.parent.parent):
-                    self.assertEqual(parent.stat().st_mode & 0o022, 0)
+                    self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755)
+
+    def test_directory_creation_race_preserves_winners_permissions(self) -> None:
+        real_mkdir, real_chmod = Path.mkdir, Path.chmod
+
+        def racing_mkdir(path, *args, **kwargs):
+            if path == self.path.parent:
+                real_mkdir(path, mode=0o750)
+                real_chmod(path, 0o750)
+            return real_mkdir(path, *args, **kwargs)
+
+        with (
+            patch.object(Path, "mkdir", racing_mkdir),
+            patch.object(Path, "chmod", side_effect=AssertionError("changed race winner")),
+            patch("wudup.db.os.fchmod", side_effect=AssertionError("changed race winner")),
+        ):
+            with open_db(self.path) as conn:
+                init_db(conn)
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o750)
+
+    def test_new_directory_replacement_before_open_is_rejected(self) -> None:
+        target = self.root / "unrelated"
+        target.mkdir()
+        target.chmod(0o750)
+        real_open = os.open
+
+        def racing_open(path, flags, *args):
+            if path == self.path.parent:
+                path.rename(self.root / "created")
+                path.symlink_to(target, target_is_directory=True)
+            return real_open(path, flags, *args)
+
+        with (
+            patch("wudup.db.os.open", side_effect=racing_open),
+            patch("wudup.db.os.fchmod") as chmod,
+            patch("wudup.db.sqlite3.connect") as connect,
+        ):
+            with self.assertRaisesRegex(OSError, "Could not protect the new database directory"):
+                connect_db(self.path)
+            chmod.assert_not_called()
+            connect.assert_not_called()
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o750)
 
     def test_existing_database_and_active_sidecars_are_private_before_connect(self) -> None:
         with open_db(self.path) as first:
@@ -321,19 +366,179 @@ assert path.parent.stat().st_mode & 0o777 == 0o700
                 self.assertEqual(inspected, [sidecar])
                 sidecar.unlink(missing_ok=True)
 
-    def test_rejects_shared_writable_directories_without_chmod(self) -> None:
+    def test_repairs_database_directory_for_first_start_and_upgrade(self) -> None:
         self.path.parent.mkdir()
-        for directory in (self.path.parent, self.root):
-            for mode in (0o775, 0o777):
-                with self.subTest(directory=directory.name, mode=mode):
-                    directory.chmod(mode)
-                    try:
-                        with self.assertRaisesRegex(OSError, "Set WUD_DB_PATH"):
-                            connect_db(self.path)
-                        self.assertFalse(self.path.exists())
-                        self.assertEqual(stat.S_IMODE(directory.stat().st_mode), mode)
-                    finally:
-                        directory.chmod(0o700)
+        sibling = self.path.parent / "unrelated.log"
+        sibling.write_text("keep")
+        sibling.chmod(0o640)
+        owner = self.path.parent.stat().st_uid, self.path.parent.stat().st_gid
+        for mode in (0o770, 0o775, 0o777):
+            for existing in (False, True):
+                with self.subTest(mode=mode, existing=existing):
+                    self.path.unlink(missing_ok=True)
+                    if existing:
+                        with open_db(self.path) as conn:
+                            conn.execute("CREATE TABLE preserved (value TEXT)")
+                            conn.execute("INSERT INTO preserved VALUES ('keep')")
+                            conn.commit()
+                        self.path.chmod(0o640)
+                    self.path.parent.chmod(mode)
+                    with open_db(self.path, owner_uid=os.getuid()) as conn:
+                        conn.execute("CREATE TABLE startup_check (value TEXT)")
+                        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
+                        self.assert_private(self.state_paths())
+                        if existing:
+                            self.assertEqual(conn.execute("SELECT value FROM preserved").fetchone()[0], "keep")
+                    self.assertEqual((self.path.parent.stat().st_uid, self.path.parent.stat().st_gid), owner)
+                    self.assertEqual(stat.S_IMODE(sibling.stat().st_mode), 0o640)
+                    self.assertEqual(sibling.read_text(), "keep")
+
+    def test_directory_repair_failure_stops_before_sqlite_opens(self) -> None:
+        self.path.parent.mkdir()
+        for failure in (PermissionError("denied"), None):
+            with self.subTest(failure=failure):
+                self.path.parent.chmod(0o770)
+                with (
+                    patch("wudup.db.os.fchmod", side_effect=failure),
+                    patch("wudup.db.sqlite3.connect") as connect,
+                ):
+                    with self.assertRaisesRegex(OSError, "owner-only permissions"):
+                        connect_db(self.path)
+                    connect.assert_not_called()
+                self.assertFalse(self.path.exists())
+
+    def test_root_repair_hands_directory_to_distinct_configured_owner(self) -> None:
+        self.path.parent.mkdir()
+        owner = OwnerConfig(os.getuid() or 1000, os.getgid())
+        real_lstat, real_fstat, real_fchown = Path.lstat, os.fstat, os.fchown
+
+        for mode, action in product((0o770, 0o700), ("success", "denied", "no_effect")):
+            with self.subTest(mode=mode, action=action):
+                self.path.unlink(missing_ok=True)
+                self.path.parent.chmod(mode)
+                owner_state = {"uid": 0}
+
+                def directory_metadata(metadata, owner_state=owner_state):
+                    fields = list(metadata)
+                    fields[4] = owner_state["uid"]
+                    return os.stat_result(fields)
+
+                def root_lstat(path):
+                    metadata = real_lstat(path)
+                    return directory_metadata(metadata) if path == self.path.parent else metadata
+
+                def handoff(fd, uid, gid, mode=mode, action=action, owner_state=owner_state):
+                    self.assertEqual((uid, gid), (owner.uid, -1))
+                    self.assertEqual(stat.S_IMODE(real_fstat(fd).st_mode), mode)
+                    if action == "denied":
+                        raise PermissionError("denied")
+                    if action == "success":
+                        real_fchown(fd, uid, gid)
+                        owner_state["uid"] = uid
+
+                with (
+                    patch("wudup.db.os.geteuid", return_value=0),
+                    patch.object(Path, "lstat", root_lstat),
+                    patch("wudup.db.os.fstat", side_effect=lambda fd: directory_metadata(real_fstat(fd))),
+                    patch("wudup.db.os.fchown", side_effect=handoff) as chown,
+                ):
+                    if action == "success":
+                        with open_db(self.path, owner_uid=owner.uid) as conn:
+                            init_db(conn)
+                            # An existing directory is skipped by the updater's
+                            # later ownership handoff; repair must handle it.
+                            apply_sqlite_owner(self.path, owner, chown_parent=False)
+                        self.assertEqual(self.path.parent.stat().st_uid, owner.uid)
+                        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
+                        self.assert_private((self.path,))
+                        with open_db(self.path, owner_uid=owner.uid):
+                            pass  # Reopening must not repeat the ownership transfer.
+                    else:
+                        with patch("wudup.db.sqlite3.connect") as connect:
+                            with self.assertRaisesRegex(OSError, "configured owner"):
+                                connect_db(self.path, owner_uid=owner.uid)
+                            connect.assert_not_called()
+                        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), mode)
+                    chown.assert_called_once()
+
+    def test_root_preserves_traversable_directory_with_distinct_configured_owner(self) -> None:
+        self.path.parent.mkdir()
+        self.path.parent.chmod(0o755)
+        real_lstat = Path.lstat
+
+        def root_lstat(path):
+            metadata = real_lstat(path)
+            if path == self.path.parent:
+                fields = list(metadata)
+                fields[4] = 0
+                return os.stat_result(fields)
+            return metadata
+
+        with (
+            patch("wudup.db.os.geteuid", return_value=0),
+            patch.object(Path, "lstat", root_lstat),
+            patch("wudup.db.os.fchown") as chown,
+            patch("wudup.db.os.fchmod") as chmod,
+        ):
+            with open_db(self.path, owner_uid=os.getuid() or 1000) as conn:
+                init_db(conn)
+            self.assertEqual(self.path.parent.lstat().st_uid, 0)
+            self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o755)
+            chown.assert_not_called()
+            chmod.assert_not_called()
+
+    def test_foreign_writable_directory_is_not_repaired(self) -> None:
+        self.path.parent.mkdir()
+        self.path.parent.chmod(0o770)
+        with self.foreign_owner(self.path.parent), patch("wudup.db.os.fchmod") as chmod:
+            with self.assertRaisesRegex(OSError, "Could not protect"):
+                connect_db(self.path)
+            chmod.assert_not_called()
+        self.assertFalse(self.path.exists())
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o770)
+
+    def test_rejects_shared_writable_ancestors_without_chmod(self) -> None:
+        self.path.parent.mkdir()
+        for mode in (0o775, 0o777):
+            with self.subTest(mode=mode):
+                self.root.chmod(mode)
+                try:
+                    with self.assertRaisesRegex(OSError, "Set WUD_DB_PATH"):
+                        connect_db(self.path)
+                    self.assertFalse(self.path.exists())
+                    self.assertEqual(stat.S_IMODE(self.root.stat().st_mode), mode)
+                finally:
+                    self.root.chmod(0o700)
+
+    def test_directory_replacement_before_repair_does_not_chmod_target(self) -> None:
+        self.path.parent.mkdir()
+        self.path.parent.chmod(0o770)
+        target = self.root / "unrelated"
+        target.mkdir()
+        target.chmod(0o775)
+        real_open = os.open
+
+        def racing_open(path, flags, *args):
+            if path == self.path.parent:
+                path.rmdir()
+                path.symlink_to(target, target_is_directory=True)
+            return real_open(path, flags, *args)
+
+        with (
+            patch("wudup.db.os.open", side_effect=racing_open),
+            patch("wudup.db.sqlite3.connect") as connect,
+        ):
+            with self.assertRaisesRegex(OSError, "Could not protect"):
+                connect_db(self.path)
+            connect.assert_not_called()
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o775)
+
+    def test_sticky_database_directory_is_not_repaired(self) -> None:
+        self.path.parent.mkdir()
+        self.path.parent.chmod(0o1777)
+        with self.assertRaisesRegex(OSError, "Could not protect"):
+            connect_db(self.path)
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o1777)
 
     def test_resolves_parent_alias_and_preserves_configured_owner_handoff(self) -> None:
         self.path.parent.mkdir()
