@@ -4,6 +4,23 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.59.8](https://github.com/magrhino/wudup/compare/v0.59.7...v0.59.8) (2026-09-14)
+
+
+### Bug Fixes
+
+* **db:** repair database directory permissions on startup ([#667](https://github.com/magrhino/wudup/issues/667)) ([83c1ab8](https://github.com/magrhino/wudup/commit/83c1ab82821ff76073bd42611ae9e85a914cf6be))
+
+
+### Dependencies
+
+* **deps-dev:** bump @playwright/test ([#665](https://github.com/magrhino/wudup/issues/665)) ([6c43c9c](https://github.com/magrhino/wudup/commit/6c43c9c918252024b071ff297df11f619f8772ee))
+* **deps-dev:** bump ruff in the python-development group ([#661](https://github.com/magrhino/wudup/issues/661)) ([21ad1a7](https://github.com/magrhino/wudup/commit/21ad1a71ccfb0b52759f54a44d655604a74fd9d9))
+* **deps:** bump anyio in the python-production group ([#660](https://github.com/magrhino/wudup/issues/660)) ([c3f96b2](https://github.com/magrhino/wudup/commit/c3f96b2e7d5bc1a400adc7efbc1dba00c0ef66ff))
+* **deps:** bump nanoid from 3.3.17 to 3.3.19 in /webui ([#663](https://github.com/magrhino/wudup/issues/663)) ([81e6264](https://github.com/magrhino/wudup/commit/81e62645ca104dd236883ba107549abd5a085378))
+* **deps:** bump the github-actions group with 2 updates ([#666](https://github.com/magrhino/wudup/issues/666)) ([384b97b](https://github.com/magrhino/wudup/commit/384b97b17bd38a5fa814b1ba3dafac2563e77ed1))
+* **deps:** bump the npm-production group in /webui with 2 updates ([#664](https://github.com/magrhino/wudup/issues/664)) ([fd53e0d](https://github.com/magrhino/wudup/commit/fd53e0d386d88e9f478d406c02c66af40d51464a))
+
 ## [0.59.7](https://github.com/magrhino/wudup/compare/v0.59.6...v0.59.7) (2026-09-13)
 
 
