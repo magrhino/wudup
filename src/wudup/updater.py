@@ -246,14 +246,19 @@ class UpdateFromWudRunner(
             )
 
             stack_statuses = self._preflight_matching_stack_digests(matches)
-            if stack_statuses:
-                exclusion_statuses = {
-                    update.source_line: StackStatus("failure", "preflight-skipped")
-                    for update in exclusion_updates
-                }
-            else:
-                exclusion_statuses = self._apply_tag_exclusions(exclusion_updates)
-                stack_statuses = self._update_matching_stacks(matches)
+            exclusion_statuses = self._apply_tag_exclusions([
+                update for update in exclusion_updates
+                if update.stack.index not in stack_statuses
+            ])
+            exclusion_statuses.update({
+                update.source_line: StackStatus("failure", "preflight-skipped")
+                for update in exclusion_updates
+                if update.stack.index in stack_statuses
+            })
+            stack_statuses.update(self._update_matching_stacks([
+                match for match in matches
+                if match.stack.index not in stack_statuses
+            ]))
 
             self._reconcile_pending_entries(
                 audit_parsed,
@@ -510,14 +515,9 @@ class UpdateFromWudRunner(
         }
         self.preflight_skipped_pending_line_numbers = {
             match.target.line_no for match in matches
+            if match.stack.index in stale_statuses
         } - definitively_stale_lines - integrity_failed_lines
-        return {
-            stack.index: stale_statuses.get(
-                stack.index,
-                StackStatus("failure", "preflight-skipped"),
-            )
-            for stack in stacks
-        }
+        return stale_statuses
 
     def _reconcile_pending_entries(
         self,
@@ -640,19 +640,20 @@ class UpdateFromWudRunner(
         if fail_count:
             updater_audit.finish_audit_run(self, "failure")
             error_report = self._write_error_report()
+            summary = self._failure_summary(fail_count)
             if error_report is not None:
                 self.log.error(
-                    f"Completed with {fail_count} failure(s). "
+                    f"{summary} "
                     f"See log: {self.log_file}; error report: {error_report}"
                 )
             else:
                 self.log.error(
-                    f"Completed with {fail_count} failure(s). See log: {self.log_file}"
+                    f"{summary} See log: {self.log_file}"
                 )
             self._progress(
                 "completion",
                 "failure",
-                f"Updater completed with {fail_count} failure(s).",
+                summary,
                 matches=matches,
             )
             return 1

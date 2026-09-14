@@ -16,6 +16,7 @@ from .updater_matching import (
     _stacks_to_update,
 )
 from .updater_models import (
+    STALE_PENDING_DIGEST_REASON,
     DigestPinUpdate,
     FailureRecord,
     Match,
@@ -26,6 +27,28 @@ from .wud_file import ParsedWudFile, WudTarget
 
 
 class _RunnerOutputMixin:
+    def _failure_summary(self, fail_count: int) -> str:
+        failed_services = sorted({
+            f"{failure.stack.name}/{service}"
+            for failure in self.failures
+            for service in (failure.services or ("stack",))
+        })
+        refresh_services = sorted({
+            f"{failure.stack.name}/{service}"
+            for failure in self.failures
+            if failure.reason == STALE_PENDING_DIGEST_REASON
+            for service in (failure.services or ("stack",))
+        })
+        summary = f"Completed with {fail_count} failure(s)."
+        if failed_services:
+            summary += f" Failed: {', '.join(failed_services)}."
+        if refresh_services:
+            summary += (
+                f" Refresh pending updates for: {', '.join(refresh_services)};"
+                " then retry."
+            )
+        return summary
+
     def _write_error_report(self) -> Path | None:
         if not self.failures:
             return None

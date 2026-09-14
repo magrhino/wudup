@@ -83,7 +83,7 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             self.calls(),
             r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
         )
-    def test_stale_digest_blocks_tag_exclusion_rewrite_and_recreate(self) -> None:
+    def test_stale_digest_allows_unaffected_tag_exclusion(self) -> None:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"
             "ghcr.io/acme/stale:latest@sha256:stale\n",
@@ -96,6 +96,54 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.make_stack(
             "stale",
             [("app", "ghcr.io/acme/stale:latest", "cid-stale")],
+        )
+        self.set_image_state(
+            "ghcr.io/acme/stale:latest",
+            "sha256:old",
+            "sha256:old-index",
+        )
+        self.set_manifest_stdout(
+            "ghcr.io/acme/stale:latest",
+            manifest_index_digest("sha256:moved", "sha256:moved-child"),
+        )
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "",
+        )
+        compose_text = (exclusion_stack / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("wud.tag.exclude", compose_text)
+        self.assertIn("up -d", self.calls())
+        pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
+        self.assertEqual(
+            [(row["status"], row["status_reason"]) for row in pending],
+            [
+                ("resolved", "tag-excluded"),
+                ("failed", "stale-pending-digest"),
+            ],
+        )
+    def test_stale_digest_blocks_same_stack_tag_exclusion(self) -> None:
+        self.wud_file.write_text(
+            "repo/excluded:1.0 tag=2.0\n"
+            "ghcr.io/acme/stale:latest@sha256:stale\n",
+            encoding="utf-8",
+        )
+        exclusion_stack = self.make_stack(
+            "excluded",
+            [
+                ("app", "repo/excluded:1.0", "cid-excluded"),
+                ("stale", "ghcr.io/acme/stale:latest", "cid-stale"),
+            ],
         )
         self.set_image_state(
             "ghcr.io/acme/stale:latest",

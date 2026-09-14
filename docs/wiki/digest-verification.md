@@ -13,6 +13,13 @@ the digest WUD requested. Successful verification lets the updater recreate the
 matched service or stack and remove the todo entry. A proven mismatch leaves the
 entry pending and skips the recreate.
 
+Before updating, digest preflight checks each selected stack. A stale digest or
+manifest integrity failure blocks only the affected Compose stack; other stacks
+continue updating. Services in the blocked stack stay unchanged together. The
+final summary names failed services and identifies stale updates to refresh
+before retrying. Stale pending lines are removed unless another matched image
+still needs the same line.
+
 ## Verification Sources
 
 The fastest check uses Docker's local image metadata. If any local

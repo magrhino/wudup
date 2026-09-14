@@ -431,7 +431,16 @@ def _event_status_for_match(
     }.get(runner._preflight_expected_digest_outcome(match))
     if reason:
         return StackStatus("failure", reason)
-    if match.target.line_no in runner.preflight_skipped_pending_line_numbers:
+    if (
+        match.target.line_no in runner.preflight_skipped_pending_line_numbers
+        and any(
+            key[0] == match.stack.index
+            for key in (
+                runner.preflight_digest_outcomes.stale
+                | runner.preflight_digest_outcomes.failed
+            )
+        )
+    ):
         return StackStatus("failure", "preflight-skipped")
     if status.status != "failure" or not runner._expected_digest_failed_in_stack(
         match.stack
