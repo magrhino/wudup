@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest import mock
 
 from tests.update_from_wud_helpers import (
@@ -83,12 +84,47 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             self.calls(),
             r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
         )
-    def test_stale_digest_allows_unaffected_tag_exclusion(self) -> None:
+    def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"
             "ghcr.io/acme/stale:latest@sha256:stale\n",
             encoding="utf-8",
         )
+        self.set_image_state(
+            "ghcr.io/acme/stale:latest",
+            "sha256:old",
+            "sha256:old-index",
+        )
+        self.set_manifest_stdout(
+            "ghcr.io/acme/stale:latest",
+            manifest_index_digest("sha256:moved", "sha256:moved-child"),
+        )
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        return result
+
+    def _assert_exclusion_result(self, stack: Path, *, skipped: bool) -> None:
+        expected_pending = "repo/excluded:1.0 tag=2.0\n" if skipped else ""
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), expected_pending)
+        compose_text = (stack / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertEqual("wud.tag.exclude" in compose_text, not skipped)
+        pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
+        expected_exclusion = (
+            ("failed", "preflight-skipped") if skipped else ("resolved", "tag-excluded")
+        )
+        self.assertEqual(
+            [(row["status"], row["status_reason"]) for row in pending],
+            [expected_exclusion, ("failed", "stale-pending-digest")],
+        )
+
+    def test_stale_digest_allows_unaffected_tag_exclusion(self) -> None:
         exclusion_stack = self.make_stack(
             "excluded",
             [("app", "repo/excluded:1.0", "cid-excluded")],
@@ -97,47 +133,10 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             "stale",
             [("app", "ghcr.io/acme/stale:latest", "cid-stale")],
         )
-        self.set_image_state(
-            "ghcr.io/acme/stale:latest",
-            "sha256:old",
-            "sha256:old-index",
-        )
-        self.set_manifest_stdout(
-            "ghcr.io/acme/stale:latest",
-            manifest_index_digest("sha256:moved", "sha256:moved-child"),
-        )
-
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
-        )
-
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
-        self.assertEqual(
-            self.wud_file.read_text(encoding="utf-8"),
-            "",
-        )
-        compose_text = (exclusion_stack / "docker-compose.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("wud.tag.exclude", compose_text)
+        self._run_stale_exclusion()
+        self._assert_exclusion_result(exclusion_stack, skipped=False)
         self.assertIn("up -d", self.calls())
-        pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
-        self.assertEqual(
-            [(row["status"], row["status_reason"]) for row in pending],
-            [
-                ("resolved", "tag-excluded"),
-                ("failed", "stale-pending-digest"),
-            ],
-        )
     def test_stale_digest_blocks_same_stack_tag_exclusion(self) -> None:
-        self.wud_file.write_text(
-            "repo/excluded:1.0 tag=2.0\n"
-            "ghcr.io/acme/stale:latest@sha256:stale\n",
-            encoding="utf-8",
-        )
         exclusion_stack = self.make_stack(
             "excluded",
             [
@@ -145,47 +144,10 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
                 ("stale", "ghcr.io/acme/stale:latest", "cid-stale"),
             ],
         )
-        self.set_image_state(
-            "ghcr.io/acme/stale:latest",
-            "sha256:old",
-            "sha256:old-index",
-        )
-        self.set_manifest_stdout(
-            "ghcr.io/acme/stale:latest",
-            manifest_index_digest("sha256:moved", "sha256:moved-child"),
-        )
-
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
-        )
-
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
-        self.assertEqual(
-            self.wud_file.read_text(encoding="utf-8"),
-            "repo/excluded:1.0 tag=2.0\n",
-        )
-        compose_text = (exclusion_stack / "docker-compose.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("wud.tag.exclude", compose_text)
+        self._run_stale_exclusion()
+        self._assert_exclusion_result(exclusion_stack, skipped=True)
         self.assertNotRegex(self.calls(), r"compose -f .* (?:pull|stop|up -d)")
-        pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
-        self.assertEqual(
-            [(row["status"], row["status_reason"]) for row in pending],
-            [
-                ("failed", "preflight-skipped"),
-                ("failed", "stale-pending-digest"),
-            ],
-        )
     def test_shared_exclusion_attributes_skip_to_blocked_stack(self) -> None:
-        self.wud_file.write_text(
-            "repo/excluded:1.0 tag=2.0\n"
-            "ghcr.io/acme/stale:latest@sha256:stale\n",
-            encoding="utf-8",
-        )
         healthy_stack = self.make_stack(
             "a-healthy", [("app", "repo/excluded:1.0", "cid-healthy")]
         )
@@ -196,32 +158,8 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
                 ("stale", "ghcr.io/acme/stale:latest", "cid-stale"),
             ],
         )
-        self.set_image_state(
-            "ghcr.io/acme/stale:latest",
-            "sha256:old",
-            "sha256:old-index",
-        )
-        self.set_manifest_stdout(
-            "ghcr.io/acme/stale:latest",
-            manifest_index_digest("sha256:moved", "sha256:moved-child"),
-        )
-
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
-        )
-
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
-        self.assertEqual(
-            self.wud_file.read_text(encoding="utf-8"),
-            "repo/excluded:1.0 tag=2.0\n",
-        )
-        compose_text = (exclusion_stack / "docker-compose.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("wud.tag.exclude", compose_text)
+        result = self._run_stale_exclusion()
+        self._assert_exclusion_result(exclusion_stack, skipped=True)
         self.assertIn("wud.tag.exclude", (healthy_stack / "docker-compose.yml").read_text())
         self.assertNotRegex(self.calls(), r"/z-blocked\tcompose -f .* (?:pull|stop|up -d)")
         self.assertRegex(self.calls(), r"/a-healthy\tcompose -f .* up -d")
@@ -231,13 +169,6 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
         self.assertEqual(pending[0]["stack_name"], "z-blocked")
         self.assertEqual(pending[0]["service_name"], "app")
-        self.assertEqual(
-            [(row["status"], row["status_reason"]) for row in pending],
-            [
-                ("failed", "preflight-skipped"),
-                ("failed", "stale-pending-digest"),
-            ],
-        )
     def test_exclude_tag_line_does_not_recreate_already_excluded_service(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
