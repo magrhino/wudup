@@ -82,7 +82,7 @@ class _RunnerOperationsMixin:
     def _apply_tag_exclusions(
         self,
         updates: Sequence[TagExclusionUpdate],
-    ) -> dict[int, StackStatus]:
+    ) -> dict[tuple[int, int], StackStatus]:
         return updater_tag_exclusions.apply_tag_exclusions(self, updates)
 
     def _existing_exact_tag_exclusions(
@@ -100,7 +100,7 @@ class _RunnerOperationsMixin:
     def _recreate_tag_exclusion_services(
         self,
         updates: Sequence[TagExclusionUpdate],
-        statuses: dict[int, StackStatus],
+        statuses: dict[tuple[int, int], StackStatus],
     ) -> None:
         updater_tag_exclusions.recreate_tag_exclusion_services(
             self,
@@ -117,7 +117,7 @@ class _RunnerOperationsMixin:
     def _mark_successful_tag_exclusions(
         self,
         updates: Sequence[TagExclusionUpdate],
-        statuses: Mapping[int, StackStatus],
+        statuses: Mapping[tuple[int, int], StackStatus],
     ) -> None:
         updater_tag_exclusions.mark_successful_tag_exclusions(self, updates, statuses)
 

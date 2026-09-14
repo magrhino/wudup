@@ -143,12 +143,24 @@ def mark_tag_exclusions_pending(
 def mark_successful_tag_exclusions(
     runner: Any,
     updates: Sequence[TagExclusionUpdate],
-    statuses: Mapping[int, StackStatus],
+    statuses: Mapping[tuple[int, int], StackStatus],
 ) -> None:
     if runner.audit_conn is None or runner.audit_run_id is None:
         return
-    for line_no, update in _first_tag_exclusion_by_line(updates).items():
-        status = statuses.get(line_no, StackStatus("failure", "missing"))
+    by_line: dict[int, tuple[TagExclusionUpdate, StackStatus]] = {}
+    for update in updates:
+        status = statuses.get(
+            (update.stack.index, update.source_line), StackStatus("failure", "missing")
+        )
+        previous = by_line.get(update.source_line)
+        if (
+            previous is None
+            or previous[1].status == "success"
+            or (previous[1].reason == "preflight-skipped"
+                and status.status != "success" and status.reason != "preflight-skipped")
+        ):
+            by_line[update.source_line] = (update, status)
+    for line_no, (update, status) in by_line.items():
         update_pending_update(
             runner.audit_conn,
             run_id=runner.audit_run_id,
@@ -431,7 +443,16 @@ def _event_status_for_match(
     }.get(runner._preflight_expected_digest_outcome(match))
     if reason:
         return StackStatus("failure", reason)
-    if match.target.line_no in runner.preflight_skipped_pending_line_numbers:
+    if (
+        match.target.line_no in runner.preflight_skipped_pending_line_numbers
+        and any(
+            key[0] == match.stack.index
+            for key in (
+                runner.preflight_digest_outcomes.stale
+                | runner.preflight_digest_outcomes.failed
+            )
+        )
+    ):
         return StackStatus("failure", "preflight-skipped")
     if status.status != "failure" or not runner._expected_digest_failed_in_stack(
         match.stack

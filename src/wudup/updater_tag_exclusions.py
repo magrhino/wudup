@@ -277,10 +277,10 @@ def can_apply_tag_exclusions(
 def apply_tag_exclusions(
     runner: Any,
     updates: Sequence[TagExclusionUpdate],
-) -> dict[int, StackStatus]:
+) -> dict[tuple[int, int], StackStatus]:
     statuses = {
-        line_no: StackStatus("success", "tag-excluded")
-        for line_no in {update.source_line for update in updates}
+        (update.stack.index, update.source_line): StackStatus("success", "tag-excluded")
+        for update in updates
     }
     if not updates:
         return statuses
@@ -299,7 +299,7 @@ def apply_tag_exclusions(
                 f"[{stack.name}] Could not safely write wud.tag.exclude: {exc}"
             )
             for update in stack_updates:
-                statuses[update.source_line] = StackStatus(
+                statuses[(update.stack.index, update.source_line)] = StackStatus(
                     "failure",
                     "tag-exclusion-label-failed",
                 )
@@ -307,7 +307,7 @@ def apply_tag_exclusions(
         except OSError as exc:
             runner.log.error(f"[{stack.name}] Could not write wud.tag.exclude: {exc}")
             for update in stack_updates:
-                statuses[update.source_line] = StackStatus(
+                statuses[(update.stack.index, update.source_line)] = StackStatus(
                     "failure",
                     "tag-exclusion-label-failed",
                 )
@@ -353,7 +353,7 @@ def record_tag_exclusion_rules(
 def recreate_tag_exclusion_services(
     runner: Any,
     updates: Sequence[TagExclusionUpdate],
-    statuses: dict[int, StackStatus],
+    statuses: dict[tuple[int, int], StackStatus],
 ) -> None:
     for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
         services = tuple(sorted({update.service for update in stack_updates}))
@@ -380,7 +380,7 @@ def recreate_tag_exclusion_services(
         ):
             continue
         for update in stack_updates:
-            statuses[update.source_line] = StackStatus(
+            statuses[(update.stack.index, update.source_line)] = StackStatus(
                 "failure",
                 "tag-exclusion-recreate-failed",
             )
@@ -396,7 +396,7 @@ def mark_tag_exclusions_pending(
 def mark_successful_tag_exclusions(
     runner: Any,
     updates: Sequence[TagExclusionUpdate],
-    statuses: Mapping[int, StackStatus],
+    statuses: Mapping[tuple[int, int], StackStatus],
 ) -> None:
     updater_audit.mark_successful_tag_exclusions(runner, updates, statuses)
 

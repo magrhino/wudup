@@ -414,7 +414,7 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(pending[0]["status"], "failed")
         self.assertEqual(pending[0]["status_reason"], "stale-pending-digest")
-    def test_later_stale_stack_blocks_all_stack_mutation(self) -> None:
+    def test_later_stale_stack_allows_unaffected_stack_update(self) -> None:
         self.wud_file.write_text(
             "ghcr.io/acme/current:latest@sha256:current\n"
             "ghcr.io/acme/stale:latest@sha256:stale\n",
@@ -447,22 +447,28 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
             manifest_index_digest("sha256:moved", "sha256:moved-child"),
         )
 
+        self.set_image_after_pull(
+            "ghcr.io/acme/current:latest", "sha256:new-current", "sha256:current"
+        )
         status, stdout, stderr = self.run_direct()
 
         self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(
             self.wud_file.read_text(encoding="utf-8"),
-            "ghcr.io/acme/current:latest@sha256:current\n",
+            "",
         )
         calls = self.calls()
         self.assertIn("manifest inspect ghcr.io/acme/current:latest", calls)
         self.assertIn("manifest inspect ghcr.io/acme/stale:latest", calls)
-        self.assertNotRegex(calls, r"compose -f .* (?:pull|stop|up -d)")
+        self.assertIn("pull app", calls)
+        self.assertNotRegex(calls, r"/z-stale\tcompose -f .* (?:pull|stop|up -d)")
+        self.assertIn("Completed with 1 failure(s). Failed: z-stale/app.", stderr)
+        self.assertIn("Refresh pending updates for: z-stale/app; then retry.", stderr)
         pending = self.db_rows("SELECT * FROM pending_updates ORDER BY line_no")
         self.assertEqual(
             [(row["status"], row["status_reason"]) for row in pending],
             [
-                ("failed", "preflight-skipped"),
+                ("resolved", "updated"),
                 ("failed", "stale-pending-digest"),
             ],
         )
@@ -496,11 +502,14 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
             manifest_index_digest("sha256:moved", "sha256:moved-child"),
         )
 
+        self.set_image_after_pull(
+            "ghcr.io/acme/app:latest", "sha256:new-current", "sha256:shared"
+        )
         status, stdout, stderr = self.run_direct()
 
         self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), pending_line)
-        self.assertNotRegex(self.calls(), r"compose -f .* (?:pull|stop|up -d)")
+        self.assertIn("pull app", self.calls())
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(pending[0]["status_reason"], "preflight-skipped")
         events = self.db_rows("SELECT * FROM update_events ORDER BY stack_name")
@@ -510,7 +519,7 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
                 for row in events
             },
             {
-                "a-current": "preflight-skipped",
+                "a-current": "updated",
                 "z-stale": "stale-pending-digest",
             },
         )

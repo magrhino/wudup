@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from . import updater_logging, updater_tag_exclusions
@@ -16,9 +16,11 @@ from .updater_matching import (
     _stacks_to_update,
 )
 from .updater_models import (
+    STALE_PENDING_DIGEST_REASON,
     DigestPinUpdate,
     FailureRecord,
     Match,
+    StackStatus,
     TagExclusionUpdate,
     UpdaterError,
 )
@@ -26,6 +28,47 @@ from .wud_file import ParsedWudFile, WudTarget
 
 
 class _RunnerOutputMixin:
+    def _failure_summary(
+        self,
+        fail_count: int,
+        exclusion_updates: Sequence[TagExclusionUpdate],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
+    ) -> str:
+        failed_services = sorted({
+            f"{failure.stack.name}/{service}"
+            for failure in self.failures
+            for service in (failure.services or ("stack",))
+        } | {
+            update.service_key for update in exclusion_updates
+            if (status := exclusion_statuses[(update.stack.index, update.source_line)]).status
+            != "success" and status.reason != "preflight-skipped"
+        })
+        skipped_services = sorted({
+            update.service_key for update in exclusion_updates
+            if exclusion_statuses[(update.stack.index, update.source_line)].reason
+            == "preflight-skipped"
+        })
+        refresh_services = sorted({
+            f"{failure.stack.name}/{service}"
+            for failure in self.failures
+            if failure.reason == STALE_PENDING_DIGEST_REASON
+            for service in (failure.services or ("stack",))
+        })
+        summary = f"Completed with {fail_count} failure(s)."
+        if failed_services:
+            summary += f" Failed: {', '.join(failed_services)}."
+        if refresh_services:
+            summary += (
+                f" Refresh pending updates for: {', '.join(refresh_services)};"
+                " then retry."
+            )
+        if skipped_services:
+            summary += (
+                f" Skipped exclusions: {', '.join(skipped_services)}"
+                " (stack preflight failed)."
+            )
+        return summary
+
     def _write_error_report(self) -> Path | None:
         if not self.failures:
             return None

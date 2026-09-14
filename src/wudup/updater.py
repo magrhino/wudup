@@ -246,14 +246,19 @@ class UpdateFromWudRunner(
             )
 
             stack_statuses = self._preflight_matching_stack_digests(matches)
-            if stack_statuses:
-                exclusion_statuses = {
-                    update.source_line: StackStatus("failure", "preflight-skipped")
-                    for update in exclusion_updates
-                }
-            else:
-                exclusion_statuses = self._apply_tag_exclusions(exclusion_updates)
-                stack_statuses = self._update_matching_stacks(matches)
+            exclusion_statuses = self._apply_tag_exclusions([
+                update for update in exclusion_updates
+                if update.stack.index not in stack_statuses
+            ])
+            exclusion_statuses.update({
+                (update.stack.index, update.source_line): StackStatus("failure", "preflight-skipped")
+                for update in exclusion_updates
+                if update.stack.index in stack_statuses
+            })
+            stack_statuses.update(self._update_matching_stacks([
+                match for match in matches
+                if match.stack.index not in stack_statuses
+            ]))
 
             self._reconcile_pending_entries(
                 audit_parsed,
@@ -510,14 +515,9 @@ class UpdateFromWudRunner(
         }
         self.preflight_skipped_pending_line_numbers = {
             match.target.line_no for match in matches
+            if match.stack.index in stale_statuses
         } - definitively_stale_lines - integrity_failed_lines
-        return {
-            stack.index: stale_statuses.get(
-                stack.index,
-                StackStatus("failure", "preflight-skipped"),
-            )
-            for stack in stacks
-        }
+        return stale_statuses
 
     def _reconcile_pending_entries(
         self,
@@ -525,7 +525,7 @@ class UpdateFromWudRunner(
         matches: Sequence[Match],
         stack_statuses: Mapping[int, StackStatus],
         exclusion_updates: Sequence[TagExclusionUpdate],
-        exclusion_statuses: Mapping[int, StackStatus],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
         lock: DirectoryLock,
     ) -> None:
         opts = self.options
@@ -540,7 +540,7 @@ class UpdateFromWudRunner(
             update.source_line
             for update in exclusion_updates
             if exclusion_statuses.get(
-                update.source_line,
+                (update.stack.index, update.source_line),
                 StackStatus("failure", "missing"),
             ).status
             != "success"
@@ -617,7 +617,7 @@ class UpdateFromWudRunner(
         matches: Sequence[Match],
         stack_statuses: Mapping[int, StackStatus],
         exclusion_updates: Sequence[TagExclusionUpdate],
-        exclusion_statuses: Mapping[int, StackStatus],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
         exclusion_failures: Sequence[tuple[WudTarget, str]],
     ) -> int:
         updater_audit.mark_successful_pending(self, matches, stack_statuses)
@@ -635,24 +635,27 @@ class UpdateFromWudRunner(
         ) + sum(
             1
             for status in exclusion_statuses.values()
-            if status.status != "success"
+            if status.status != "success" and status.reason != "preflight-skipped"
         ) + len(exclusion_failures)
-        if fail_count:
+        if fail_count or any(
+            status.reason == "preflight-skipped" for status in exclusion_statuses.values()
+        ):
             updater_audit.finish_audit_run(self, "failure")
             error_report = self._write_error_report()
+            summary = self._failure_summary(fail_count, exclusion_updates, exclusion_statuses)
             if error_report is not None:
                 self.log.error(
-                    f"Completed with {fail_count} failure(s). "
+                    f"{summary} "
                     f"See log: {self.log_file}; error report: {error_report}"
                 )
             else:
                 self.log.error(
-                    f"Completed with {fail_count} failure(s). See log: {self.log_file}"
+                    f"{summary} See log: {self.log_file}"
                 )
             self._progress(
                 "completion",
                 "failure",
-                f"Updater completed with {fail_count} failure(s).",
+                summary,
                 matches=matches,
             )
             return 1
