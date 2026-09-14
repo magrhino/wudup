@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@csstools/postcss-global-data": "^4.0.0",
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/coverage-v8": "^4.1.11",
     "@vue/test-utils": "^2.5.0",
