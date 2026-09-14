@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.59.9](https://github.com/magrhino/wudup/compare/v0.59.8...v0.59.9) (2026-09-14)
+
+
+### Bug Fixes
+
+* **updater:** isolate preflight failures and clarify update results ([#668](https://github.com/magrhino/wudup/issues/668)) ([13483bd](https://github.com/magrhino/wudup/commit/13483bd988b5f38f47157d25b98eab83febe0d64))
+
 ## [0.59.8](https://github.com/magrhino/wudup/compare/v0.59.7...v0.59.8) (2026-09-14)
 
 
