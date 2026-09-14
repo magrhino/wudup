@@ -83,6 +83,16 @@ def _check_database_directory(
         )
 
 
+def _stat_or_create_database_directory(path: Path, *, ancestor: bool) -> os.stat_result:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        # Intermediate parents stay traversable for the configured UID
+        # handoff. Recheck even if another creator wins the mkdir race.
+        path.mkdir(mode=0o755 if ancestor else 0o700, exist_ok=True)
+        return path.lstat()
+
+
 def _private_database_directory(
     path: Path, trusted_uids: set[int], *, owner_uid: int | None = None
 ) -> Path:
@@ -99,13 +109,7 @@ def _private_database_directory(
             directory = directory.parent
             continue
         candidate = directory / component
-        try:
-            metadata = candidate.lstat()
-        except FileNotFoundError:
-            # Intermediate parents stay traversable for the configured UID
-            # handoff. Recheck even if another creator wins the mkdir race.
-            candidate.mkdir(mode=0o755 if pending else 0o700, exist_ok=True)
-            metadata = candidate.lstat()
+        metadata = _stat_or_create_database_directory(candidate, ancestor=bool(pending))
         if stat.S_ISLNK(metadata.st_mode):
             links += 1
             if metadata.st_uid not in trusted_uids or links > 40:
@@ -139,11 +143,17 @@ def _repair_database_directory(
 ) -> None:
     # Only the configured database directory belongs to WUDup. Never repair
     # shared ancestors, foreign owners, or sticky directories such as /tmp.
+    private_owner_handoff = (
+        stat.S_IMODE(metadata.st_mode) == 0o700
+        and owner_uid is not None
+        and os.geteuid() == 0
+        and metadata.st_uid != owner_uid
+    )
     if (
         not stat.S_ISDIR(metadata.st_mode)
         or metadata.st_uid not in trusted_uids
         or metadata.st_mode & stat.S_ISVTX
-        or not metadata.st_mode & 0o022
+        or (not metadata.st_mode & 0o022 and not private_owner_handoff)
     ):
         return
     try:

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from itertools import product
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -369,10 +370,10 @@ assert path.parent.stat().st_mode & 0o777 == 0o700
         owner = OwnerConfig(os.getuid() or 1000, os.getgid())
         real_lstat, real_fstat, real_fchown = Path.lstat, os.fstat, os.fchown
 
-        for action in ("success", "denied", "no_effect"):
-            with self.subTest(action=action):
+        for mode, action in product((0o770, 0o700), ("success", "denied", "no_effect")):
+            with self.subTest(mode=mode, action=action):
                 self.path.unlink(missing_ok=True)
-                self.path.parent.chmod(0o770)
+                self.path.parent.chmod(mode)
                 owner_state = {"uid": 0}
 
                 def directory_metadata(metadata, owner_state=owner_state):
@@ -384,9 +385,9 @@ assert path.parent.stat().st_mode & 0o777 == 0o700
                     metadata = real_lstat(path)
                     return directory_metadata(metadata) if path == self.path.parent else metadata
 
-                def handoff(fd, uid, gid, action=action, owner_state=owner_state):
+                def handoff(fd, uid, gid, mode=mode, action=action, owner_state=owner_state):
                     self.assertEqual((uid, gid), (owner.uid, -1))
-                    self.assertEqual(stat.S_IMODE(real_fstat(fd).st_mode), 0o770)
+                    self.assertEqual(stat.S_IMODE(real_fstat(fd).st_mode), mode)
                     if action == "denied":
                         raise PermissionError("denied")
                     if action == "success":
@@ -408,13 +409,41 @@ assert path.parent.stat().st_mode & 0o777 == 0o700
                         self.assertEqual(self.path.parent.stat().st_uid, owner.uid)
                         self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
                         self.assert_private((self.path,))
+                        with open_db(self.path, owner_uid=owner.uid):
+                            pass  # Reopening must not repeat the ownership transfer.
                     else:
                         with patch("wudup.db.sqlite3.connect") as connect:
                             with self.assertRaisesRegex(OSError, "configured owner"):
                                 connect_db(self.path, owner_uid=owner.uid)
                             connect.assert_not_called()
-                        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o770)
+                        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), mode)
                     chown.assert_called_once()
+
+    def test_root_preserves_traversable_directory_with_distinct_configured_owner(self) -> None:
+        self.path.parent.mkdir()
+        self.path.parent.chmod(0o755)
+        real_lstat = Path.lstat
+
+        def root_lstat(path):
+            metadata = real_lstat(path)
+            if path == self.path.parent:
+                fields = list(metadata)
+                fields[4] = 0
+                return os.stat_result(fields)
+            return metadata
+
+        with (
+            patch("wudup.db.os.geteuid", return_value=0),
+            patch.object(Path, "lstat", root_lstat),
+            patch("wudup.db.os.fchown") as chown,
+            patch("wudup.db.os.fchmod") as chmod,
+        ):
+            with open_db(self.path, owner_uid=os.getuid() or 1000) as conn:
+                init_db(conn)
+            self.assertEqual(self.path.parent.lstat().st_uid, 0)
+            self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o755)
+            chown.assert_not_called()
+            chmod.assert_not_called()
 
     def test_foreign_writable_directory_is_not_repaired(self) -> None:
         self.path.parent.mkdir()

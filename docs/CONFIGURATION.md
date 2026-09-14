@@ -133,8 +133,10 @@ with a pre-created volume directory and upgrades with existing databases. Only
 the database directory is repaired; ancestor directories and unrelated log files
 stay unchanged. When running as root with `OUT_UID` configured, WUDup also assigns
 the repaired directory to that UID before restricting access to `0700`, so the
-configured owner can still reach its database files. The directory's group stays
-unchanged. Use a dedicated directory for `WUD_DB_PATH`
+configured owner can still reach its database files. This ownership handoff also
+applies to a root-owned database directory that is already `0700`. Existing
+traversable directories such as `0755` retain their owner and permissions. The
+directory's group stays unchanged. Use a dedicated directory for `WUD_DB_PATH`
 if other applications need shared access to your logs. Run database clients under
 the same UID (or root); the configured `OUT_UID`/`OUT_GID` ownership handoff remains
 supported. Database files must be regular files without symbolic or hard links.
