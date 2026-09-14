@@ -126,18 +126,27 @@ secret-bearing file.
 
 WUDup creates database files with Unix mode `0600` and tightens
 existing database, WAL, SHM, and rollback-journal files before opening them for
-writes. Newly created database directories use `0700`; existing directories and
-unrelated logs keep their permissions. Run database clients under the same UID
-(or root); the updater's configured `OUT_UID`/`OUT_GID` ownership handoff remains
+writes. Newly created database directories use `0700`. WUDup also repairs an
+existing database directory to `0700` if it allows group/other writes and is owned
+by root, the running WUDup UID, or configured `OUT_UID`. This covers first startup
+with a pre-created volume directory and upgrades with existing databases. Only
+the database directory is repaired; ancestor directories and unrelated log files
+stay unchanged. When running as root with `OUT_UID` configured, WUDup also assigns
+the repaired directory to that UID before restricting access to `0700`, so the
+configured owner can still reach its database files. The directory's group stays
+unchanged. Use a dedicated directory for `WUD_DB_PATH`
+if other applications need shared access to your logs. Run database clients under
+the same UID (or root); the configured `OUT_UID`/`OUT_GID` ownership handoff remains
 supported. Database files must be regular files without symbolic or hard links.
-If a database directory or its ancestors allow group/other writes, set
-`WUD_DB_PATH` to a private directory instead of changing shared log permissions.
+If ancestor directories allow group/other writes, set `WUD_DB_PATH` to a private
+directory under trusted parents. WUDup does not repair sticky shared directories.
 Sticky ancestors such as `/tmp` are allowed above a private database directory.
 Every directory and symbolic link in the path, including alias targets, must be
 owned by root, the running WUDup UID, or the explicitly configured `OUT_UID`.
 Database and sidecar owners must also be one of those trusted UIDs. A private
 directory beneath an untrusted user's directory is rejected because that user
-could replace it. WUDup checks owners without changing existing ownership.
+could replace it. WUDup checks owners before changing permissions or handing off
+a repaired directory to `OUT_UID`.
 The filesystem must enforce these modes. Remove any inherited or named-user ACL
 grants that independently allow other accounts to access the database; WUDup
 does not manage platform-specific ACL policies.

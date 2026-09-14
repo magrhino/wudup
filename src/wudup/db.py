@@ -83,7 +83,9 @@ def _check_database_directory(
         )
 
 
-def _private_database_directory(path: Path, trusted_uids: set[int]) -> Path:
+def _private_database_directory(
+    path: Path, trusted_uids: set[int], *, owner_uid: int | None = None
+) -> Path:
     # Validate from root before descending, including aliases and their targets.
     # Resolving first could hide an attacker-owned directory or chained alias.
     absolute = path.absolute()
@@ -119,17 +121,68 @@ def _private_database_directory(path: Path, trusted_uids: set[int]) -> Path:
             else:
                 pending.extendleft(reversed(target.parts))
             continue
+        if not pending:
+            _repair_database_directory(candidate, metadata, trusted_uids, owner_uid=owner_uid)
+            metadata = candidate.lstat()
         _check_database_directory(metadata, trusted_uids, ancestor=bool(pending))
         directory = candidate
     _check_database_directory(directory.lstat(), trusted_uids, ancestor=False)
     return directory
 
 
+def _repair_database_directory(
+    path: Path,
+    metadata: os.stat_result,
+    trusted_uids: set[int],
+    *,
+    owner_uid: int | None = None,
+) -> None:
+    # Only the configured database directory belongs to WUDup. Never repair
+    # shared ancestors, foreign owners, or sticky directories such as /tmp.
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid not in trusted_uids
+        or metadata.st_mode & stat.S_ISVTX
+        or not metadata.st_mode & 0o022
+    ):
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            actual = os.fstat(fd)
+            if (
+                (actual.st_dev, actual.st_ino) != (metadata.st_dev, metadata.st_ino)
+                or actual.st_uid not in trusted_uids
+            ):
+                raise OSError("The database directory changed during startup")
+            # Root must hand the repaired directory to the configured owner too:
+            # handing off only its files would strand them behind root-only 0700.
+            if owner_uid is not None and os.geteuid() == 0 and actual.st_uid != owner_uid:
+                os.fchown(fd, owner_uid, -1)
+                if os.fstat(fd).st_uid != owner_uid:
+                    raise OSError("The database directory owner could not be verified")
+            os.fchmod(fd, 0o700)
+            actual = os.fstat(fd)
+            _check_database_directory(actual, trusted_uids, ancestor=False)
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) != (actual.st_dev, actual.st_ino):
+                raise OSError("The database directory changed during startup")
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise OSError(
+            "Could not protect the database directory. Ensure the WUDup account "
+            "can set the configured owner and owner-only permissions (0700), "
+            "or set WUD_DB_PATH to a "
+            "private directory it owns."
+        ) from exc
+
+
 def _prepare_private_database(path: Path, *, owner_uid: int | None = None) -> Path:
     trusted_uids = {0, os.geteuid()}
     if owner_uid is not None:
         trusted_uids.add(owner_uid)
-    path = _private_database_directory(path.parent, trusted_uids) / path.name
+    path = _private_database_directory(path.parent, trusted_uids, owner_uid=owner_uid) / path.name
     try:
         # SQLite's Unix driver inherits the database mode for new journals,
         # WAL and SHM files. Set it before SQLite can persist any secrets.

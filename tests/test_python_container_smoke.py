@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContainerSmokeTests(unittest.TestCase):
-    def test_health_fixture_has_private_logs_and_configured_owner(self) -> None:
+    def test_health_fixture_exercises_permission_repair_with_configured_owner(self) -> None:
         source = (ROOT / "tests/smoke-container-image.sh").read_text()
         function = re.search(
             r"^smoke_default_web_health\(\)\{.*?^\}", source, re.MULTILINE | re.DOTALL
@@ -46,7 +46,7 @@ class ContainerSmokeTests(unittest.TestCase):
             logs = Path(result.stdout) / "logs"
             args = args_path.read_text().rstrip("\0").split("\0")
             options = list(pairwise(args))
-            self.assertEqual(stat.S_IMODE(logs.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(logs.stat().st_mode), 0o770)
             self.assertIn(("-v", f"{logs}:/logs"), options)
             for name, value in (("OUT_UID", os.getuid()), ("OUT_GID", os.getgid())):
                 self.assertIn(("-e", f"{name}={value}"), options)
