@@ -87,10 +87,45 @@ def _stat_or_create_database_directory(path: Path, *, ancestor: bool) -> os.stat
     try:
         return path.lstat()
     except FileNotFoundError:
-        # Intermediate parents stay traversable for the configured UID
-        # handoff. Recheck even if another creator wins the mkdir race.
-        path.mkdir(mode=0o755 if ancestor else 0o700, exist_ok=True)
+        pass
+    mode = 0o755 if ancestor else 0o700
+    try:
+        path.mkdir(mode=mode)
+    except FileExistsError:
+        # A competing creator owns this result; leave it for normal validation.
         return path.lstat()
+    try:
+        created = path.lstat()
+        if not stat.S_ISDIR(created.st_mode) or created.st_uid != os.geteuid():
+            raise OSError("The new database directory changed during startup")
+        # mkdir applies umask, which can remove even owner read/execute bits.
+        # Bootstrap only our new directory before opening its descriptor.
+        path.chmod(mode, follow_symlinks=False)
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            actual = os.fstat(fd)
+            identity = created.st_dev, created.st_ino, created.st_uid
+            if (actual.st_dev, actual.st_ino, actual.st_uid) != identity:
+                raise OSError("The new database directory changed during startup")
+            os.fchmod(fd, mode)
+            actual = os.fstat(fd)
+            current = path.lstat()
+            if (
+                (actual.st_dev, actual.st_ino, actual.st_uid) != identity
+                or (current.st_dev, current.st_ino, current.st_uid) != identity
+                or stat.S_IMODE(actual.st_mode) != mode
+                or stat.S_IMODE(current.st_mode) != mode
+            ):
+                raise OSError("The new database directory permissions could not be verified")
+            return current
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise OSError(
+            "Could not protect the new database directory. Ensure the WUDup "
+            "account can set directory permissions, or set WUD_DB_PATH to a "
+            "private directory it owns."
+        ) from exc
 
 
 def _private_database_directory(

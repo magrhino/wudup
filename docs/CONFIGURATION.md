@@ -126,8 +126,12 @@ secret-bearing file.
 
 WUDup creates database files with Unix mode `0600` and tightens
 existing database, WAL, SHM, and rollback-journal files before opening them for
-writes. Newly created database directories use `0700`. WUDup also repairs an
-existing database directory to `0700` if it allows group/other writes and is owned
+writes. Newly created database directories use `0700`, with newly created
+intermediate directories set to `0755` so the configured owner can traverse them.
+WUDup enforces these modes even with a restrictive umask, without changing the
+process-wide umask. Existing intermediate directories keep their permissions.
+WUDup also repairs an existing database directory to `0700` if it allows
+group/other writes and is owned
 by root, the running WUDup UID, or configured `OUT_UID`. This covers first startup
 with a pre-created volume directory and upgrades with existing databases. Only
 the database directory is repaired; ancestor directories and unrelated log files

@@ -166,14 +166,14 @@ class DatabasePermissionsTests(unittest.TestCase):
         with self.assertRaisesRegex(OSError, "untrusted or looping"):
             connect_db(alias / self.path.name)
 
-    def test_permissive_umask_creates_private_files_before_secret_persistence(self) -> None:
+    def test_umask_creates_usable_directories_and_private_files(self) -> None:
         # Keep process-wide umask changes out of the threaded test process too.
         script = """
 import os, sys
 from pathlib import Path
 from unittest.mock import patch
 from wudup.db import open_db, init_db
-os.umask(int(sys.argv[2], 8))
+original_umask = os.umask(int(sys.argv[2], 8))
 path = Path(sys.argv[1])
 with patch('wudup.db.os.umask', side_effect=AssertionError('global umask change')):
     for _ in range(2):
@@ -186,13 +186,55 @@ with patch('wudup.db.os.umask', side_effect=AssertionError('global umask change'
                 assert Path(f'{path}{suffix}').stat().st_mode & 0o777 == 0o600
             assert conn.execute('SELECT value FROM web_settings').fetchone()[0] == 'example-only-secret'
 assert path.parent.stat().st_mode & 0o777 == 0o700
+os.umask(original_umask)  # Restore access for subprocess coverage's exit-time writes.
 """
-        for mask in ("000", "022", "077"):
+        for mask in ("000", "022", "077", "777"):
             with self.subTest(umask=mask):
                 path = self.root / mask / "nested" / "state" / "wud.sqlite"
                 subprocess.run([sys.executable, "-c", script, str(path), mask], check=True)
                 for parent in (path.parent.parent, path.parent.parent.parent):
-                    self.assertEqual(parent.stat().st_mode & 0o022, 0)
+                    self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755)
+
+    def test_directory_creation_race_preserves_winners_permissions(self) -> None:
+        real_mkdir, real_chmod = Path.mkdir, Path.chmod
+
+        def racing_mkdir(path, *args, **kwargs):
+            if path == self.path.parent:
+                real_mkdir(path, mode=0o750)
+                real_chmod(path, 0o750)
+            return real_mkdir(path, *args, **kwargs)
+
+        with (
+            patch.object(Path, "mkdir", racing_mkdir),
+            patch.object(Path, "chmod", side_effect=AssertionError("changed race winner")),
+            patch("wudup.db.os.fchmod", side_effect=AssertionError("changed race winner")),
+        ):
+            with open_db(self.path) as conn:
+                init_db(conn)
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o750)
+
+    def test_new_directory_replacement_before_open_is_rejected(self) -> None:
+        target = self.root / "unrelated"
+        target.mkdir()
+        target.chmod(0o750)
+        real_open = os.open
+
+        def racing_open(path, flags, *args):
+            if path == self.path.parent:
+                path.rename(self.root / "created")
+                path.symlink_to(target, target_is_directory=True)
+            return real_open(path, flags, *args)
+
+        with (
+            patch("wudup.db.os.open", side_effect=racing_open),
+            patch("wudup.db.os.fchmod") as chmod,
+            patch("wudup.db.sqlite3.connect") as connect,
+        ):
+            with self.assertRaisesRegex(OSError, "Could not protect the new database directory"):
+                connect_db(self.path)
+            chmod.assert_not_called()
+            connect.assert_not_called()
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o750)
 
     def test_existing_database_and_active_sidecars_are_private_before_connect(self) -> None:
         with open_db(self.path) as first:
