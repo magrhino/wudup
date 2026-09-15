@@ -10,6 +10,7 @@ from . import compose_rewrite, updater_audit, updater_logging
 from .command import CommandError
 from .compose import ComposeBindMount, ComposeRuntimePortIssue, ComposeStack
 from .images import image_tag
+from .self_update import is_self_update_target
 from .updater_digest_pin import _digest_pin_match_tag
 from .updater_matching import _preflight_status_reason, _stacks_to_update
 from .updater_models import (
@@ -47,6 +48,71 @@ _ComposePreflightValidator = Callable[
     [Any, ComposeStack, Sequence[Match], _PreflightIssueRecords],
     bool,
 ]
+
+
+def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
+    if runner.options.protected_container is None:
+        return True
+    protected_id = ""
+    identity_error = ""
+    if runner.options.protected_container:
+        try:
+            protected_id = runner.docker.container_id(runner.options.protected_container)
+        except CommandError:
+            pass
+        if not protected_id:
+            identity_error = (
+                "Could not verify the WUDup container identity; no update was applied. "
+                "Check Docker access and WUD_WEB_RESTART_CONTAINER, then retry."
+            )
+    records = _PreflightIssueRecords()
+    stacks = _stacks_to_update(matches)
+    for stack in stacks:
+        stack_matches = _matches_for_stack(matches, stack)
+        message = identity_error
+        protected_services: set[str] = set()
+        if not message:
+            services = _scoped_preflight_services(
+                runner, stack, stack_matches,
+                (item.service for item in stack.service_images),
+            )
+            protected_services = {
+                item.service for item in stack.service_images
+                if item.service in services and is_self_update_target(item.image)
+            }
+            if protected_id:
+                try:
+                    container_ids = runner.compose.ps_quiet_checked(
+                        stack.directory, stack.file, tuple(sorted(services)),
+                        project_directory=stack.project_directory,
+                    )
+                except CommandError:
+                    message = (
+                        "Could not verify whether this update includes the WUDup container; "
+                        "no update was applied. Check Docker access and the Compose "
+                        "configuration, then retry."
+                    )
+                else:
+                    if protected_id in container_ids:
+                        protected_services.update(services)
+        if not message and not protected_services:
+            continue
+        message = f"[{stack.name}] " + (message or (
+            "This update would stop or recreate WUDup itself. "
+            "Use the self-update action for WUDup, or update this stack from "
+            "the host. Remove it from this selection to update other services."
+        ))
+        runner.log.error(message)
+        runner._progress(
+            "preflight", "failure", message, stack=stack.name,
+            services=tuple(sorted(protected_services)), matches=stack_matches,
+        )
+        records.messages_by_stack[stack.index] = [message]
+        records.services_by_stack[stack.index] = protected_services
+    _record_compose_preflight_failures(
+        runner, matches, stacks, records, reason="self-update-recreate-blocked",
+    )
+    return not records.messages_by_stack
 
 
 def validate_tag_manifests(runner: Any, matches: Sequence[Match]) -> bool:

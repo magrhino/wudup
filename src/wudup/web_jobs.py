@@ -890,6 +890,7 @@ def _apply_options(
         metadata_json=metadata_json,
         update_selections=selection_scope.update_selections,
         completed_update_selections=selection_scope.completed_update_selections,
+        protected_container=settings.restart_container,
     )
 
 

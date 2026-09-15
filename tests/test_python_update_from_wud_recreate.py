@@ -21,6 +21,84 @@ from wudup.updater_models import (
 
 
 class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
+    def test_web_apply_protects_self_in_expanded_stack_scope(self) -> None:
+        image = "ghcr.io/magrhino/wudup:latest-trivy"
+        stack = self.make_stack("wud", [
+            ("watcher", "repo/watcher:1.0", "cid-watcher"),
+            ("updater", image, "cid-updater"),
+        ])
+        self.wud_file.write_text("repo/watcher:1.0 2.0\n")
+        (self.fake_root / "containers/cid-watcher.labels").write_text(
+            "WUD-UPDATER-RECREATE-STACK=true\n",
+        )
+        original = (stack / "docker-compose.yml").read_text()
+        runner = self.make_runner(allow_tag_updates=True, db_path=self.db_path)
+        runner.options = replace(runner.options, protected_container="")
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            result = runner.run()
+        self.assertEqual(result, 1)
+        self.assertIn("self-update-recreate-blocked", [f.reason for f in runner.failures])
+        self.assertEqual((stack / "docker-compose.yml").read_text(), original)
+        self.assertEqual(self.wud_file.read_text(), "repo/watcher:1.0 2.0\n")
+        self.assertNotRegex(self.calls(), r"compose -f .* (?:pull|stop|pause|up -d)")
+
+    def test_web_apply_protects_custom_image_by_container_identity(self) -> None:
+        self.make_stack("custom", [("server", "repo/custom:latest", "cid-self")])
+        self.wud_file.write_text("repo/custom:latest\n")
+        runner = self.make_runner(db_path=self.db_path)
+        runner.options = replace(runner.options, protected_container="renamed-server")
+        inspect = runner.docker.inspect
+
+        def inspect_identity(target, fmt):
+            if target == "renamed-server" and fmt == "{{.Id}}":
+                return ["cid-self"]
+            return inspect(target, fmt)
+
+        with (
+            mock.patch.object(runner.docker, "inspect", side_effect=inspect_identity),
+            redirect_stdout(StringIO()), redirect_stderr(StringIO()),
+        ):
+            result = runner.run()
+        self.assertEqual(result, 1)
+        self.assertEqual(runner.failures[0].reason, "self-update-recreate-blocked")
+        self.assertNotRegex(self.calls(), r"compose -f .* (?:pull|stop|pause|up -d)")
+
+    def test_web_apply_allows_scoped_sibling_of_updater(self) -> None:
+        image = "repo/watcher:latest"
+        self.make_stack("wud", [
+            ("watcher", image, "cid-watcher"),
+            ("updater", "ghcr.io/magrhino/wudup:latest", "cid-updater"),
+        ])
+        self.wud_file.write_text(f"{image}\n")
+        self.set_image_state(image, "old")
+        self.set_image_after_pull(image, "new")
+        runner = self.make_runner()
+        runner.options = replace(runner.options, protected_container="updater")
+        with (
+            mock.patch.object(runner.docker, "container_id", return_value="cid-updater"),
+            redirect_stdout(StringIO()), redirect_stderr(StringIO()),
+        ):
+            result = runner.run()
+        self.assertEqual(result, 0)
+        self.assertIn(" stop watcher", self.calls())
+        self.assertNotIn(" stop updater", self.calls())
+        self.assertNotRegex(self.calls(), r"up -d [^\n]*\bupdater\b")
+
+    def test_protected_self_dry_run_does_not_write_audit_or_pending(self) -> None:
+        image = "ghcr.io/magrhino/wudup:latest"
+        self.make_stack("wud", [("updater", image, "cid-updater")])
+        self.wud_file.write_text(f"{image}\n")
+        runner = self.make_runner(db_path=self.db_path)
+        runner.options = replace(
+            runner.options, protected_container="", dry_run=True,
+        )
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            result = runner.run()
+        self.assertEqual(result, 1)
+        self.assertFalse(self.db_path.exists())
+        self.assertEqual(self.wud_file.read_text(), f"{image}\n")
+        self.assertNotRegex(self.calls(), r"compose -f .* (?:pull|stop|pause|up -d)")
+
     def test_verified_image_is_not_repulled_with_always_policy(self) -> None:
         self._assert_recreation_keeps_verified_image(policy="always")
 

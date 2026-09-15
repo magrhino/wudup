@@ -22,7 +22,10 @@ from tests.web_test_helpers import (
 
 from wudup import web_jobs, web_wud_api
 from wudup import web_self_update as self_update_module
+from wudup.command import CommandError, CommandResult
+from wudup.compose import ComposeCli
 from wudup.config import UpdaterConfig
+from wudup.docker_cli import DockerCli
 from wudup.updater_models import CompletedUpdateSelection
 from wudup.web_models import WebApplyJob, WebSettings
 
@@ -58,11 +61,15 @@ def _shared_update_case(
     wud_line: str = "repo/shared:latest",
     compose_image: str = "repo/shared:latest",
     pull_image: str = "repo/shared:latest",
+    update_mode: str = "stop",
+    restart_container: str = "",
 ) -> SimpleNamespace:
     fake_env, fake_root = _fake_docker_env(tmp_path)
     environ = {
         "WUD_WEB_DEV_NO_AUTH": "true",
         "WUD_WEB_MUTATIONS_ENABLED": "true",
+        "WUD_UPDATE_MODE": update_mode,
+        "WUD_WEB_RESTART_CONTAINER": restart_container,
         **fake_env,
     }
     client = _client(tmp_path, environ)
@@ -793,6 +800,86 @@ def test_scoped_apply_updates_shared_stacks_sequentially_and_clears_line(
         for event in backup_result.job["progress"]
         if event["stack"]
     } == {"backup"}
+
+
+@pytest.mark.parametrize("mode", ["stop", "pause", "live"])
+@pytest.mark.parametrize("image", [
+    "ghcr.io/magrhino/wudup:latest-trivy",
+    "ghcr.io/magrhino/wud-updater:v0.24.2",
+])
+def test_apply_job_blocks_self_recreate_before_mutation(
+    tmp_path: Path, mode: str, image: str,
+) -> None:
+    case = _shared_update_case(
+        tmp_path, wud_line=image, compose_image=image, pull_image=image, update_mode=mode,
+    )
+    original_compose = (case.active_dir / "docker-compose.yml").read_text()
+    result = _plan_and_apply(
+        case.client, case.headers, [_selection_for_group(case.client, "active")],
+    )
+    assert result.job["status"] == "failure"
+    assert any(
+        "would stop or recreate WUDup itself" in event["message"]
+        for event in result.job["progress"]
+    )
+    assert case.wud_file.read_text() == case.original
+    assert (case.active_dir / "docker-compose.yml").read_text() == original_compose
+    calls = _fake_docker_calls(case.fake_root)
+    assert not any(
+        mutation in calls for mutation in (" pull ", " stop ", " pause ", " up -d ")
+    )
+
+
+@pytest.mark.parametrize("lookup_result", ["error", "empty", "compose_error"])
+def test_apply_job_fails_closed_when_protected_identity_is_unavailable(
+    tmp_path: Path, monkeypatch, lookup_result: str,
+) -> None:
+    image = "example/custom-updater:latest"
+    case = _shared_update_case(
+        tmp_path, wud_line=image, compose_image=image, pull_image=image,
+        restart_container="renamed-server",
+    )
+    inspect = DockerCli.inspect
+
+    def inspect_identity(docker, target, fmt):
+        if target == "renamed-server" and fmt == "{{.Id}}":
+            if lookup_result == "error":
+                raise CommandError(CommandResult(
+                    ("docker", "inspect"), None, 1, stderr="private daemon detail",
+                ))
+            return ["cid-active"] if lookup_result == "compose_error" else []
+        return inspect(docker, target, fmt)
+
+    monkeypatch.setattr(DockerCli, "inspect", inspect_identity)
+    if lookup_result == "compose_error":
+        def fail_compose_lookup(*_args, **_kwargs):
+            raise CommandError(CommandResult(
+                ("docker", "compose", "ps"), None, 1, stderr="private daemon detail",
+            ))
+
+        monkeypatch.setattr(ComposeCli, "ps_quiet_checked", fail_compose_lookup)
+    original_compose = (case.active_dir / "docker-compose.yml").read_text()
+    result = _plan_and_apply(
+        case.client, case.headers, [_selection_for_group(case.client, "active")],
+    )
+    assert result.job["status"] == "failure"
+    assert result.job["run_id"] is not None
+    expected_message = (
+        "Could not verify whether this update includes the WUDup container"
+        if lookup_result == "compose_error"
+        else "Could not verify the WUDup container identity"
+    )
+    assert any(
+        expected_message in event["message"]
+        for event in result.job["progress"]
+    )
+    assert "private daemon detail" not in str(result.job)
+    assert case.wud_file.read_text() == case.original
+    assert (case.active_dir / "docker-compose.yml").read_text() == original_compose
+    assert not any(
+        mutation in _fake_docker_calls(case.fake_root)
+        for mutation in (" pull ", " stop ", " pause ", " up -d ")
+    )
 
 
 def test_scoped_apply_preserves_completions_for_other_pending_lines(

@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from typing import TYPE_CHECKING
 
-from . import db, updater_audit, updater_logging, wud_file
+from . import db, updater_audit, updater_logging, updater_preflight, wud_file
 from .command import CommandError, CommandRunner
 from .compose import ComposeCli, ComposeDiscoveryError
 from .digest_verifier import DigestVerifier
@@ -371,6 +371,16 @@ class UpdateFromWudRunner(
                 ),
             )
         )
+        if not updater_preflight.validate_self_update_scope(self, preflight_matches):
+            if opts.dry_run:
+                return 1
+            return self._finish_preflight_failure(
+                self._audit_parsed_file(
+                    parsed, [match.target.line_no for match in preflight_matches],
+                ),
+                preflight_matches,
+                skipped_tags,
+            )
         if not self._validate_compose_runtime_ports(preflight_matches):
             if opts.dry_run:
                 self.log.warning(
