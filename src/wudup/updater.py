@@ -132,6 +132,7 @@ class UpdateFromWudRunner(
     def run(self) -> int:
         opts = self.options
         self._validate_options()
+        self.lifecycle.verified_update_scopes.clear()
 
         lock = DirectoryLock(
             opts.wud_file,

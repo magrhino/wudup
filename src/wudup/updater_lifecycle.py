@@ -54,6 +54,7 @@ from .updater_lifecycle_scope import (
     runtime_services_for_scope,
 )
 from .updater_lifecycle_state import _StackUpdateState
+from .updater_matching import _update_services
 from .updater_models import (
     STALE_PENDING_DIGEST_REASON,
     Match,
@@ -74,6 +75,10 @@ class StackLifecycleExecutor(
 ):
     def __init__(self, runner: Any) -> None:
         self.runner = runner
+        # Guarded jobs retain their approved scope through pulls and recreation.
+        self.verified_update_scopes: dict[
+            tuple[int, tuple[str, ...] | None], UpdateScope,
+        ] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.runner, name)
@@ -154,6 +159,17 @@ class StackLifecycleExecutor(
         stack: ComposeStack,
         matches: Sequence[Match],
     ) -> _StackUpdateState | StackStatus:
+        if (
+            self.options.protected_container is not None
+            and (stack.index, _update_services(matches)) not in self.verified_update_scopes
+        ):
+            message = "The update scope was not verified; no container changes were applied."
+            self.log.error(f"[{stack.name}] {message}")
+            self._record_failure(
+                stack, matches, phase="preflight", reason="update-scope-unverified", note=message,
+            )
+            self._progress("preflight", "failure", message, stack=stack.name, matches=matches)
+            return StackStatus("failure", "update-scope-unverified")
         scope = self._update_scope(stack, matches)
         self._log_stack_scope(stack, scope)
 

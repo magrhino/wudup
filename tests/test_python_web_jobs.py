@@ -865,7 +865,7 @@ def test_apply_job_fails_closed_when_protected_identity_is_unavailable(
     assert result.job["status"] == "failure"
     assert result.job["run_id"] is not None
     expected_message = (
-        "Could not verify whether this update includes the WUDup container"
+        "Could not verify the update's recreate scope"
         if lookup_result == "compose_error"
         else "Could not verify the WUDup container identity"
     )

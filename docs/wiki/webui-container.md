@@ -183,6 +183,9 @@ If a runtime target is configured or auto-detected, its container identity and
 the selected Compose containers must be readable; a lookup failure blocks the
 job before mutation. Check Docker access and `WUD_WEB_RESTART_CONTAINER` before
 retrying.
+Recreate-scope discovery also fails closed on lookup errors. Each approved
+scope is retained for execution, so a later label change cannot expand the
+services that the job stops or recreates.
 
 WebUI self-update pulls prepare an image but do not treat `docker restart` as
 adoption. The response verifies the running container image ID after the pull

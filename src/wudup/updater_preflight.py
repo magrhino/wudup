@@ -12,7 +12,12 @@ from .compose import ComposeBindMount, ComposeRuntimePortIssue, ComposeStack
 from .images import image_tag
 from .self_update import is_self_update_target
 from .updater_digest_pin import _digest_pin_match_tag
-from .updater_matching import _preflight_status_reason, _stacks_to_update
+from .updater_lifecycle_scope import runtime_services_for_scope
+from .updater_matching import (
+    _preflight_status_reason,
+    _stacks_to_update,
+    _update_services,
+)
 from .updater_models import (
     ComposeTagRewriteError,
     Match,
@@ -71,11 +76,17 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
         stack_matches = _matches_for_stack(matches, stack)
         message = identity_error
         protected_services: set[str] = set()
+        scope = None
         if not message:
-            services = _scoped_preflight_services(
-                runner, stack, stack_matches,
-                (item.service for item in stack.service_images),
-            )
+            try:
+                scope = runner.lifecycle._update_scope(stack, stack_matches, strict=True)
+            except (CommandError, ValueError):
+                message = (
+                    "Could not verify the update's recreate scope; no update was applied. "
+                    "Check Docker access and the Compose configuration, then retry."
+                )
+        if scope is not None:
+            services = set(runtime_services_for_scope(scope))
             protected_services = {
                 item.service for item in stack.service_images
                 if item.service in services and is_self_update_target(item.image)
@@ -96,6 +107,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                     if protected_id in container_ids:
                         protected_services.update(services)
         if not message and not protected_services:
+            runner.lifecycle.verified_update_scopes[(stack.index, _update_services(stack_matches))] = scope
             continue
         message = f"[{stack.name}] " + (message or (
             "This update would stop or recreate WUDup itself. "
