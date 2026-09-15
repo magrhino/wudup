@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.59.10](https://github.com/magrhino/wudup/compare/v0.59.9...v0.59.10) (2026-09-15)
+
+
+### Bug Fixes
+
+* **webui:** prevent apply jobs from stopping wudup ([#670](https://github.com/magrhino/wudup/issues/670)) ([8716562](https://github.com/magrhino/wudup/commit/871656213d2507e8c2e6fd16d83c768c123bbe5c))
+
 ## [0.59.9](https://github.com/magrhino/wudup/compare/v0.59.8...v0.59.9) (2026-09-14)
 
 
