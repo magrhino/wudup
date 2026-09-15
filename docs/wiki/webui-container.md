@@ -174,6 +174,19 @@ WebUI's plan-first apply flow. Keep the Docker socket or socket proxy, stack
 root, WUD output file, logs, and SQLite database mounted as intended before
 enabling mutation mode.
 
+Normal WebUI apply jobs, including scheduled jobs, reject a recreate scope
+that includes WUDup before changing Compose files or removing pending entries.
+This also covers a sibling service whose stack-level recreate would include
+WUDup. Remove that selection to update other services; use the self-update
+action for WUDup or recreate its stack from the host.
+If a runtime target is configured or auto-detected, its container identity and
+the selected Compose containers must be readable; a lookup failure blocks the
+job before mutation. Check Docker access and `WUD_WEB_RESTART_CONTAINER` before
+retrying.
+Recreate-scope discovery also fails closed on lookup errors. Each approved
+scope is retained for execution, so a later label change cannot expand the
+services that the job stops or recreates.
+
 WebUI self-update pulls prepare an image but do not treat `docker restart` as
 adoption. The response verifies the running container image ID after the pull
 and reports `prepared_only` until an external Compose recreate moves the

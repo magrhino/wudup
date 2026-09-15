@@ -31,13 +31,19 @@ def runtime_services_for_scope(
 
 
 class _UpdateScopeMixin:
-    def _update_scope(self, stack: ComposeStack, matches: Sequence[Match]) -> UpdateScope:
+    def _update_scope(
+        self, stack: ComposeStack, matches: Sequence[Match], *, strict: bool = False,
+    ) -> UpdateScope:
         services = _update_services(matches)
+        if not strict:
+            verified = getattr(self, "verified_update_scopes", {}).get((stack.index, services))
+            if verified is not None:
+                return verified
         if services is None:
             return UpdateScope(
                 services=None,
                 pull_services=None,
-                stop_services=self._stack_stop_services(stack),
+                stop_services=self._stack_stop_services(stack, strict=strict),
                 force_recreate=True,
             )
         network_providers = _network_mode_providers(stack.service_images)
@@ -49,6 +55,7 @@ class _UpdateScopeMixin:
             stack,
             services,
             network_providers,
+            strict=strict,
         )
         if missing_providers:
             lifecycle_services = _ordered_unique((*missing_providers, *lifecycle_services))
@@ -61,7 +68,7 @@ class _UpdateScopeMixin:
             else lifecycle_services
         )
 
-        label_cid = self._stack_recreate_label_cid(stack, lifecycle_services)
+        label_cid = self._stack_recreate_label_cid(stack, lifecycle_services, strict=strict)
         if label_cid:
             return UpdateScope(
                 services=None,
@@ -70,7 +77,7 @@ class _UpdateScopeMixin:
                     f"selected service scope container {label_cid} has "
                     f"{RECREATE_STACK_LABEL}=true"
                 ),
-                stop_services=self._stack_stop_services(stack),
+                stop_services=self._stack_stop_services(stack, strict=strict),
                 force_recreate=False,
             )
         return UpdateScope(
@@ -85,13 +92,16 @@ class _UpdateScopeMixin:
         stack: ComposeStack,
         services: Sequence[str],
         providers: Mapping[str, str],
+        *,
+        strict: bool = False,
     ) -> tuple[str, ...]:
         missing: list[str] = []
         for service in services:
             provider = providers.get(service)
             if not provider or provider in services or provider in missing:
                 continue
-            cids = self.compose.ps_quiet(
+            lookup = self.compose.ps_quiet_checked if strict else self.compose.ps_quiet
+            cids = lookup(
                 stack.directory,
                 stack.file,
                 (provider,),
@@ -101,7 +111,9 @@ class _UpdateScopeMixin:
                 missing.append(provider)
         return tuple(missing)
 
-    def _stack_stop_services(self, stack: ComposeStack) -> tuple[str, ...] | None:
+    def _stack_stop_services(
+        self, stack: ComposeStack, *, strict: bool = False,
+    ) -> tuple[str, ...] | None:
         try:
             services = self.compose.config_services(
                 stack.directory,
@@ -109,8 +121,12 @@ class _UpdateScopeMixin:
                 project_directory=stack.project_directory,
             )
         except CommandError:
+            if strict:
+                raise
             return None
         if not services:
+            if strict:
+                raise ValueError("Compose service discovery returned no services")
             return None
         return tuple(reversed(services))
 
@@ -118,14 +134,18 @@ class _UpdateScopeMixin:
         self,
         stack: ComposeStack,
         services: Sequence[str],
+        *,
+        strict: bool = False,
     ) -> str:
-        for cid in self.compose.ps_quiet(
+        lookup = self.compose.ps_quiet_checked if strict else self.compose.ps_quiet
+        inspect = self.docker.inspect if strict else self.docker.try_inspect
+        for cid in lookup(
             stack.directory,
             stack.file,
             services,
             project_directory=stack.project_directory,
         ):
-            for value in self.docker.try_inspect(cid, RECREATE_STACK_LABEL_FORMAT):
+            for value in inspect(cid, RECREATE_STACK_LABEL_FORMAT):
                 if _label_value_is_true(value):
                     return cid
         return ""

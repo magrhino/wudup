@@ -84,6 +84,8 @@ class UpdaterOptions:
     update_selections: tuple[UpdateSelection, ...] = ()
     completed_update_selections: tuple[CompletedUpdateSelection, ...] = ()
     tag_stream_updates: tuple[TagStreamUpdate, ...] = ()
+    # None disables WebUI self-protection; empty enables image checks without a runtime target.
+    protected_container: str | None = None
 
 
 @dataclass(frozen=True)
