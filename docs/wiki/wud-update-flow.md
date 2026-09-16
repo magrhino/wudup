@@ -52,6 +52,31 @@ WUDup polls WUD's API directly for WebUI release-note notifications. Set
 recreating the stack. In that mode, managed script sync installs no WUD command
 scripts.
 
+## Review updates in the WebUI
+
+On Pending, select stack updates, then choose **Review selected**. The review
+bar stays available while scrolling and shows the eligible update count. Each
+stack also has a **Review … plan** action. Review changes nothing; **Apply** stays
+inside the plan dialog, subject to read-only mode, readiness and fresh-plan checks.
+The dialog scrolls its contents separately from Close and Apply.
+
+**Queue details and actions** explains count scopes and contains rescans and
+selected-entry removal. Search narrows the visible queue; hidden selections still
+participate in review. **Select all** replaces the selection with the currently
+visible selectable updates; **Clear selection** clears hidden selections too.
+Stopped/unverified services are excluded from bulk selection. Stale metadata can
+still block a selected update from review. Counts can overlap or use different
+units, so detected, pending and selectable counts are not additive.
+
+Stack summaries prioritize services, current and target images, operational impact
+and actionable risks. Details retains routine metadata and the full evidence.
+Release advisory cues describe release security evidence; candidate scan cues
+describe image scan results. Neither is a guarantee that an update is safe.
+
+**Refresh current view status** reads current state. **Rescan WUD** asks WUD to
+check registries; **Refresh security scans** requests candidate-image scans.
+After applying, use **History** to inspect the result.
+
 ## Todo File Format
 
 Blank lines and lines beginning with `#` are ignored. Each actionable line starts

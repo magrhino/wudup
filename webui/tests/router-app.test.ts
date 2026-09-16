@@ -525,7 +525,7 @@ describe("app shell", () => {
     expect(scrollIntoView.mock.contexts).toContain(settingsItem?.element);
     loadSettings.mockClear();
     loadCoreUpdateTour.mockClear();
-    await wrapper.find('button[aria-label="Refresh current view"]').trigger("click");
+    await wrapper.find('button[aria-label="Refresh current view status"]').trigger("click");
     expect(loadSettings).toHaveBeenCalledTimes(1);
     expect(loadOnboarding).toHaveBeenCalledTimes(1);
     expect(loadCoreUpdateTour).toHaveBeenCalledTimes(1);
@@ -547,7 +547,7 @@ describe("app shell", () => {
     expect(navItems.some((item) => item.text().includes("Audit log"))).toBe(false);
     expect(wrapper.find("h1").text()).toBe("History");
     loadRuns.mockClear();
-    await wrapper.find('button[aria-label="Refresh current view"]').trigger("click");
+    await wrapper.find('button[aria-label="Refresh current view status"]').trigger("click");
     expect(loadRuns).toHaveBeenCalledTimes(1);
   });
 
@@ -572,7 +572,7 @@ describe("app shell", () => {
     expect(retagsItem?.attributes("aria-current")).toBe("page");
     expect(wrapper.find("h1").text()).toBe("Retags");
     loadRetagTargets.mockClear();
-    await wrapper.find('button[aria-label="Refresh current view"]').trigger("click");
+    await wrapper.find('button[aria-label="Refresh current view status"]').trigger("click");
     expect(loadRetagTargets).toHaveBeenCalledTimes(1);
   });
 });

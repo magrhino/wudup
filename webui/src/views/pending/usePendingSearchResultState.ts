@@ -53,7 +53,7 @@ export function usePendingSearchResultState(
         : "";
     }
     return options.filteredUnmatchedItems.value.length
-      ? `${pluralize(options.filteredUnmatchedItems.value.length, "stale item")} visible`
+      ? `${pluralize(options.filteredUnmatchedItems.value.length, "item")} needing review`
       : "";
   });
 

@@ -219,3 +219,45 @@
     justify-self: start;
   }
 }
+
+/* Keep plan actions outside the scrolling review content. */
+.preflight-scroll-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.preflight-modal-fixed-footer {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+}
+
+.preflight-modal-fixed-footer .preflight-scroll-content {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 2px;
+}
+
+.preflight-modal-fixed-footer > .preflight-footer {
+  position: static;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 12px 0 env(safe-area-inset-bottom);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.preflight-modal-fixed-footer > .preflight-footer .n-button {
+  max-width: 100%;
+  height: auto;
+  min-height: var(--size-touch-target);
+  white-space: normal;
+}
+
+.preflight-modal-fixed-footer > .preflight-footer .n-button__content {
+  white-space: normal;
+  text-align: start;
+}

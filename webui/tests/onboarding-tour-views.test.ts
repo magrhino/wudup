@@ -356,7 +356,7 @@ vi.spyOn(settings, "loadTagExclusions").mockResolvedValue(undefined as any);
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     await flushPromises();
 

@@ -85,7 +85,7 @@ test("static demo renders current pending state in read-only mode", async ({
   ).toBeVisible();
   await expect(page.getByText("8 pending updates")).toBeVisible();
   await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
-  await expect(page.getByText("3 items need review")).toBeVisible();
+  await expect(page.getByText("3 pending lines need review:")).toBeVisible();
   const snoozedPanel = page
     .locator("article")
     .filter({ hasText: "Snoozed pending entries" });
@@ -104,18 +104,22 @@ test("static demo renders current pending state in read-only mode", async ({
     page.getByTitle("ghcr.io/home-assistant/home-assistant:2026.5.1").first(),
   ).toBeVisible();
   await expect(
-    page.getByText("1 verified security update", { exact: true }),
+    page.getByText("1 verified high/critical release update", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Critical security update", { exact: true }).first(),
+    page.getByText("Release advisory: critical", { exact: true }).first(),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: /Preview home plan/ }).click();
+  await page.getByRole("button", { name: /Review home plan/ }).click();
   await expect(page.getByRole("heading", { name: "Apply blocked" })).toBeVisible();
   const applyButton = page
     .getByRole("dialog")
     .getByRole("button", { name: /Apply 1 update/ });
   await expect(applyButton).toBeDisabled();
+  const close = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true });
+  await close.focus();
+  await expect(close).toBeFocused();
+
   await expect(
     page.getByText(
       "The public static demo is read-only. Run WUDup locally to apply changes.",
@@ -248,6 +252,19 @@ test("static demo mobile layout stays within the viewport", async ({ page }) => 
   await expect(page.getByRole("checkbox", { name: /Select stack data/ })).toBeVisible();
   await expectTouchTargetHeight(page, "Pull image");
   await expectNoHorizontalOverflow(page, 390);
+  await expect(page.getByRole("button", { name: "Review selected (0)", exact: true })).toBeDisabled();
+  await expect(page.locator(".stack-card").first()).toBeInViewport();
+  await page.locator(".stack-card").last().scrollIntoViewIfNeeded();
+  await expect(page.getByRole("region", { name: "Review updates", exact: true })).toBeInViewport();
+  await page.getByRole("button", { name: "Review data plan", exact: true }).click();
+  const closeReview = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true });
+  await expect(closeReview).toBeInViewport();
+  await expect(page.getByRole("dialog").getByRole("button", { name: /Apply 1 update/ })).toBeDisabled();
+  await closeReview.focus();
+  await expect(closeReview).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
 
   await page.goto(demoRoute("/#/doctor"));
   await expect(page.getByRole("heading", { name: "Doctor", level: 1 })).toBeVisible();

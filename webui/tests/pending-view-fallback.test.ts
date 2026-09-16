@@ -165,7 +165,11 @@ describe("pending view fallback and release notes", () => {
     expect(previewText).toContain("Tag update");
     expect(previewText).toContain("Major bump");
     expect(previewText).toContain("Possible breaking");
-    expect(previewText).toContain("Auto-update");
+    expect(previewText).not.toContain("Auto-update");
+    expect(card.find(".stack-details").text()).toContain("Auto-update");
+    expect(previewText).not.toContain("Fresh metadata");
+    expect(card.find(".stack-details").text()).toContain("Fresh metadata");
+    expect(previewText).toContain("Stack restart");
     expect(previewText).toContain("ghcr.io/example/wudup:1.0");
     expect(previewText).toContain("ghcr.io/example/wudup:2.0");
     expect(card.text()).toContain("Recreate stack");
@@ -175,6 +179,46 @@ describe("pending view fallback and release notes", () => {
     expect(card.find(".stack-card-tags").text()).not.toContain(
       "radarr, wudup",
     );
+  });
+
+  it("bounds large stack previews while retaining overflow risks and precise advisory scope", () => {
+    const items = Array.from({ length: 12 }, (_, index) => pendingGroupedItem({
+      line_no: index + 1,
+      selection_id: `selection-${index + 1}`,
+      image: `repo/service-${index + 1}:1.0`,
+      repo: `repo/service-${index + 1}`,
+      services: [`service-${index + 1}`],
+      current_tag: "1.0",
+      desired_tag: index >= 8 ? "2.0" : "1.0",
+      metadata_status: index === 10 ? "retained" : "fresh",
+    }));
+    const { pinia, settings, updates } = setupStores(false);
+    updates.pending = { ...pendingResponse(items), grouping: pendingGrouping(items) };
+    updates.releaseNotes = releaseNotesResponse(items.map((item) => releaseNoteInfo({
+      line_no: item.line_no,
+      security: {
+        outcome: item.line_no === 12 ? "verified_critical_high" : item.line_no === 11 ? "needs_review" : "ordinary",
+        severity: item.line_no >= 11 ? "critical" : "",
+        reason_code: "fixture",
+        reason: "Fixture evidence",
+        advisory_ids: [],
+        lookup_truncated: false,
+      },
+    })));
+    mockPendingLifecycle(settings, updates);
+    const wrapper = mountPendingView(pinia);
+    const card = wrapper.find(".stack-card");
+
+    expect(card.findAll(".stack-change-row")).toHaveLength(2);
+    expect(card.findAll(".stack-details .pending-update-row")).toHaveLength(12);
+    expect(card.find(".stack-details").attributes("open")).toBeUndefined();
+    const overflow = card.find(".stack-change-overflow");
+    expect(overflow.text()).toContain("+10 more updates in Details");
+    expect(overflow.text()).toContain("1 more update with stale metadata");
+    expect(overflow.text()).toContain("Release advisory: critical");
+    expect(overflow.text()).toContain("Release advisory: needs review");
+    expect(overflow.findAll(".safety-badge").filter((cue) => cue.text() === "Major bump")).toHaveLength(1);
+    expect(card.find(".stack-card-tags").text()).toContain("1 verified high/critical release update");
   });
 
   it("renders active snoozes in the snoozed pending section", () => {
@@ -309,7 +353,7 @@ describe("pending view fallback and release notes", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -371,7 +415,7 @@ describe("pending view fallback and release notes", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -419,7 +463,7 @@ describe("pending view fallback and release notes", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -613,7 +657,7 @@ describe("pending view fallback and release notes", () => {
 
     expect(wrapper.text()).toContain("Loading pending updates");
     expect(wrapper.find(".pending-loading-state").exists()).toBe(true);
-    expect(wrapper.find(".selection-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".batch-action-bar").exists()).toBe(false);
   });
 
   it("keeps failed pending loads recoverable without showing stale selection controls", async () => {
@@ -638,7 +682,7 @@ describe("pending view fallback and release notes", () => {
     expect(wrapper.text()).toContain("Pending updates unavailable");
     expect(wrapper.text()).toContain("Pending updates did not load");
     expect(wrapper.text()).toContain("Network request failed");
-    expect(wrapper.find(".selection-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".batch-action-bar").exists()).toBe(false);
 
     await wrapper
       .findAll("button")
@@ -648,7 +692,7 @@ describe("pending view fallback and release notes", () => {
 
     expect(loadPending).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain("1 pending update");
-    expect(wrapper.find(".selection-toolbar").exists()).toBe(true);
+    expect(wrapper.find(".batch-action-bar").exists()).toBe(true);
   });
 
   it("shows pending safety cue loading failures", () => {
@@ -785,7 +829,7 @@ describe("pending view fallback and release notes", () => {
     expect(wrapper.text()).toContain("GitHub release");
     expect(wrapper.text()).toContain("Possible breaking change");
     expect(wrapper.text()).toContain("Verified High security update");
-    expect(wrapper.text()).toContain("1 verified security update");
+    expect(wrapper.text()).toContain("1 verified high/critical release update");
     expect(wrapper.text()).toContain("Verified High advisory GHSA-AAAA-BBBB-CCCC");
     expect(wrapper.text()).toContain("Read changelog");
     expect(loadChangelog).not.toHaveBeenCalled();

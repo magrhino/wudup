@@ -94,7 +94,7 @@ async function previewAndApplyFirstUpdate(
 ): Promise<void> {
   await wrapper
     .findAll("button")
-    .find((button) => button.text().includes("Preview media plan"))
+    .find((button) => button.text().includes("Review media plan"))
     ?.trigger("click");
   await flushPromises();
   await wrapper
@@ -167,7 +167,7 @@ describe("pending view apply jobs", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -303,7 +303,7 @@ describe("pending view apply jobs", () => {
       "docker-update-from-wud-v2",
     );
     expect(showOutputButton.attributes("aria-expanded")).toBe("true");
-    expect(wrapper.find(".batch-action-bar").exists()).toBe(false);
+    expect(wrapper.find(".batch-action-bar").text()).toContain("Select updates to review");
   });
 
   it("refreshes api-backed pending reads after successful apply without a second rescan", async () => {
@@ -381,7 +381,7 @@ describe("pending view apply jobs", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
     await wrapper
@@ -465,7 +465,7 @@ describe("pending view apply jobs", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
     await wrapper
@@ -574,7 +574,7 @@ describe("pending view apply jobs", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
     await wrapper
@@ -621,7 +621,7 @@ describe("pending view apply jobs", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
     await wrapper

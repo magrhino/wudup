@@ -169,7 +169,7 @@ export function usePendingPlanReviewState(
   });
   const preflightTitle = computed(() => {
     if (!updates.plan) {
-      return updateIntent.value?.title ?? "Preview selected plan";
+      return updateIntent.value?.title ?? "Review selected plan";
     }
     if (updates.plan.status === "blocked") {
       return "Plan blocked";
@@ -463,8 +463,8 @@ export function usePendingPlanReviewState(
   });
   const updateSelectedButtonLabel = computed(() =>
     selectedBlockedMetadataCount.value
-      ? `Preview ${pluralize(selectedFreshCount.value, "verified update")}`
-      : "Preview selected plan",
+      ? `Review ${pluralize(selectedFreshCount.value, "verified update")}`
+      : `Review selected (${options.selectedSelections.value.length})`,
   );
   const selectedMetadataWarning = computed(() => {
     const count = selectedBlockedMetadataCount.value;

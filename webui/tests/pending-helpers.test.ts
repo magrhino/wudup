@@ -371,7 +371,7 @@ describe("pending helper modules", () => {
       snoozes: [snooze({ service_key: "media/app" })],
     }).map((cue) => cue.label);
     expect(majorLabels).toContain("Major bump");
-    expect(majorLabels).toContain("Critical security update");
+    expect(majorLabels).toContain("Release advisory: critical");
     expect(majorLabels).toContain("Possible breaking");
     expect(majorLabels).toContain("Snoozed");
     expect(majorLabels).toContain("Auto-update");
@@ -554,28 +554,28 @@ describe("pending helper modules", () => {
     expect(securityCuesFor(completeFindingsScan)).toContainEqual(
       expect.objectContaining({
         key: "security-findings",
-        label: "Findings",
+        label: "Candidate scan: Findings",
         type: "error",
       }),
     );
     expect(securityCuesFor(completeLowerSeverityScan)).toContainEqual(
       expect.objectContaining({
         key: "security-findings",
-        label: "Findings",
+        label: "Candidate scan: Findings",
         type: "warning",
       }),
     );
     expect(securityCuesFor(mixedComparisonScan)).toContainEqual(
       expect.objectContaining({
         key: "security-mixed",
-        label: "Findings changed",
+        label: "Candidate scan: Findings changed",
         type: "error",
       }),
     );
     expect(securityCuesFor(noneReportedScan)).toContainEqual(
       expect.objectContaining({
         key: "security-none-reported",
-        label: "None reported",
+        label: "Candidate scan: None reported",
         type: "success",
       }),
     );
@@ -585,14 +585,14 @@ describe("pending helper modules", () => {
     expect(securityCuesFor(notScannedScan)).toContainEqual(
       expect.objectContaining({
         key: "security-not-scanned",
-        label: "Not scanned",
+        label: "Candidate scan: Not scanned",
         type: "default",
       }),
     );
     expect(securityCuesFor(staleScan)).toContainEqual(
       expect.objectContaining({
         key: "security-stale",
-        label: "Scan stale",
+        label: "Candidate scan: stale",
         type: "warning",
       }),
     );
@@ -601,14 +601,14 @@ describe("pending helper modules", () => {
     ).toContainEqual(
       expect.objectContaining({
         key: "security-stale",
-        label: "Scan stale",
+        label: "Candidate scan: stale",
         type: "warning",
       }),
     );
     expect(securityCuesFor(null)).toContainEqual(
       expect.objectContaining({
         key: "security-unknown",
-        label: "Security unknown",
+        label: "Candidate scan: unavailable",
         type: "warning",
       }),
     );
@@ -628,7 +628,7 @@ describe("pending helper modules", () => {
     ).toContainEqual(
       expect.objectContaining({
         key: "security-unknown",
-        label: "Image scan unavailable",
+        label: "Candidate scan: unavailable",
         type: "warning",
       }),
     );

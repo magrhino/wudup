@@ -12,7 +12,6 @@ import type {
 } from "../../api/client";
 import { displayDigest } from "../../utils/digestProvenance";
 import {
-  groupChangeOverflowCount,
   groupChangePreviewItems,
   groupedItemActionLabel,
   groupedItemActionTagType,
@@ -61,6 +60,27 @@ const emit = defineEmits<{
   updateTag: [item: PendingGroupedItem, value: string];
 }>();
 
+function actionableRiskCues(item: PendingGroupedItem): SafetyCue[] {
+  return props.riskCues(item).filter((cue) => cue.type === "warning" || cue.type === "error");
+}
+
+const previewItems = computed(() => groupChangePreviewItems(props.group));
+const overflowItems = computed(() => props.group.items.slice(previewItems.value.length));
+const overflowMetadataBlockedCount = computed(
+  () => overflowItems.value.filter((item) => pendingMetadataStatus(item) !== "fresh").length,
+);
+const overflowRiskCues = computed(() => {
+  const cues = new Map<string, SafetyCue>();
+  for (const item of overflowItems.value) {
+    for (const cue of actionableRiskCues(item)) {
+      if (cues.get(cue.label)?.type !== "error") {
+        cues.set(cue.label, cue);
+      }
+    }
+  }
+  return [...cues.values()];
+});
+
 const verifiedUpdateCount = computed(
   () =>
     props.group.items.filter((item) => pendingMetadataStatus(item) === "fresh")
@@ -74,12 +94,12 @@ const previewDisabled = computed(
 );
 const previewLabel = computed(() => {
   if (!blockedUpdateCount.value) {
-    return `Preview ${props.group.name} plan`;
+    return `Review ${props.group.name} plan`;
   }
   if (!verifiedUpdateCount.value) {
     return "No verified updates";
   }
-  return `Preview ${pluralize(verifiedUpdateCount.value, "verified update")}`;
+  return `Review ${pluralize(verifiedUpdateCount.value, "verified update")}`;
 });
 const previewDisabledMessage = computed(() =>
   verifiedUpdateCount.value
@@ -122,13 +142,14 @@ const previewDisabledMessage = computed(() =>
           </n-tag>
           <n-tag
             v-if="itemsVerifiedSecurityCount(group.items, releaseNoteFor)"
+            class="stack-advisory-tag"
             size="small"
             type="error"
           >
             <template #icon>
               <ShieldAlert :size="14" aria-hidden="true" />
             </template>
-            {{ pluralize(itemsVerifiedSecurityCount(group.items, releaseNoteFor), "verified security update") }}
+            {{ pluralize(itemsVerifiedSecurityCount(group.items, releaseNoteFor), "verified high/critical release update") }}
           </n-tag>
           <n-tag
             v-if="itemsBreakingCount(group.items, releaseNoteFor)"
@@ -142,6 +163,7 @@ const previewDisabledMessage = computed(() =>
           <n-button
             size="small"
             secondary
+            type="primary"
             :disabled="previewDisabled"
             :loading="loading"
             :title="previewDisabledMessage || undefined"
@@ -158,40 +180,12 @@ const previewDisabledMessage = computed(() =>
 
     <div class="stack-change-preview" aria-label="Change preview">
       <div
-        v-for="item in groupChangePreviewItems(group)"
+        v-for="item in previewItems"
         :key="`${group.name}-${item.line_no}-preview`"
         class="stack-change-row"
       >
         <strong class="stack-change-service wrap-anywhere">{{ groupedItemServices(item) }}</strong>
         <span class="stack-change-target wrap-anywhere">
-          <n-tag
-            size="small"
-            :type="groupedItemActionTagType(item)"
-          >
-            {{ groupedItemActionLabel(item) }}
-          </n-tag>
-          <n-tag
-            size="small"
-            :type="pendingMetadataStatusTagType(item)"
-            :title="pendingMetadataStatusTitle(item)"
-          >
-            {{ pendingMetadataStatusLabel(item) }} metadata
-          </n-tag>
-          <span
-            v-if="riskCues(item).length"
-            class="risk-badges-container stack-change-risk-cues"
-            aria-label="Safety cues"
-          >
-            <n-tag
-              v-for="cue in riskCues(item)"
-              :key="`${item.line_no}-${cue.key}`"
-              size="small"
-              :type="cue.type"
-              class="safety-badge"
-            >
-              {{ cue.label }}
-            </n-tag>
-          </span>
           <code
             class="stack-change-value wrap-anywhere"
             data-label="Current"
@@ -207,6 +201,35 @@ const previewDisabledMessage = computed(() =>
           >
             {{ previewImageLabel(groupedItemTarget(item), displayDigest) }}
           </code>
+          <n-tag
+            size="small"
+            :type="groupedItemActionTagType(item)"
+          >
+            {{ groupedItemActionLabel(item) }}
+          </n-tag>
+          <n-tag
+            v-if="pendingMetadataStatus(item) !== 'fresh'"
+            size="small"
+            :type="pendingMetadataStatusTagType(item)"
+            :title="pendingMetadataStatusTitle(item)"
+          >
+            {{ pendingMetadataStatusLabel(item) }} metadata
+          </n-tag>
+          <span
+            v-if="actionableRiskCues(item).length"
+            class="risk-badges-container stack-change-risk-cues"
+            aria-label="Safety cues"
+          >
+            <n-tag
+              v-for="cue in actionableRiskCues(item)"
+              :key="`${item.line_no}-${cue.key}`"
+              size="small"
+              :type="cue.type"
+              class="safety-badge"
+            >
+              {{ cue.label }}
+            </n-tag>
+          </span>
           <n-button
             v-if="item.tag_stream"
             size="small"
@@ -224,9 +247,23 @@ const previewDisabledMessage = computed(() =>
           </n-button>
         </span>
       </div>
-      <span v-if="groupChangeOverflowCount(group)" class="stack-change-more wrap-anywhere">
-        +{{ groupChangeOverflowCount(group) }} more in Details
-      </span>
+      <div v-if="overflowItems.length" class="stack-change-overflow">
+        <span class="stack-change-more">+{{ overflowItems.length }} more updates in Details</span>
+        <n-tag v-if="overflowMetadataBlockedCount" size="small" type="warning">
+          {{ pluralize(overflowMetadataBlockedCount, "more update") }} with stale metadata
+        </n-tag>
+        <span v-if="overflowRiskCues.length" class="stack-change-risk-cues" aria-label="Risks in additional updates">
+          <n-tag
+            v-for="cue in overflowRiskCues"
+            :key="cue.label"
+            size="small"
+            :type="cue.type"
+            class="safety-badge"
+          >
+            {{ cue.label }}
+          </n-tag>
+        </span>
+      </div>
     </div>
 
     <details class="stack-details">
@@ -397,9 +434,27 @@ const previewDisabledMessage = computed(() =>
   margin-inline-start: 2px;
 }
 
+.stack-change-overflow,
+.stack-change-overflow .stack-change-risk-cues {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .stack-change-more {
   color: var(--color-muted-text);
-  font-size: 0.82rem;
+  font-size: var(--text-metadata-size);
+}
+
+.stack-advisory-tag {
+  max-width: 100%;
+  height: auto;
+  min-height: 24px;
+}
+
+.stack-advisory-tag :deep(.n-tag__content) {
+  white-space: normal;
 }
 
 .stack-card-tags {

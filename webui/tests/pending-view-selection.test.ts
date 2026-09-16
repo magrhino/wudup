@@ -35,7 +35,7 @@ async function selectAllAndPreview(
     ?.trigger("click");
   await wrapper
     .findAll("button")
-    .find((button) => button.text().includes("Preview selected plan"))
+    .find((button) => button.text().includes("Review selected ("))
     ?.trigger("click");
 }
 
@@ -73,6 +73,34 @@ function mountPendingWithSnooze(kind: SnoozeKind) {
 describe("pending view selection actions", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  it("keeps review visible at zero selection and updates its scope without applying", async () => {
+    const { pinia, settings, updates } = setupStores(false);
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    const createPlan = vi.spyOn(updates, "createPlan").mockResolvedValue();
+    const applyPlan = vi.spyOn(updates, "applyPlan");
+    const wrapper = mountPendingView(pinia);
+    const review = () => wrapper.findAll("button").find((button) => button.text().startsWith("Review selected ("))!;
+
+    expect(review().text()).toBe("Review selected (0)");
+    expect(review().attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".batch-action-bar").text()).toContain("Select updates to review");
+    await review().trigger("click");
+    expect(createPlan).not.toHaveBeenCalled();
+
+    await wrapper.find('input[aria-label="Select stack media"]').setValue(true);
+    expect(review().text()).toBe("Review selected (1)");
+    expect(review().attributes("disabled")).toBeUndefined();
+    await review().trigger("click");
+    expect(createPlan).toHaveBeenCalledTimes(1);
+    expect(applyPlan).not.toHaveBeenCalled();
+
+    await wrapper.findAll("button").find((button) => button.text().includes("Clear selection"))!.trigger("click");
+    expect(review().text()).toBe("Review selected (0)");
+    expect(review().attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".queue-tools").text()).toContain("These counts do not form a simple sum");
   });
 
   it("keeps updates with stopped effective services out of bulk selection", async () => {
@@ -171,16 +199,16 @@ describe("pending view selection actions", () => {
     );
     const preview = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview 1 verified update"));
+      .find((button) => button.text().includes("Review 1 verified update"));
     expect(
       wrapper
         .findAll("button")
-        .filter((button) => button.text().includes("Preview 1 verified update")),
+        .filter((button) => button.text().includes("Review 1 verified update")),
     ).toHaveLength(2);
     expect(
       wrapper
         .findAll("button")
-        .filter((button) => button.text().includes("Preview 1 verified update"))
+        .filter((button) => button.text().includes("Review 1 verified update"))
         .every((button) => button.attributes("disabled") === undefined),
     ).toBe(true);
     await preview?.trigger("click");
@@ -278,7 +306,7 @@ describe("pending view selection actions", () => {
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     await flushPromises();
 
@@ -421,7 +449,7 @@ describe("pending view selection actions", () => {
 
     const refreshButton = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Refresh scans"));
+      .find((button) => button.text().includes("Refresh security scans"));
 
     expect(refreshButton?.exists()).toBe(true);
     expect(refreshButton?.attributes("disabled")).toBeDefined();
@@ -536,7 +564,7 @@ describe("pending view selection actions", () => {
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     await flushPromises();
 
@@ -898,7 +926,7 @@ describe("pending view selection actions", () => {
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     await flushPromises();
 
@@ -1023,7 +1051,7 @@ describe("pending view selection actions", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
 
     expect(createPlan).toHaveBeenCalledWith(
@@ -1103,7 +1131,7 @@ describe("pending view selection actions", () => {
     expect((rowCheckboxes[1].element as HTMLInputElement).checked).toBe(false);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(createPlan).toHaveBeenLastCalledWith(
@@ -1118,7 +1146,7 @@ describe("pending view selection actions", () => {
     await rowCheckboxes[1].setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(createPlan).toHaveBeenLastCalledWith(
@@ -1135,7 +1163,7 @@ describe("pending view selection actions", () => {
       ?.trigger("click");
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     expect(createPlan).toHaveBeenLastCalledWith(
       [1],
@@ -1166,7 +1194,7 @@ describe("pending view selection actions", () => {
       .setValue(false);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(
@@ -1211,7 +1239,7 @@ describe("pending view selection actions", () => {
       ?.trigger("click");
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(wrapper.text()).toContain("No Compose match");
@@ -1244,7 +1272,7 @@ describe("pending view selection actions", () => {
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(createPlan).toHaveBeenLastCalledWith(
@@ -1377,7 +1405,7 @@ describe("pending view selection actions", () => {
       .setValue("1.2");
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
 
     expect(
@@ -1412,7 +1440,7 @@ describe("pending view selection actions", () => {
     expect(wrapper.text()).toContain(`${item.image} has an invalid new tag`);
     const updateButton = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"));
+      .find((button) => button.text().includes("Review selected ("));
     expect(updateButton?.attributes("disabled")).toBeDefined();
     await updateButton?.trigger("click");
     expect(createPlan).not.toHaveBeenCalled();
