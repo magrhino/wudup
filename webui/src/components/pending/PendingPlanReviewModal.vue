@@ -147,7 +147,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
     :title="preflightTitle"
     :summary="preflightSummary"
     :impact-label="preflightServiceImpactLabel"
-    :status-label="planStatusLabel"
+    :status-label="planStatusLabel === preflightTitle ? '' : planStatusLabel"
     :status-type="planAlertType"
     @close="emit('close')"
   >
@@ -168,7 +168,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
         <div class="apply-readiness-heading">
           <div>
             <strong id="apply-readiness-title">Apply readiness</strong>
-            <span>{{ applyReadinessSummary }}</span>
+            <span v-if="applyReadinessSummary !== preflightSummary">{{ applyReadinessSummary }}</span>
           </div>
           <n-tag size="small" :type="applyReadinessStatusType">
             {{ applyReadinessStatusLabel }}
@@ -916,6 +916,10 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 }
 
 @media (--wud-compact) {
+  .plan-line-release {
+    grid-column: 1 / -1;
+  }
+
   .plan-action {
     grid-template-columns: 1fr;
   }

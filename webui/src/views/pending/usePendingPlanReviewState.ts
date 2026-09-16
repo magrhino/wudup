@@ -413,11 +413,10 @@ export function usePendingPlanReviewState(
       return "";
     }
     if (!auth.session?.mutations_enabled) {
-      const detail = updates.plan.apply_preflight.checks.find(
-        (check) => check.code === "mutations-enabled",
-      )?.detail;
-      if (detail) {
-        return `Read-only mode is active. ${detail}`;
+      if (applyPreflightAttentionChecks.value.some(
+        (check) => check.code === "mutations-enabled" && check.status === "FAIL",
+      )) {
+        return "";
       }
       return "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.";
     }
@@ -426,7 +425,7 @@ export function usePendingPlanReviewState(
         (check) => check.status === "FAIL",
       );
       return failed?.detail
-        ? `${failed.label}: ${failed.detail}`
+        ? ""
         : "Fix the failed apply readiness check before applying updates.";
     }
     return "This plan cannot be applied.";
@@ -545,6 +544,9 @@ export function usePendingPlanReviewState(
   function applyPreflightCheckDetail(check: ApplyPreflightCheck): string {
     if (check.status === "PASS") {
       return "";
+    }
+    if (check.code === "mutations-enabled" && check.status === "FAIL") {
+      return `Read-only mode is active. ${check.detail || "Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates."}`;
     }
     if (
       check.code === "selected-services-matched" &&

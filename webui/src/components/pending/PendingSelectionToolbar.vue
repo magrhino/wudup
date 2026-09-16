@@ -118,12 +118,12 @@ const emit = defineEmits<{
       <span v-if="selectedHiddenCount" class="wrap-anywhere">
         {{ selectedHiddenCount }} selected {{ selectedHiddenCount === 1 ? 'update hidden' : 'updates hidden' }} by search; included in review.
       </span>
-      <span v-else class="wrap-anywhere">Review changes nothing. Apply follows in the plan.</span>
+      <span v-else class="wrap-anywhere">Review changes nothing.<span class="selection-helper-detail"> Apply follows in the plan.</span></span>
     </div>
     <n-flex class="pending-actions" align="center" :size="8">
-      <n-button v-if="selectedCount" size="small" quaternary @click="emit('clearSelection')">
+      <n-button v-if="selectedCount" size="small" quaternary aria-label="Clear selection" @click="emit('clearSelection')">
         <template #icon><X :size="16" /></template>
-        Clear selection
+        <span>Clear<span class="selection-helper-detail"> selection</span></span>
       </n-button>
       <n-button
         type="primary"
@@ -217,6 +217,25 @@ const emit = defineEmits<{
 }
 
 @media (--wud-compact) {
+  .batch-action-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .batch-action-bar .pending-actions {
+    flex-wrap: nowrap;
+  }
+
+  .batch-action-bar .pending-actions :deep(.n-button:last-child) {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .selection-helper-detail {
+    display: none;
+  }
+
   .pending-actions :deep(.n-button),
   .selection-tools :deep(.n-button),
   .queue-tools summary {
