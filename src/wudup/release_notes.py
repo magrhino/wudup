@@ -1370,7 +1370,9 @@ def _fetch_lsio_release_note(
         body=lsio_body,
         classification=classification,
     )
-    if _lsio_only_update(context, classification):
+    if context.upstream_repo == context.image_repo or _lsio_only_update(
+        context, classification
+    ):
         return lsio_info
     upstream_release = _fetch_lsio_upstream_release(
         client,

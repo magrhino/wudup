@@ -212,6 +212,20 @@ For explicit LSIO mode or existing `tag-manager.sh` configurations,
 `upstreams.txt`. Missing mappings are sent to `ADMIN_WEBHOOK` and the embed is
 skipped.
 
+For containers without a separate upstream release source, map the image
+repository to itself to use only its GitHub image releases. Socket-proxy is
+configured this way, including when pulled from GHCR:
+
+```text
+# Image-only releases; preserve this manual override during map refreshes.
+linuxserver/docker-socket-proxy: linuxserver/docker-socket-proxy
+```
+
+To enable another container, add a sorted entry in `wud/upstreams.txt` with the
+same `linuxserver/docker-<name>` repository on both sides. Keep an explanatory
+comment immediately above it so the refresh script preserves the override.
+The WebUI and legacy callbacks skip upstream enrichment for these entries.
+
 The LinuxServer.io release is authoritative for LSIO image updates. LSIO-only
 image updates and rebuilds stop after that release is resolved and do not
 require an upstream release match. Confirmed upstream application updates can
