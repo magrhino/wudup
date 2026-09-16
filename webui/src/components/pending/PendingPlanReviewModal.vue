@@ -692,6 +692,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
         </details>
       </div>
 
+    <template #footer>
       <PreflightFooterActions @secondary="emit('close')">
         <n-button
           v-if="cleanupAvailable"
@@ -723,6 +724,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
           </n-button>
         </template>
       </PreflightFooterActions>
+    </template>
   </PreflightModalShell>
 </template>
 

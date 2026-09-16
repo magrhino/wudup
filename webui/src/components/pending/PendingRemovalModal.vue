@@ -33,7 +33,8 @@ function handleModalShowUpdate(value: boolean): void {
     :mask-closable="false"
     @update:show="handleModalShowUpdate"
   >
-    <section
+    <!-- Naive UI requires a div root for keyboard focus trapping. -->
+    <div
       class="preflight-modal"
       role="dialog"
       aria-modal="true"
@@ -89,6 +90,6 @@ function handleModalShowUpdate(value: boolean): void {
           {{ removalConfirmButtonLabel }}
         </n-button>
       </n-flex>
-    </section>
+    </div>
   </n-modal>
 </template>

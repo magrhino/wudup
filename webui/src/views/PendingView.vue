@@ -464,7 +464,7 @@ const pendingHealthReadiness = computed(() => {
   if (applyPreflight.value?.ok) {
     return "Advisory for this plan: its readiness checks passed. Review warnings before confirming.";
   }
-  return "Update readiness is not yet checked. Preview the selected plan to identify blockers.";
+  return "Update readiness is not yet checked. Review the selected plan to identify blockers.";
 });
 const pendingHealthCheckedAt = computed(() => {
   const value = updates.pendingWudMetadataCheckedAt || updates.pending?.wud_api.last_checked_at;
@@ -817,23 +817,6 @@ onBeforeUnmount(() => {
         <h2>{{ pendingHeadingText }}</h2>
       </div>
       <n-flex align="center" :size="8">
-        <n-tag size="small" :type="securityScanSummaryType">
-          {{ securityScanSummaryLabel }}
-        </n-tag>
-        <n-button
-          v-if="securityScanRefreshVisible"
-          size="small"
-          secondary
-          :loading="updates.securityScansLoading"
-          :disabled="securityScanRefreshDisabled"
-          :title="securityScanRefreshDisabledMessage || undefined"
-          @click="refreshSecurityScans"
-        >
-          <template #icon>
-            <ShieldCheck :size="16" aria-hidden="true" />
-          </template>
-          Refresh scans
-        </n-button>
         <n-tag size="small" :type="mutationStateType">{{ mutationStateLabel }}</n-tag>
       </n-flex>
     </div>
@@ -891,7 +874,7 @@ onBeforeUnmount(() => {
     <CoreUpdateTourPanel
       step="pending_select"
       title="Select the update scope"
-      detail="Choose one stack or selected lines before previewing. Stack groups are the safest default because they keep related services together."
+      detail="Choose one stack or selected lines before reviewing. Stack groups are the safest default because they keep related services together."
       next-label="Show preflight guidance"
       next-step="pending_preflight"
     >
@@ -912,8 +895,8 @@ onBeforeUnmount(() => {
 
     <CoreUpdateTourPanel
       step="pending_preflight"
-      title="Preview before anything changes"
-      detail="Open a preview to see affected services, image targets, tag rewrites, skipped lines, and any blocking issues. Creating a plan does not pull, restart, or edit Docker state."
+      title="Review before anything changes"
+      detail="Review the plan to see affected services, image targets, tag rewrites, skipped lines, and any blocking issues. Creating a plan does not pull, restart, or edit Docker state."
       next-label="Continue to apply guidance"
       next-step="pending_apply"
       :show="!showPreflightModal"
@@ -923,7 +906,7 @@ onBeforeUnmount(() => {
       step="pending_apply"
       title="Apply only after the plan is clear"
       :detail="pendingApplyTourDetail"
-      next-label="Open run history"
+      next-label="Open History"
       next-step="runs_history"
       next-to="/runs"
     />
@@ -942,7 +925,6 @@ onBeforeUnmount(() => {
       :global-rescan-disabled-message="wudRescanUnavailableMessage"
       :grouping-ready="groupingReady"
       :has-selected-tag-updates="selectedHasTagUpdates"
-      :is-mobile="isMobile"
       :loading="updates.loading"
       :pending-loaded="pendingLoaded"
       :removal-button-label="removalButtonLabel"
@@ -960,6 +942,8 @@ onBeforeUnmount(() => {
         filteredSnoozedItems.length + filteredSnoozedCandidates.length
       "
       :stack-count="filteredStackGroups.length"
+      :stopped-count="filteredStoppedItems.length"
+      :search-active="pendingSearchActive"
       :unmatched-review-count-label="visibleUnmatchedReviewCountLabel"
       :update-selected-disabled="updateSelectedDisabled"
       :update-selected-button-label="updateSelectedButtonLabel"
@@ -969,7 +953,30 @@ onBeforeUnmount(() => {
       @select-all="selectAllVisible"
       @start-removal="startSelectedRemoval"
       @start-update="startSelectedUpdate"
-    />
+    >
+      <template #tools>
+        <n-flex align="center" :size="8">
+          <n-tag size="small" :type="securityScanSummaryType">
+            {{ securityScanSummaryLabel }}
+          </n-tag>
+          <n-button
+            v-if="securityScanRefreshVisible"
+            size="small"
+            secondary
+            :loading="updates.securityScansLoading"
+            :disabled="securityScanRefreshDisabled"
+            :title="securityScanRefreshDisabledMessage || undefined"
+            @click="refreshSecurityScans"
+          >
+            <template #icon>
+              <ShieldCheck :size="16" aria-hidden="true" />
+            </template>
+            Refresh security scans
+          </n-button>
+        </n-flex>
+        <p>Release advisory evidence and candidate-image scans are separate checks. Neither guarantees an update is safe.</p>
+      </template>
+    </PendingSelectionToolbar>
 
     <n-alert
       v-if="selectedTagOverrideError"
@@ -1174,6 +1181,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .pending-heading {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
 }
 

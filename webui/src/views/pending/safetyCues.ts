@@ -161,9 +161,9 @@ function addReleaseNoteSecurityCue(
 ): void {
   if (note?.security?.outcome === "verified_critical_high") {
     const severity = note.security.severity === "critical" ? "Critical" : "High";
-    addCue("verified-security", `${severity} security update`, "error");
+    addCue("verified-security", `Release advisory: ${severity.toLowerCase()}`, "error");
   } else if (note?.security?.outcome === "needs_review") {
-    addCue("security-review", "Security review", "warning");
+    addCue("security-review", "Release advisory: needs review", "warning");
   }
 }
 
@@ -187,22 +187,17 @@ function addSecurityScanCues(
     return;
   }
   if (!context.securityScansCurrent) {
-    addCue("security-stale", "Scan stale", "warning");
+    addCue("security-stale", "Candidate scan: stale", "warning");
     return;
   }
   const scan = context.securityScan;
   if (!scan) {
-    const label =
-      context.releaseNote?.security.outcome === "ordinary" ||
-      !context.releaseNote?.security.outcome
-        ? "Security unknown"
-        : "Image scan unavailable";
-    addCue("security-unknown", label, "warning");
+    addCue("security-unknown", "Candidate scan: unavailable", "warning");
     return;
   }
   const display = securityScanCueDisplay(scan);
   if (display) {
-    addCue(display.key, display.label, display.type);
+    addCue(display.key, `Candidate scan: ${display.key === "security-stale" ? "stale" : display.label}`, display.type);
   }
 }
 

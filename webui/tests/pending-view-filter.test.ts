@@ -196,7 +196,7 @@ describe("pending view search filter", () => {
     await setPendingSearch(wrapper, "postgres");
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
 
     expect(createPlan).toHaveBeenCalledWith(
@@ -254,7 +254,7 @@ describe("pending view search filter", () => {
   });
 
   it("keeps hidden selected rows clear when filtering", async () => {
-    const { wrapper } = await mountDefaultPendingView();
+    const { wrapper, updates } = await mountDefaultPendingView();
 
     await wrapper.find('input[aria-label="Select stack media"]').setValue(true);
     await setPendingSearch(wrapper, "postgres");
@@ -262,9 +262,17 @@ describe("pending view search filter", () => {
     expect(wrapper.text()).toContain("1 selected");
     expect(wrapper.text()).toContain("1 selected update hidden by search");
     expect(wrapper.text()).toContain(
-      "1 selected update remains selected outside the current search.",
+      "1 selected update hidden by search; included in review.",
     );
-    expect(wrapper.text()).toContain("Preview selected plan");
+    expect(wrapper.text()).toContain("Review selected (");
+    expect(wrapper.find(".queue-tools").text()).toContain("These counts reflect the current search.");
+    const createPlan = vi.spyOn(updates, "createPlan").mockResolvedValue();
+    await wrapper.findAll("button").find((button) => button.text().includes("Review selected (1)"))!.trigger("click");
+    expect(createPlan.mock.calls[0]?.[0]).toEqual([1]);
+    await wrapper.findAll("button").find((button) => button.text().includes("Clear selection"))!.trigger("click");
+    expect(wrapper.find(".batch-action-bar").text()).toContain("Select updates to review");
+    expect(wrapper.find(".batch-action-bar").text()).not.toContain("hidden by search");
+
     expect(wrapper.text()).toContain("postgres:16");
     expect(wrapper.text()).not.toContain("linuxserver/radarr:4.0");
   });
@@ -297,7 +305,7 @@ describe("pending view search filter", () => {
 
     expect(wrapper.text()).toContain("1 selected update hidden by search");
     expect(wrapper.text()).toContain("backup");
-    expect(wrapper.text()).not.toContain("Preview active plan");
+    expect(wrapper.text()).not.toContain("Review active plan");
   });
 
   it("filters by loaded release-note unavailable reasons", async () => {

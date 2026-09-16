@@ -60,7 +60,7 @@ export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
 
   async function startSelectedUpdate(): Promise<void> {
     await startUpdateFlow({
-      title: "Preview selected plan",
+      title: "Review selected plan",
       contextLabel: options.selectedUpdateContext.value,
       selections: options.selectedSelections.value,
     });
@@ -75,7 +75,7 @@ export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
           candidate.project_directory === group.project_directory,
       ) ?? group;
     await startUpdateFlow({
-      title: `Preview ${group.name} plan`,
+      title: `Review ${group.name} plan`,
       contextLabel: group.name,
       selections: pendingSelectionsForGroup(fullGroup),
     });

@@ -808,14 +808,63 @@ test("read-only pending flow can preflight a stack but cannot apply", async ({ p
 
   await page.goto("/#/pending");
   await page.getByRole("checkbox", { name: /Select stack media/ }).check();
-  await page.getByRole("button", { name: /Preview selected plan/ }).click();
+  await page.getByRole("button", { name: /Review selected \(/ }).click();
 
-  await expect(page.getByText("Read-only mode is active").first()).toBeVisible();
+  await expect(page.getByRole("dialog").getByText("Read-only mode is active").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Apply blocked" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Apply 1 update/ })).toBeDisabled();
   expect(state.calls.some((call) => call.path === "/api/v1/plans")).toBe(true);
   expect(state.calls.some((call) => call.path === "/api/v1/plans/apply")).toBe(false);
 });
+
+for (const kind of ["removal", "cleanup"] as const) {
+  test(`pending ${kind} confirmation supports keyboard focus and cancel`, async ({ page }) => {
+    const state = createState({ authenticated: true, mutationsEnabled: true });
+    await installApiFixtures(page, state);
+    const line = { line_no: 1, raw: "repo/old:latest", image: "repo/old:latest", desired_tag: "", digest: "" };
+    if (kind === "removal") {
+      await page.route("**/api/v1/pending/removal-plan", (route) => json(route, {
+        removal_id: "removal-smoke",
+        source_file: "/out/images.todo",
+        can_remove: true,
+        selected_line_numbers: [1],
+        lines: [line],
+      }));
+    } else {
+      await page.route("**/api/v1/plans", (route) => json(route, planResponse({
+        cleanup: {
+          cleanup_id: "cleanup-smoke",
+          can_remove_unmatched: true,
+          items: [{ ...line, reason: "unmatched", diagnostic: null }],
+        },
+      })));
+    }
+    await page.goto("/#/pending");
+    await page.getByRole("checkbox", { name: /Select stack media/ }).check();
+    if (kind === "removal") {
+      await page.getByText("Queue details and actions", { exact: true }).click();
+      await page.getByRole("button", { name: "Remove 1 selected entry", exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: /Review selected \(/ }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Remove 1 unmatched entry", exact: true }).click();
+    }
+    const dialog = page.getByRole("dialog", {
+      name: kind === "removal" ? "Remove selected entries" : "Remove unmatched entries",
+      exact: true,
+    });
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    const confirm = dialog.getByRole("button", { name: /Remove 1/ });
+    await cancel.focus();
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(confirm).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeHidden();
+    expect(state.calls.some((call) => ["/api/v1/pending/removal", "/api/v1/pending/cleanup"].includes(call.path))).toBe(false);
+  });
+}
 
 test("mutation-enabled pending flow applies and links to run details", async ({
   page,
@@ -828,7 +877,7 @@ test("mutation-enabled pending flow applies and links to run details", async ({
   await expect(
     page.getByRole("textbox", { name: "New tag for repo/app:1.0" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Preview media plan/ }).click();
+  await page.getByRole("button", { name: /Review media plan/ }).click();
 
   await expect(page.getByRole("heading", { name: "Review media plan" })).toBeVisible();
   await page
@@ -990,7 +1039,7 @@ test("mutation-enabled pending flow creates jobs only after confirmation", async
 
   await page.goto("/#/pending");
   await page.getByRole("checkbox", { name: /Select stack media/ }).check();
-  await page.getByRole("button", { name: /Preview selected plan/ }).click();
+  await page.getByRole("button", { name: /Review selected \(/ }).click();
   await expect(page.getByRole("heading", { name: "Review media plan" })).toBeVisible();
 
   const dialog = page.getByRole("dialog").filter({

@@ -572,7 +572,7 @@ describe("usePendingPlanReviewState", () => {
     const tagOverrides = [{ line_no: 1, tag: "1.2" }];
 
     state.setUpdateIntent({
-      title: "Preview media plan",
+      title: "Review media plan",
       contextLabel: "media",
       lineNumbers: [1],
       selections: [{ line_no: 1, selection_id: "selection-media-app" }],
@@ -584,7 +584,7 @@ describe("usePendingPlanReviewState", () => {
     });
 
     expect(state.planContextLabel.value).toBe("media");
-    expect(state.preflightTitle.value).toBe("Preview media plan");
+    expect(state.preflightTitle.value).toBe("Review media plan");
     expect(
       state.applyPlanPayload({
         allowTagUpdates: false,
@@ -868,7 +868,7 @@ describe("usePendingPlanReviewState", () => {
     expect(await state.approveDigestPinLabelRewrite(issue)).toBe(false);
 
     state.setUpdateIntent({
-      title: "Preview media plan",
+      title: "Review media plan",
       contextLabel: "media",
       lineNumbers: [1],
       selections: [{ line_no: 1, selection_id: "selection-media-app" }],
@@ -930,7 +930,7 @@ describe("usePendingPlanReviewState", () => {
       tagStreamLabelApprovalIssueKey(siblingLabelIssue),
     );
     state.setUpdateIntent({
-      title: "Preview media plan",
+      title: "Review media plan",
       contextLabel: "media",
       lineNumbers: [1],
       selections: [{ line_no: 1, selection_id: "selection-media-app" }],

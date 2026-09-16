@@ -37,8 +37,8 @@ defineEmits<{
       <n-button
         quaternary
         circle
-        title="Refresh"
-        aria-label="Refresh current view"
+        title="Refresh status for the current view; does not request a WUD rescan or security scan."
+        aria-label="Refresh current view status"
         @click="$emit('refresh')"
       >
         <template #icon>

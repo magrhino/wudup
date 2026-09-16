@@ -88,7 +88,7 @@ describe("pending view preflight safety", () => {
       .setValue(true);
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview selected plan"))
+      .find((button) => button.text().includes("Review selected ("))
       ?.trigger("click");
     await flushPromises();
 
@@ -105,6 +105,14 @@ describe("pending view preflight safety", () => {
       .find((button) => button.text().includes("Apply 1 update"));
     expect(applyButton?.exists()).toBe(true);
     expect(applyButton?.attributes("disabled")).toBeDefined();
+    const modal = wrapper.find(".preflight-modal");
+    expect(modal.classes()).toContain("preflight-modal-fixed-footer");
+    expect(modal.element.tagName).toBe("DIV");
+    expect(modal.attributes("aria-modal")).toBe("true");
+    expect(modal.find(".preflight-scroll-content .preflight-footer").exists()).toBe(false);
+    expect(modal.find(":scope > .preflight-footer").text()).toContain("Close");
+    expect(modal.find(":scope > .preflight-footer").text()).toContain("Apply 1 update");
+
     expect(applyPlan).not.toHaveBeenCalled();
   });
 
@@ -153,7 +161,7 @@ describe("pending view preflight safety", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -261,7 +269,7 @@ describe("pending view preflight safety", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 
@@ -392,7 +400,7 @@ describe("pending view preflight safety", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Preview media plan"))
+      .find((button) => button.text().includes("Review media plan"))
       ?.trigger("click");
     await flushPromises();
 

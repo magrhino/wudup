@@ -31,26 +31,32 @@ function handleShowUpdate(value: boolean): void {
     :mask-closable="false"
     @update:show="handleShowUpdate"
   >
-    <dialog
-      open
+    <!-- Naive UI's focus trap requires a div as the modal content root. -->
+    <div
+      role="dialog"
+      aria-modal="true"
       class="preflight-modal"
+      :class="{ 'preflight-modal-fixed-footer': $slots.footer }"
       :aria-labelledby="titleId ?? `${eyebrow}-preflight-title`"
     >
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">{{ eyebrow }}</p>
-          <h2 :id="titleId ?? `${eyebrow}-preflight-title`">{{ title }}</h2>
-          <p class="preflight-summary-text">{{ summary }}</p>
-          <p v-if="impactLabel" class="preflight-impact-text">
-            {{ impactLabel }}
-          </p>
+      <div class="preflight-scroll-content">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">{{ eyebrow }}</p>
+            <h2 :id="titleId ?? `${eyebrow}-preflight-title`">{{ title }}</h2>
+            <p class="preflight-summary-text">{{ summary }}</p>
+            <p v-if="impactLabel" class="preflight-impact-text">
+              {{ impactLabel }}
+            </p>
+          </div>
+          <n-tag v-if="statusLabel" :type="statusType ?? 'default'">
+            {{ statusLabel }}
+          </n-tag>
         </div>
-        <n-tag v-if="statusLabel" :type="statusType ?? 'default'">
-          {{ statusLabel }}
-        </n-tag>
-      </div>
 
-      <slot />
-    </dialog>
+        <slot />
+      </div>
+      <slot name="footer" />
+    </div>
   </n-modal>
 </template>
