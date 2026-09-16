@@ -181,6 +181,35 @@ describe("pending view fallback and release notes", () => {
     );
   });
 
+  it.each([
+    ["acme/app:5.1.0", "v5.1.0", true],
+    ["registry.example:5000/acme/app:v5.1.0", "5.1.0", true],
+    ["acme/app:latest", "latest", false],
+    ["acme/app@sha256:abc", "v5.0.0", false],
+    ["acme/app:5.1", "v5.1", false],
+    ["acme/app:v5.1", "v5.1", false],
+  ])("uses the recreate target %s for release matching", (targetImage, releaseTag, matched) => {
+    const item = pendingGroupedItem({
+      image: "acme/app:5.0.0",
+      repo: "acme/app",
+      current_tag: "5.0.0",
+      desired_tag: "",
+      target_image: targetImage,
+      action: "recreate_service",
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = { ...pendingResponse([item]), grouping: pendingGrouping([item]) };
+    updates.releaseNotes = releaseNotesResponse([
+      releaseNoteInfo({ line_no: item.line_no, release_tag: releaseTag }),
+    ]);
+    mockPendingLifecycle(settings, updates);
+    const wrapper = mountPendingView(pinia);
+    const release = wrapper.find(".stack-change-release");
+
+    expect(release.text()).toContain(matched ? "Matched to candidate" : "Upstream context");
+    expect(release.text()).not.toContain(matched ? "Upstream context" : "Matched to candidate");
+  });
+
   it("shows release access for every candidate while retaining risks and precise advisory scope", () => {
     const items = Array.from({ length: 12 }, (_, index) => pendingGroupedItem({
       line_no: index + 1,

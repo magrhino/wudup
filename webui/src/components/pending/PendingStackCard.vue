@@ -232,7 +232,7 @@ const previewDisabledMessage = computed(() =>
         <PendingReleaseNotes
           class="stack-change-release"
           :candidate-label="`${groupedItemServices(item)} · ${groupedItemTarget(item)}`"
-          :candidate-tag="item.desired_tag || item.current_tag"
+          :candidate-tag="groupedItemTarget(item).split('@')[0]?.split('/').pop()?.split(':')[1] || ''"
           :release-note="releaseNoteFor(item)"
           :release-note-status="releaseNoteStatus(releaseNoteFor(item))"
           :release-note-reason="releaseNoteReason(releaseNoteFor(item))"
