@@ -29,12 +29,11 @@ const titleId = useId();
 const releaseBody = computed(() => props.releaseNote?.body?.trim() ?? "");
 const links = computed(() => (props.releaseNote?.links ?? [])
   .filter((link) => safeUrl(link.url))
-  .map((link) => ({
-    ...link,
-    label: link.kind === "github_release"
-      ? (link.label === "Upstream release" ? "Upstream release (GitHub)" : "GitHub release")
-      : link.label,
-  })),
+  .map((link) => {
+    if (link.kind !== "github_release") return link;
+    const label = link.label === "Upstream release" ? "Upstream release (GitHub)" : "GitHub release";
+    return { ...link, label };
+  }),
 );
 const sourceLinks = computed(() => links.value.filter((link) => link.kind !== "security_advisory"));
 const matched = computed(() => {
@@ -125,63 +124,66 @@ function readChangelog(): Promise<void> {
         <ExternalLink :size="14" aria-hidden="true" />
       </a>
       <span v-if="releaseNote?.status === 'ready'" class="release-notes-reason">{{ contextLabel }}</span>
-      <span v-else class="release-notes-reason" role="status">
+      <output v-else class="release-notes-reason">
         <strong v-if="releaseNoteStatus">{{ releaseNoteStatus }}. </strong>{{ unavailableReason }}
-      </span>
+      </output>
     </div>
     <n-modal v-model:show="show">
-      <div role="dialog" aria-modal="true" :aria-labelledby="titleId" class="release-panel">
-        <header class="release-panel-heading">
-          <div>
-            <h2 :id="titleId">Release notes</h2>
-            <p class="wrap-anywhere">{{ candidateLabel }}</p>
+      <!-- Naive UI's focus trap requires a div as the modal content root. -->
+      <div class="release-modal">
+        <dialog open aria-modal="true" :aria-labelledby="titleId" class="release-panel">
+          <header class="release-panel-heading">
+            <div>
+              <h2 :id="titleId">Release notes</h2>
+              <p class="wrap-anywhere">{{ candidateLabel }}</p>
+            </div>
+            <n-button size="small" @click="show = false">Close release notes</n-button>
+          </header>
+          <div class="release-panel-content">
+            <strong v-if="releaseNote?.release_tag" class="wrap-anywhere">
+              {{ releaseNote.release_tag }}<template v-if="releaseNote.title && releaseNote.title !== releaseNote.release_tag"> — {{ releaseNote.title }}</template>
+            </strong>
+            <p v-if="releaseNote?.release_tag" class="release-context">
+              <strong>{{ contextLabel }}.</strong>
+              {{ matched ? 'The release version matches this candidate tag.' : 'This release is general upstream information; it is not confirmed for this candidate or digest.' }}
+            </p>
+            <p v-if="releaseNote?.upstream_repo" class="wrap-anywhere">Source: {{ releaseNote.upstream_repo }}</p>
+            <div class="candidate-release-actions">
+              <a v-for="link in links" :key="link.url" class="release-note-link"
+                :href="link.url" target="_blank" rel="noopener noreferrer">
+                {{ link.label }}
+                <ExternalLink :size="14" aria-hidden="true" />
+              </a>
+            </div>
+            <div v-if="releaseNote?.breaking" class="release-evidence">
+              <strong><AlertTriangle :size="14" aria-hidden="true" /> Possible breaking change</strong>
+              <p v-for="reason in releaseNote.breaking_reasons" :key="reason">{{ reason }}</p>
+            </div>
+            <output v-if="securityVerified || securityNeedsReview" class="release-evidence"
+              :aria-label="securityLabel">
+              <strong><ShieldAlert :size="14" aria-hidden="true" /> {{ securityLabel }}</strong>
+              <span>{{ security?.reason }}</span>
+            </output>
+            <pre v-if="releaseBody" class="release-panel-body">{{ releaseBody }}</pre>
+            <output v-else-if="!changelogLoading && !changelogReady && !changelogProblem">{{ unavailableReason }}</output>
+            <output v-if="changelogLoading">Loading changelog notes…</output>
+            <output v-if="changelogProblem" class="release-changelog-problem">{{ changelogProblem }}</output>
+            <section v-if="changelogReady">
+              <h3>Changelog notes</h3>
+              <pre class="release-panel-body">{{ changelog.body }}</pre>
+              <a v-if="safeUrl(changelog.sourceUrl)" class="release-note-link" :href="changelog.sourceUrl"
+                target="_blank" rel="noopener noreferrer">Changelog source <ExternalLink :size="14" aria-hidden="true" /></a>
+            </section>
+            <n-button v-if="canReadChangelog && !changelogReady" size="small" secondary
+              :loading="changelogLoading" :disabled="changelogLoading" @click="readChangelog">
+              {{ readChangelogLabel }}
+            </n-button>
+            <div v-if="releaseNote" class="release-notes-cell">
+              <n-tag size="small" :type="notificationStatusType" :title="notificationStatusDetail || undefined">{{ notificationStatusLabel }}</n-tag>
+              <span v-if="notificationStatusDetail" class="release-notes-reason">{{ notificationStatusDetail }}</span>
+            </div>
           </div>
-          <n-button size="small" @click="show = false">Close release notes</n-button>
-        </header>
-        <div class="release-panel-content">
-          <strong v-if="releaseNote?.release_tag" class="wrap-anywhere">
-            {{ releaseNote.release_tag }}<template v-if="releaseNote.title && releaseNote.title !== releaseNote.release_tag"> — {{ releaseNote.title }}</template>
-          </strong>
-          <p v-if="releaseNote?.release_tag" class="release-context">
-            <strong>{{ contextLabel }}.</strong>
-            {{ matched ? 'The release version matches this candidate tag.' : 'This release is general upstream information; it is not confirmed for this candidate or digest.' }}
-          </p>
-          <p v-if="releaseNote?.upstream_repo" class="wrap-anywhere">Source: {{ releaseNote.upstream_repo }}</p>
-          <div class="candidate-release-actions">
-            <a v-for="link in links" :key="link.url" class="release-note-link"
-              :href="link.url" target="_blank" rel="noopener noreferrer">
-              {{ link.label }}
-              <ExternalLink :size="14" aria-hidden="true" />
-            </a>
-          </div>
-          <div v-if="releaseNote?.breaking" class="release-evidence">
-            <strong><AlertTriangle :size="14" aria-hidden="true" /> Possible breaking change</strong>
-            <p v-for="reason in releaseNote.breaking_reasons" :key="reason">{{ reason }}</p>
-          </div>
-          <div v-if="securityVerified || securityNeedsReview" class="release-evidence"
-            role="status" :aria-label="securityLabel">
-            <strong><ShieldAlert :size="14" aria-hidden="true" /> {{ securityLabel }}</strong>
-            <p>{{ security?.reason }}</p>
-          </div>
-          <pre v-if="releaseBody" class="release-panel-body">{{ releaseBody }}</pre>
-          <p v-else-if="!changelogLoading && !changelogReady && !changelogProblem" role="status">{{ unavailableReason }}</p>
-          <p v-if="changelogLoading" role="status">Loading changelog notes…</p>
-          <p v-if="changelogProblem" class="release-changelog-problem" role="status">{{ changelogProblem }}</p>
-          <section v-if="changelogReady">
-            <h3>Changelog notes</h3>
-            <pre class="release-panel-body">{{ changelog.body }}</pre>
-            <a v-if="safeUrl(changelog.sourceUrl)" class="release-note-link" :href="changelog.sourceUrl"
-              target="_blank" rel="noopener noreferrer">Changelog source <ExternalLink :size="14" aria-hidden="true" /></a>
-          </section>
-          <n-button v-if="canReadChangelog && !changelogReady" size="small" secondary
-            :loading="changelogLoading" :disabled="changelogLoading" @click="readChangelog">
-            {{ readChangelogLabel }}
-          </n-button>
-          <div v-if="releaseNote" class="release-notes-cell">
-            <n-tag size="small" :type="notificationStatusType" :title="notificationStatusDetail || undefined">{{ notificationStatusLabel }}</n-tag>
-            <span v-if="notificationStatusDetail" class="release-notes-reason">{{ notificationStatusDetail }}</span>
-          </div>
-        </div>
+        </dialog>
       </div>
     </n-modal>
   </div>
@@ -199,7 +201,14 @@ function readChangelog(): Promise<void> {
   gap: 6px 12px;
 }
 
+.release-modal {
+  border-radius: 8px;
+}
+
 .release-panel {
+  position: static;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   width: min(680px, calc(100vw - 32px));

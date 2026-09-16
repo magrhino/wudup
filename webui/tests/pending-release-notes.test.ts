@@ -24,6 +24,7 @@ describe("candidate release panel", () => {
     expect(wrapper.findAll("a")).toHaveLength(0);
     expect(wrapper.find(".release-panel").exists()).toBe(false);
     await wrapper.find("button").trigger("click");
+    expect(wrapper.find("dialog[open][aria-modal=true]").exists()).toBe(true);
     expect(wrapper.find("pre").text()).toBe(body);
     expect(wrapper.find("img").exists()).toBe(false);
     expect(wrapper.text()).toContain("Matched to candidate");

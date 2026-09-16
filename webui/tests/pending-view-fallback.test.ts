@@ -893,7 +893,7 @@ describe("pending view fallback and release notes", () => {
     expect(advisoryLink.attributes("target")).toBe("_blank");
     expect(advisoryLink.attributes("rel")).toBe("noopener noreferrer");
     expect(
-      wrapper.find('[role="status"][aria-label="Verified High security update"]').exists(),
+      wrapper.find('output[aria-label="Verified High security update"]').exists(),
     ).toBe(true);
   });
 
