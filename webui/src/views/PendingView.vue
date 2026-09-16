@@ -274,7 +274,8 @@ const pendingRescanMessage = computed(() => {
     const skipped = rescan.skipped.length
       ? ` ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped.`
       : "";
-    return `${rescan.scope === "all" ? `${requested} ` : ""}WUD reported a partial scan result.${counts}${skipped} Review request details.`;
+    const prefix = rescan.scope === "all" ? `${requested} ` : "";
+    return `${prefix}WUD reported a partial scan result.${counts}${skipped} Review request details.`;
   }
   if (rescan.skipped.length) {
     return `${requested} ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped. Review request details.`;

@@ -1200,9 +1200,12 @@ export const useUpdatesStore = defineStore("updates", () => {
   }
 
   function markApplyJobRecovery(jobId: string): void {
-    const runId = applyJob.value?.job_id === jobId
-      ? applyJob.value.run_id
-      : rememberedApplyJobId.value === jobId ? rememberedApplyRunId.value : null;
+    let runId: number | null = null;
+    if (applyJob.value?.job_id === jobId) {
+      runId = applyJob.value.run_id;
+    } else if (rememberedApplyJobId.value === jobId) {
+      runId = rememberedApplyRunId.value;
+    }
     if (!applyJobRecoveries.value.some((notice) => notice.jobId === jobId)) {
       applyJobRecoveries.value.push({ jobId, runId, acknowledged: false });
       persistApplyJobRecoveries();

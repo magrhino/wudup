@@ -16,9 +16,11 @@ const error = ref("");
 const checked = ref(false);
 const run = computed(() => props.runId === null ? null : runs.runDetails[props.runId]);
 const resolved = computed(() => updates.applyJobRecoveryResolved(props.runId));
-const title = computed(() => resolved.value
-  ? "Update verified"
-  : run.value?.status === "failure" ? "Update failed — review required" : "Update outcome needs review");
+const title = computed(() => {
+  if (resolved.value) return "Update verified";
+  if (run.value?.status === "failure") return "Update failed — review required";
+  return "Update outcome needs review";
+});
 const detail = computed(() => {
   if (resolved.value) return "The related run completed successfully and its updates were verified.";
   if (run.value?.finished_at) return "The related run has finished, but the update still needs review. Inspect its verification results and log before retrying.";
