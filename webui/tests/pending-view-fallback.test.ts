@@ -458,7 +458,8 @@ describe("pending view fallback and release notes", () => {
     expect(readiness.find(".apply-readiness-passed").exists()).toBe(true);
     expect(readiness.findAll(".apply-readiness-row")).toHaveLength(1);
     expect(readiness.text()).not.toContain("docker-daemon-info");
-    expect(dialog.text()).toContain("Logs writable: /logs is not a directory");
+    expect(readiness.text()).toContain("/logs is not a directory");
+    expect(dialog.text().split("/logs is not a directory")).toHaveLength(2);
 
     const applyButton = dialog
       .findAll("button")
@@ -498,7 +499,7 @@ describe("pending view fallback and release notes", () => {
 
     const dialog = wrapper.find('[role="dialog"]');
     expect(dialog.find("#preflight-modal-title").text()).toBe("Apply blocked");
-    expect(dialog.text()).toContain("Apply blocked");
+    expect(dialog.text().split("Apply blocked")).toHaveLength(2);
     expect(dialog.text()).toContain("Selected update metadata");
     expect(dialog.text()).toContain(
       "Check your WUD configuration, then run a successful WUD scan.",

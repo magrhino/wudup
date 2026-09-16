@@ -969,6 +969,46 @@ test("mobile shell keeps page width stable and preserves link targets", async ({
     .toEqual({ innerWidth: 390, scrollWidth: 390 });
 });
 
+test("selection toolbar stays compact without hiding selection scope or actions", async ({ page }) => {
+  const state = createState({ authenticated: true, mutationsEnabled: false });
+  await installApiFixtures(page, state);
+
+  for (const width of [320, 390, 844, 1280]) {
+    await page.setViewportSize({ width, height: width === 844 ? 390 : 844 });
+    await page.goto("/#/pending");
+    const toolbar = page.getByRole("region", { name: "Review updates" });
+    const review = toolbar.getByRole("button", { name: /Review selected \(/ });
+    await expect(review).toBeDisabled();
+    await page.getByRole("checkbox", { name: "Select stack media", exact: true }).check();
+    await expect(review).toBeEnabled();
+    const clear = toolbar.getByRole("button", { name: "Clear selection", exact: true });
+
+    if (width <= 390) {
+      const toolbarBox = await toolbar.boundingBox();
+      const clearBox = await clear.boundingBox();
+      const reviewBox = await review.boundingBox();
+      expect(toolbarBox!.height).toBeLessThanOrEqual(125);
+      expect(clearBox!.height).toBeGreaterThanOrEqual(touchTargetSizePx);
+      expect(reviewBox!.height).toBeGreaterThanOrEqual(touchTargetSizePx);
+      expect(clearBox!.y).toBe(reviewBox!.y);
+      expect(clearBox!.x + clearBox!.width).toBeLessThan(reviewBox!.x);
+      expect(reviewBox!.x + reviewBox!.width).toBeLessThanOrEqual(width);
+    }
+
+    await page.getByRole("textbox", { name: "Search pending updates" }).fill("no-match");
+    await expect(toolbar).toContainText("1 selected update hidden by search; included in review.");
+    await clear.focus();
+    await page.keyboard.press("Enter");
+    await expect(review).toBeDisabled();
+    await expect(toolbar).not.toContainText("hidden by search");
+    await page.getByText("Queue details and actions", { exact: true }).click();
+    await expect(page.getByRole("button", { name: "Rescan WUD", exact: true })).toBeVisible();
+    await page.getByText("Queue details and actions", { exact: true }).click();
+    await page.getByRole("textbox", { name: "Search pending updates" }).fill("");
+  }
+  expect(state.calls.some((call) => call.path === "/api/v1/plans/apply")).toBe(false);
+});
+
 test("theme toggle follows system dark mode and cycles preferences", async ({
   page,
 }) => {

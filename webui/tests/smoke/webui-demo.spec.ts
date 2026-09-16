@@ -120,12 +120,12 @@ test("static demo renders current pending state in read-only mode", async ({
   await close.focus();
   await expect(close).toBeFocused();
 
-  await expect(
-    page.getByText(
-      "The public static demo is read-only. Run WUDup locally to apply changes.",
-      { exact: true },
-    ),
-  ).toBeVisible();
+  const readOnlyGuidance = page.getByRole("dialog").getByText(
+    "Read-only mode is active. The public static demo is read-only. Run WUDup locally to apply changes.",
+    { exact: true },
+  );
+  await expect(readOnlyGuidance).toHaveCount(1);
+  await expect(readOnlyGuidance).toBeVisible();
   await expect(page.getByText("8 pending updates")).toBeVisible();
 });
 

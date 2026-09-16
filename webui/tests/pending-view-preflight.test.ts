@@ -106,6 +106,9 @@ describe("pending view preflight safety", () => {
     expect(applyButton?.exists()).toBe(true);
     expect(applyButton?.attributes("disabled")).toBeDefined();
     const modal = wrapper.find(".preflight-modal");
+    expect(modal.text().split("1 failed check must be fixed before applying.")).toHaveLength(2);
+    expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
+    expect(modal.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     expect(modal.classes()).toContain("preflight-modal-fixed-footer");
     expect(modal.element.tagName).toBe("DIV");
     expect(modal.attributes("aria-modal")).toBe("true");
@@ -114,6 +117,31 @@ describe("pending view preflight safety", () => {
     expect(modal.find(":scope > .preflight-footer").text()).toContain("Apply 1 update");
 
     expect(applyPlan).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { mutationsEnabled: true, code: "docker-reachable", detail: "Docker is unavailable. Check the Docker connection.", expected: "Docker is unavailable. Check the Docker connection." },
+    { mutationsEnabled: false, code: "mutations-enabled", detail: "", expected: "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates." },
+    { mutationsEnabled: false, code: "docker-reachable", detail: "Docker is unavailable.", expected: "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates." },
+    { mutationsEnabled: true, code: "docker-reachable", detail: "", expected: "Fix the failed apply readiness check before applying updates." },
+  ])("keeps one explanation and fallback guidance for $code ($mutationsEnabled, $detail)", async ({ mutationsEnabled, code, detail, expected }) => {
+    const { pinia, settings, updates } = setupStores(mutationsEnabled);
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse({ can_apply: false, apply_preflight: failedApplyPreflight(code, detail) });
+    });
+    const applyPlan = vi.spyOn(updates, "applyPlan");
+    const wrapper = mountPendingView(pinia);
+    await wrapper.findAll("button").find((button) => button.text() === "Review media plan")!.trigger("click");
+    await flushPromises();
+
+    const modal = wrapper.find(".preflight-modal");
+    expect(modal.text().split(expected)).toHaveLength(2);
+    if (detail) expect(modal.find(".apply-readiness").text()).toContain(detail);
+    expect(modal.findAll("button").find((button) => button.text() === "Apply 1 update")!.attributes("disabled")).toBeDefined();
+    expect(applyPlan).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("shows blocked preflight errors without an apply action", async () => {
