@@ -125,6 +125,59 @@ test("static demo renders current pending state in read-only mode", async ({
   await expect(page.getByText("8 pending updates")).toBeVisible();
 });
 
+test("changelog uses native fetch and recovers from failed or unavailable notes", async ({ page }) => {
+  let releaseRequests = 0;
+  let changelogRequests = 0;
+  await page.route("https://api.github.com/repos/**/releases/tags/*", async (route) => {
+    releaseRequests += 1;
+    // Exercise a runtime failure without replacing the browser's native fetch.
+    const body = releaseRequests === 1
+      ? "invalid JSON"
+      : JSON.stringify({
+          body: releaseRequests === 2 ? "No changelog here." : "[changelog](CHANGELOG.md)",
+        });
+    await route.fulfill({ contentType: "application/json", body });
+  });
+  await page.route("https://raw.githubusercontent.com/**", async (route) => {
+    changelogRequests += 1;
+    await route.fulfill({
+      contentType: "text/plain",
+      body: "## [2026.5.3]\n\n- Controlled browser changelog notes\n\n## [2026.5.1]\n\n- Older notes",
+    });
+  });
+  await page.goto(demoRoute("/#/pending"));
+  await page.getByLabel("Details for home", { exact: true }).click();
+  const stack = page.locator("article").filter({
+    has: page.getByLabel("Details for home", { exact: true }),
+  });
+  const releaseLink = stack.getByRole("link", { name: "GitHub release", exact: true });
+  const releaseUrl = await releaseLink.getAttribute("href");
+  expect(releaseUrl).toMatch(/^https:\/\/github\.com\/.+\/releases\/tag\//);
+  expect(releaseRequests).toBe(0);
+
+  await stack.getByRole("button", { name: "Read changelog", exact: true }).click();
+  await expect(stack.getByRole("status").filter({ hasText: "Could not load notes." })).toBeVisible();
+  const fallbackLink = stack.getByRole("link", { name: "Open GitHub release", exact: true });
+  await expect(fallbackLink).toHaveAttribute("href", releaseUrl!);
+  await expect(fallbackLink).toHaveAttribute("target", "_blank");
+  await expect(fallbackLink).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(stack).not.toContainText("valid JSON");
+  await expect(stack).not.toContainText("Illegal invocation");
+
+  await stack.getByRole("button", { name: "Retry changelog", exact: true }).click();
+  await expect(stack.getByText("This release does not link to a changelog. Open the GitHub release for notes.")).toBeVisible();
+  await expect(fallbackLink).toBeVisible();
+
+  await stack.getByRole("button", { name: "Read changelog", exact: true }).click();
+  await expect(stack.getByRole("button", { name: "Changelog loaded", exact: true })).toBeVisible();
+  await stack.getByText("Changelog notes", { exact: true }).click();
+  await expect(stack.getByText("Controlled browser changelog notes", { exact: false })).toBeVisible();
+  await expect(stack).not.toContainText("Older notes");
+  await expect(stack.locator(".release-changelog-problem")).toHaveCount(0);
+  expect(releaseRequests).toBe(3);
+  expect(changelogRequests).toBe(1);
+});
+
 test("static demo renders seeded audit log records", async ({ page }) => {
   await page.goto(demoRoute("/#/audit"));
 

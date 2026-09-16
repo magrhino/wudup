@@ -87,7 +87,7 @@ export async function fetchReleaseChangelog(
   if (!changelogUrl) {
     return {
       status: "unavailable",
-      error: "No changelog link found in the GitHub release body.",
+      error: "This release does not link to a changelog. Open the GitHub release for notes.",
     };
   }
 
@@ -103,7 +103,7 @@ export async function fetchReleaseChangelog(
   if (!section) {
     return {
       status: "unavailable",
-      error: `No changelog section found for ${tag}.`,
+      error: `No changelog notes found for ${tag}. Open the GitHub release for details.`,
     };
   }
   return {
@@ -140,7 +140,9 @@ async function fetchTextWithLimit(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
   try {
-    const response = await options.fetchImpl(url, {
+    // Call standalone: native fetch rejects the options object as its receiver.
+    const { fetchImpl } = options;
+    const response = await fetchImpl(url, {
       headers: { Accept: options.accept },
       signal: controller.signal,
     });

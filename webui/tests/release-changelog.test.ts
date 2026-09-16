@@ -18,6 +18,58 @@ function streamlessTextResponse(body: string, init: ResponseInit = {}): Response
 }
 
 describe("release changelog fetching", () => {
+  it.each([false, true])("preserves the fetch receiver (injected: %s)", async (injected) => {
+    const responses = [
+      textResponse(JSON.stringify({ body: "[changelog](CHANGELOG.md)" })),
+      textResponse("## [v0.5.0]\n\n- Loaded notes"),
+    ];
+    const fetchMock = vi.fn(function (this: unknown) {
+      // Web IDL accepts a standalone call, but rejects an options object as this.
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(responses.shift()!);
+    });
+    if (!injected) {
+      vi.stubGlobal("fetch", fetchMock);
+    }
+
+    await expect(fetchReleaseChangelog(
+      "https://github.com/t-mart/mousehole/releases/tag/v0.5.0",
+      "v0.5.0",
+      injected ? { fetch: fetchMock } : {},
+    )).resolves.toMatchObject({
+      status: "ready",
+      body: expect.stringContaining("Loaded notes"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts a stalled fetch at the timeout and clears the timer", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const fetchMock = vi.fn((_input: string, init?: RequestInit) => {
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal?.reason));
+        });
+      });
+      const request = fetchReleaseChangelog(
+        "https://github.com/t-mart/mousehole/releases/tag/v0.5.0",
+        "v0.5.0",
+        { fetch: fetchMock, timeoutMs: 50 },
+      );
+      const rejection = expect(request).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(50);
+      await rejection;
+      expect(signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns unavailable when the release body has no changelog link", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       textResponse(JSON.stringify({ body: "No changelog here." })),
@@ -31,7 +83,7 @@ describe("release changelog fetching", () => {
       ),
     ).resolves.toMatchObject({
       status: "unavailable",
-      error: "No changelog link found in the GitHub release body.",
+      error: "This release does not link to a changelog. Open the GitHub release for notes.",
     });
   });
 
@@ -55,7 +107,7 @@ describe("release changelog fetching", () => {
       ),
     ).resolves.toMatchObject({
       status: "unavailable",
-      error: "No changelog section found for v0.5.0.",
+      error: "No changelog notes found for v0.5.0. Open the GitHub release for details.",
     });
   });
 

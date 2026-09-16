@@ -743,12 +743,12 @@ export const useUpdatesStore = defineStore("updates", () => {
           error: result.error,
         });
       })
-      .catch((caughtError: unknown) => {
+      .catch(() => {
         setReleaseChangelogState(key, {
           status: "error",
           body: "",
           sourceUrl: "",
-          error: errorMessage(caughtError),
+          error: "Could not load notes. Try again or open the GitHub release.",
         });
       })
       .finally(() => {

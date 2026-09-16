@@ -2277,9 +2277,18 @@ describe("connection store focused coverage", () => {
 
     expect(updates.releaseChangelogStateFor(note)).toMatchObject({
       status: "error",
-      error: "network failed",
+      error: "Could not load notes. Try again or open the GitHub release.",
     });
     expect(updates.releaseNotesError).toBe("");
+
+    const retryFetch = mockReleaseChangelogFetch("- Notes after retry");
+    await updates.loadReleaseChangelog(note);
+    expectReleaseChangelogFetches(retryFetch);
+    expect(updates.releaseChangelogStateFor(note)).toMatchObject({
+      status: "ready",
+      error: "",
+      body: expect.stringContaining("Notes after retry"),
+    });
   });
 
   it("sets stream errors through the updates store action", () => {
