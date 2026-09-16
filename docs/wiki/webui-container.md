@@ -85,6 +85,20 @@ todo file, and `auto` uses the API when usable before falling back to
 `WUD_OUT_FILE`. The host `updates` and `docker-update-from-wud` commands remain
 legacy file-mode helpers.
 
+Pending shows current WUD health with its last check time and affected-container
+diagnostics. Collapse the summary to keep its unresolved status and last check
+visible while hiding the details. Preview a plan to distinguish advisory source
+warnings from update blockers. Scan-request feedback clears when a newer WUD observation arrives;
+request acceptance alone does not mean the scan or update succeeded. Partial scan
+requests retain a warning and request details even when current health is good.
+
+If an update job disappears after a WebUI restart, its recovery notice links to
+the related run when known. Otherwise, review History to identify the update.
+**Check outcome** reads the related job/run evidence. **Acknowledge and collapse**
+keeps unresolved outcomes visible and does not mark them successful. A verified
+successful run allows the notice to be dismissed. Recovery notices are retained
+in the current browser tab's session storage, including across page reloads.
+
 The Compose examples place WUD and WUDup on a private app network and set
 `WUD_API_BASE_URL=http://wud:3000` so WUDup can read WUD metadata without
 publishing WUD's port to the host. WUD 9 requires API credentials on this private

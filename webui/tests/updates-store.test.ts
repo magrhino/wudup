@@ -13,7 +13,6 @@ import { useConnectionStore } from "../src/stores/connection";
 import { useSettingsStore } from "../src/stores/settings";
 import {
   useUpdatesStore,
-  APPLY_JOB_RECOVERY_MESSAGE,
   SECURITY_SCAN_POLL_INTERVAL_MS,
   SECURITY_SCAN_POLL_MAX_ATTEMPTS,
 } from "../src/stores/updates";
@@ -663,7 +662,7 @@ describe("updates store", () => {
         fallback_reason: "",
         detail: "",
       },
-      wud_api: wudApiStatus({ last_checked_at: "new-check" }),
+      wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
     };
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -674,7 +673,7 @@ describe("updates store", () => {
             requires_pending_reload: true,
             source_hash: sourceHash,
             source: refreshed.source,
-            wud_api: wudApiStatus({ last_checked_at: "new-check" }),
+            wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
             items: [],
           }),
         );
@@ -718,7 +717,7 @@ describe("updates store", () => {
     expect(updates.pending?.source_hash).toBe(sourceHash);
     expect(updates.pending?.source.active).toBe("api");
     expect(updates.pending?.items[0].metadata_status).toBe("fresh");
-    expect(updates.pendingWudMetadataCheckedAt).toBe("new-check");
+    expect(updates.pendingWudMetadataCheckedAt).toBe("2026-01-02T00:01:00+00:00");
     expect(updates.pendingCleanup?.audit_run_id).toBe(12);
     expect(updates.plan).toBeNull();
     expect(updates.error).toBe(
@@ -2113,7 +2112,7 @@ describe("updates store", () => {
     expect(job).toBeNull();
     expect(updates.applyJob).toBeNull();
     expect(updates.applyJobLog).toBeNull();
-    expect(updates.applyJobRecovery).toBe(APPLY_JOB_RECOVERY_MESSAGE);
+    expect(updates.applyJobRecoveries).toEqual([{ jobId: "job-lost", runId: null, acknowledged: false }]);
     expect(updates.rememberedApplyJobId).toBe("");
     expect(runs.error).toBe("");
     expect(globalThis.sessionStorage.getItem("applyJobId")).toBeNull();

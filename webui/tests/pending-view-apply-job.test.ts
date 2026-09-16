@@ -666,8 +666,9 @@ describe("pending view apply jobs", () => {
     expect(updates.rememberedApplyJobId).toBe("");
     expect(window.sessionStorage.getItem("applyJobId")).toBeNull();
     expect(wrapper.text()).toContain(APPLY_JOB_RECOVERY_MESSAGE);
-    expect(wrapper.text()).toContain("Runs");
-    expect(wrapper.text()).toContain("Latest run");
-    expect(wrapper.text()).toContain("Log");
+    expect(wrapper.text()).toContain("Review History");
+    expect(wrapper.text()).toContain("No related run is known");
+    expect(wrapper.find(".apply-recovery").text()).not.toContain("Latest run");
+    expect(wrapper.find(".apply-recovery").text()).not.toContain("Review run #42");
   });
 });
