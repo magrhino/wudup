@@ -17,12 +17,13 @@ linuxserver/docker-changedetection.io: dgtlmoon/changedetection.io
 linuxserver/docker-code-server: coder/code-server
 linuxserver/docker-cops: mikespub-org/seblucas-cops
 linuxserver/docker-cura: Ultimaker/Cura
-linuxserver/docker-d2-builder: terrastruct/d2
+linuxserver/docker-d2-builder: d2lang/d2
 linuxserver/docker-daapd: owntone/owntone-server
 linuxserver/docker-davos: linuxserver/davos
 linuxserver/docker-ddclient: ddclient/ddclient
 linuxserver/docker-diskover: diskoverdata/diskover-community
 linuxserver/docker-doplarr: kiranshila/Doplarr
+linuxserver/docker-doplarr_rs: activexray/doplarr_rs
 linuxserver/docker-dosbox-staging: dosbox-staging/dosbox-staging
 linuxserver/docker-duckstation: stenzek/duckstation
 linuxserver/docker-duplicati: duplicati/duplicati
@@ -45,6 +46,8 @@ linuxserver/docker-grocy: grocy/grocy
 linuxserver/docker-gzdoom: ZDoom/gzdoom
 # LSIO metadata uses this upstream owner spelling.
 linuxserver/docker-habridge: bwssytems/ha-bridge
+# LSIO tracks the Arch package; handbrake.fr links to this release repository.
+linuxserver/docker-handbrake: HandBrake/HandBrake
 linuxserver/docker-healthchecks: healthchecks/healthchecks
 linuxserver/docker-hedgedoc: hedgedoc/hedgedoc
 linuxserver/docker-heimdall: linuxserver/Heimdall
@@ -59,6 +62,9 @@ linuxserver/docker-kali-linux: linuxserver/docker-kali-linux
 # Kasm release links resolve through the install-wizard repo.
 linuxserver/docker-kasm: kasmtech/kasm-install-wizard
 linuxserver/docker-kavita: Kareadita/Kavita
+# LSIO tracks the Alpine package; keepassxc.org links to this upstream.
+# Alpine -rN revisions currently fall back to LSIO release notes.
+linuxserver/docker-keepassxc: keepassxreboot/keepassxc
 linuxserver/docker-kimai: kimai/kimai
 linuxserver/docker-kometa: Kometa-Team/Kometa
 linuxserver/docker-ldap-auth: nginxinc/nginx-ldap-auth
@@ -91,14 +97,18 @@ linuxserver/docker-openvscode-server: gitpod-io/openvscode-server
 linuxserver/docker-orcaslicer: SoftFever/OrcaSlicer
 linuxserver/docker-overseerr: sct/overseerr
 linuxserver/docker-pairdrop: schlagmichdoch/PairDrop
+linuxserver/docker-pelorus: linuxserver/pelorus
 linuxserver/docker-phpmyadmin: phpmyadmin/phpmyadmin
 linuxserver/docker-piper: rhasspy/wyoming-piper
 linuxserver/docker-piwigo: Piwigo/Piwigo
 linuxserver/docker-planka: plankanban/planka
-linuxserver/docker-projectsend: projectsend/projectsend
+linuxserver/docker-projectsend: projectsend/legacy
 linuxserver/docker-prowlarr: Prowlarr/Prowlarr
 linuxserver/docker-pwndrop: kgretzky/pwndrop
 linuxserver/docker-pydio-cells: pydio/cells
+# The pyload-ng PyPI package links to this source repository.
+# PyPI development versions may lack GitHub releases; retain LSIO notes.
+linuxserver/docker-pyload-ng: pyload/pyload
 linuxserver/docker-pylon: pylonide/pylon
 linuxserver/docker-qbittorrent: qbittorrent/qBittorrent
 linuxserver/docker-qdirstat: shundhammer/qdirstat
@@ -124,6 +134,9 @@ linuxserver/docker-synclounge: samcm/synclounge
 linuxserver/docker-syncthing: syncthing/syncthing
 linuxserver/docker-tautulli: Tautulli/Tautulli
 linuxserver/docker-thelounge: thelounge/thelounge
+# LSIO tracks Alpine transmission-daemon; transmissionbt.com links here.
+# Alpine -rN revisions currently fall back to LSIO release notes.
+linuxserver/docker-transmission: transmission/transmission
 linuxserver/docker-tvheadend: tvheadend/tvheadend
 linuxserver/docker-ungoogled-chromium: ungoogled-software/ungoogled-chromium
 linuxserver/docker-vscodium: VSCodium/vscodium
@@ -137,5 +150,7 @@ linuxserver/docker-wikijs: Requarks/wiki
 linuxserver/docker-winegui: winegui/WineGUI
 linuxserver/docker-xbackbone: SergiX44/XBackBone
 linuxserver/docker-xemu: xemu-project/xemu
+# LSIO's custom version command queries this repo and excludes yaak-cli tags.
+linuxserver/docker-yaak: mountain-loop/yaak
 linuxserver/docker-your_spotify: Yooooomi/your_spotify
 linuxserver/docker-zen: zen-browser/desktop
