@@ -34,9 +34,10 @@ const changelogProblem = computed(() =>
     ? changelog.value.error
     : "",
 );
-const readChangelogLabel = computed(() =>
-  changelogReady.value ? "Changelog loaded" : "Read changelog",
-);
+const readChangelogLabel = computed(() => {
+  if (changelogReady.value) return "Changelog loaded";
+  return changelog.value.status === "error" ? "Retry changelog" : "Read changelog";
+});
 const notificationStatusLabel = computed(() =>
   releaseNotificationStatusLabel(props.releaseNote?.notification_status ?? ""),
 );
@@ -101,7 +102,7 @@ function readChangelog(): Promise<void> {
       target="_blank"
       rel="noopener noreferrer"
     >
-      {{ link.label }}
+      {{ changelogProblem && link.kind === 'github_release' ? 'Open GitHub release' : link.label }}
       <ExternalLink :size="14" aria-hidden="true" />
     </a>
     <span
@@ -130,6 +131,7 @@ function readChangelog(): Promise<void> {
     <span
       v-if="changelogProblem"
       class="release-notes-reason release-changelog-problem"
+      role="status"
     >
       {{ changelogProblem }}
     </span>
