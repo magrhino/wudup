@@ -954,7 +954,7 @@ test("mobile shell keeps page width stable and preserves link targets", async ({
 
   await page.goto("/#/pending");
   await expect(page.getByRole("checkbox", { name: /Select stack media/ })).toBeVisible();
-  await page.getByText("Details").first().click();
+  await page.getByLabel("Details for media", { exact: true }).click();
   await expect(page.getByText("Possible breaking change")).toBeVisible();
   await expect
     .poll(() =>

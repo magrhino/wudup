@@ -112,7 +112,7 @@ const emit = defineEmits<{
     </n-button>
   </div>
 
-  <div v-if="pendingLoaded" class="batch-action-bar" role="region" aria-label="Review updates">
+  <section v-if="pendingLoaded" class="batch-action-bar" aria-label="Review updates">
     <div class="selection-summary" aria-live="polite">
       <strong class="wrap-anywhere">{{ selectedCount ? batchSummaryLabel : 'Select updates to review' }}</strong>
       <span v-if="selectedHiddenCount" class="wrap-anywhere">
@@ -136,7 +136,7 @@ const emit = defineEmits<{
         {{ updateSelectedButtonLabel }}
       </n-button>
     </n-flex>
-  </div>
+  </section>
   <p v-if="pendingLoaded && selectedMetadataWarning" class="selection-warning">{{ selectedMetadataWarning }}</p>
   <p v-if="pendingLoaded && hasSelectedTagUpdates" class="selection-warning">Tag rewrites are confirmed in review before Apply.</p>
 </template>
