@@ -7,12 +7,17 @@ and keeps browser access bound to loopback unless you expose it intentionally.
 ## Start The WebUI
 
 Copy the env example, review the host stack path and browser exposure settings,
-then start the service:
+and configure [WUD API authentication](#wud-api-authentication) before starting
+the service. WUD 9 needs administrator bootstrap credentials on first start and
+WUDup needs separate outbound API settings:
 
 ```bash
 WEBUI_ENV="$HOME/.config/wudup/webui.env"
 mkdir -p "$HOME/.config/wudup"
 test -f "$WEBUI_ENV" || cp docs/examples/webui.env.example "$WEBUI_ENV"
+chmod 600 "$WEBUI_ENV"
+# Edit WEBUI_ENV: set WUD_AUTH_ADMIN_PASSWORD and one WUD_API_AUTH_* method.
+# For a _FILE credential, also add its read-only mount as described below.
 docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d
 docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml logs wudup
 ```
@@ -82,15 +87,62 @@ legacy file-mode helpers.
 
 The Compose examples place WUD and WUDup on a private app network and set
 `WUD_API_BASE_URL=http://wud:3000` so WUDup can read WUD metadata without
-publishing WUD's port to the host. If WUD's API is protected by a proxy or
-static auth layer, configure bearer, basic, or JSON header-file credentials for
-WUDup's outbound WUD API client. Prefer `_FILE` variables for container secrets.
+publishing WUD's port to the host. WUD 9 requires API credentials on this private
+network too; configure them as described below.
 
 After WUD API access is healthy, you can set `WUDUP_LEGACY_SCRIPTS=false`.
 Remove WUD command triggers that call `/wud/append-updates.sh`,
 `/wud/on-update.sh`, or `/wud/tag-manager.sh`, then recreate the stack so stale
 trigger configuration is gone. In that mode, script sync installs no WUD command
 scripts, and WebUI pending behavior is API-first.
+
+## WUD API Authentication
+
+WUD and WUDup have separate accounts. In the Compose env file, set
+`WUD_AUTH_ADMIN_USER=admin` and a strong generated `WUD_AUTH_ADMIN_PASSWORD`
+before WUD's first start. WUD stores its account in the named `/store` volume;
+preserve that volume when recreating the service. Supplying bootstrap credentials
+again updates that administrator's password. An existing deployment with a
+stored administrator can leave the bootstrap password unset.
+
+For basic API authentication, create a private host file containing **only the
+WUD password**, with mode `0600`, readable by the WUDup runtime user. Do not
+mount the entire Compose env file as the password file. Add this read-only mount
+to the `wudup` service's existing `volumes` list (example host path):
+
+```yaml
+      - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
+```
+
+Then set these values in the Compose env file:
+
+```dotenv
+WUD_API_BASE_URL=http://wud:3000
+WUD_API_AUTH_BASIC_USER=admin
+WUD_API_AUTH_BASIC_PASSWORD_FILE=/run/secrets/wud_api_password
+```
+
+Use the WUD service name and its **container listening port**. If WUD listens on
+a custom port, change `WUD_API_BASE_URL` accordingly; a published host port does
+not change the container port. Keep both services on the same Docker network.
+Direct internal access avoids reverse-proxy access lists and interactive SSO;
+it still requires WUD credentials. Keep an HTTP connection confined to the
+private Docker network; use HTTPS for traffic over untrusted networks.
+
+For a dedicated integration identity, create a WUD user or personal API token
+with permissions for the features you use. Read-only access covers container
+metadata; rescans require write permission, and configuration diagnostics may
+require administrator access. For a token, mount a token-only file read-only and
+set `WUD_API_AUTH_BEARER_TOKEN_FILE` instead of the basic-auth variables. Browser
+login cookies and reverse-proxy authentication do not configure this client.
+
+Recreate WUDup after changing its credentials or mounts. Confirm the WUD API
+check in WebUI **Doctor**, including access to `/api/containers`: `/health` can
+return `200` while the container API returns `401`. A `401` means credentials
+are missing or rejected; `403` can indicate insufficient permissions or a proxy
+access rule. Connection failures instead call for checking the shared network,
+service name, and listening port. Do not trigger a registry rescan just to test
+connectivity.
 
 ## WUD Callback Scripts
 

@@ -67,6 +67,18 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 | `WUD_PENDING_SOURCE` | `api` | WebUI pending-update source: `api` derives pending lines from WUD `/api/containers`, `file` reads `WUD_OUT_FILE`, and `auto` uses API metadata when usable before falling back to `WUD_OUT_FILE`. Host CLI update commands remain legacy file-mode only. |
 | `WUDUP_LEGACY_SCRIPTS` | `true` | Set `false` to disable WebUI `images.todo` fallback and sync no WUD command scripts. Remove WUD command triggers for legacy scripts and recreate the stack before disabling legacy mode. |
 
+WUD 9 requires authentication for `/api/containers` even on a private Docker
+network. A successful unauthenticated `/health` probe does not establish API
+access. Configure one of the outbound credential methods above using a **WUD**
+account or personal API token; the WUDup WebUI login is separate.
+
+The Compose examples also pass `WUD_AUTH_ADMIN_USER` (default `admin`) and
+`WUD_AUTH_ADMIN_PASSWORD` to **WUD** to bootstrap its local administrator. Set a
+strong password before first start and preserve the `wud-store:/store` volume.
+These bootstrap variables do not configure WUDup's outbound API credentials.
+See [WUD API authentication](wiki/webui-container.md#wud-api-authentication)
+for the password-file mount and internal-port setup.
+
 ## Candidate Security Scans
 
 | Variable | Default | Purpose |

@@ -8,6 +8,10 @@ services:
   wud:
     image: getwud/wud:latest
     environment:
+      # WUD 9 requires an administrator, including on private Docker networks.
+      # Set a strong password in a private Compose env file before first start.
+      WUD_AUTH_ADMIN_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
+      WUD_AUTH_ADMIN_PASSWORD: "${WUD_AUTH_ADMIN_PASSWORD:-}"
       WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST: "true"
     networks:
       - wudup-app
@@ -16,6 +20,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - wud-scripts:/wud:ro
       - wud-out:/out
+      - wud-store:/store
     # Legacy file-mode fallback: configure your WUD command trigger to call:
     #   /wud/append-updates.sh
     # Use /wud/on-update.sh only for legacy shell release-note notifications.
@@ -38,6 +43,8 @@ services:
       WUD_WEB_ALLOWED_HOSTS: "${WUD_WEB_ALLOWED_HOSTS:-}"
       WUD_WEB_TRUSTED_PROXIES: "${WUD_WEB_TRUSTED_PROXIES:-}"
       WUD_WEB_SECURE_COOKIES: "${WUD_WEB_SECURE_COOKIES:-auto}"
+      # WUD 9 also requires outbound API credentials; bootstrap credentials
+      # above are not inherited here. See wiki/webui-container.md#wud-api-authentication.
       WUD_API_BASE_URL: "${WUD_API_BASE_URL:-http://wud:3000}"
       WUD_API_STARTUP_WAIT_SECONDS: "${WUD_API_STARTUP_WAIT_SECONDS:-5}"
       WUD_API_AUTH_BEARER_TOKEN: "${WUD_API_AUTH_BEARER_TOKEN:-}"
@@ -71,6 +78,8 @@ services:
       - ${WEBUI_LOG_DIR:-./logs}:/logs
       - wud-scripts:/managed-wud
       - wud-out:/out
+      # For basic API auth, mount a password-only file (example host path):
+      # - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
 
 networks:
   wudup-app:
@@ -80,3 +89,4 @@ networks:
 volumes:
   wud-scripts:
   wud-out:
+  wud-store:

@@ -62,6 +62,10 @@ services:
     depends_on:
       - socket-proxy-wudup
     environment:
+      # WUD 9 requires an administrator, including on private Docker networks.
+      # Set a strong password in a private Compose env file before first start.
+      WUD_AUTH_ADMIN_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
+      WUD_AUTH_ADMIN_PASSWORD: "${WUD_AUTH_ADMIN_PASSWORD:-}"
       # WUD watches Docker through the proxy. Legacy mode writes pending
       # updates to /out/images.todo through mounted callback scripts.
       WUD_WATCHER_LOCAL_HOST: socket-proxy-wudup
@@ -105,6 +109,8 @@ services:
       WUD_WEB_ALLOWED_HOSTS: "${WUD_WEB_ALLOWED_HOSTS:-}"
       WUD_WEB_TRUSTED_PROXIES: "${WUD_WEB_TRUSTED_PROXIES:-}"
       WUD_WEB_SECURE_COOKIES: "${WUD_WEB_SECURE_COOKIES:-auto}"
+      # WUD 9 also requires outbound API credentials; bootstrap credentials
+      # above are not inherited here. See wiki/webui-container.md#wud-api-authentication.
       WUD_API_BASE_URL: "${WUD_API_BASE_URL:-http://wud:3000}"
       WUD_API_STARTUP_WAIT_SECONDS: "${WUD_API_STARTUP_WAIT_SECONDS:-5}"
       WUD_API_AUTH_BEARER_TOKEN: "${WUD_API_AUTH_BEARER_TOKEN:-}"
@@ -139,6 +145,8 @@ services:
       # Startup sync copies this repo's WUD callback scripts here for WUD.
       - wud-scripts:/managed-wud
       - wud-out:/out
+      # For basic API auth, mount a password-only file (example host path):
+      # - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
     read_only: true
     tmpfs:
       - /tmp

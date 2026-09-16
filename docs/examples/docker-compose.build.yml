@@ -3,11 +3,16 @@ services:
   wud:
     image: getwud/wud:latest
     environment:
+      # WUD 9 requires an administrator, including on private Docker networks.
+      # Set a strong password in a private Compose env file before first start.
+      WUD_AUTH_ADMIN_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
+      WUD_AUTH_ADMIN_PASSWORD: "${WUD_AUTH_ADMIN_PASSWORD:-}"
       WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - wud-scripts:/wud:ro
       - wud-out:/out
+      - wud-store:/store
     # File-mode fallback: configure your WUD trigger to call:
     #   /wud/append-updates.sh
     # Use /wud/on-update.sh only for legacy shell release-note notifications.
@@ -32,3 +37,4 @@ services:
 volumes:
   wud-scripts:
   wud-out:
+  wud-store:

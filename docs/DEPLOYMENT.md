@@ -63,6 +63,13 @@ docker build -t wudup:local .
 
 ## Start The WebUI
 
+WUD 9 requires an administrator and authenticated API requests, even on the
+private Compose network. Before starting a generated or copied configuration,
+set WUD's bootstrap password and configure WUDup's outbound credentials and any
+secret-file mount as described in
+[WUD API authentication](wiki/webui-container.md#wud-api-authentication).
+The bootstrap password is not automatically passed to WUDup's API client.
+
 If the `wudup` CLI is available, generate first-run WebUI config:
 
 ```bash
