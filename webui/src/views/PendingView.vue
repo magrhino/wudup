@@ -14,6 +14,7 @@ import type { ReleaseNoteInfo, ReleaseNotificationSource } from "../api/client";
 import CoreUpdateTourPanel from "../components/CoreUpdateTourPanel.vue";
 import { useRouteRefresh } from "../components/app/routeRefresh";
 import PendingApplyJobPanel from "../components/pending/PendingApplyJobPanel.vue";
+import PendingApplyRecovery from "../components/pending/PendingApplyRecovery.vue";
 import PendingCleanupModal from "../components/pending/PendingCleanupModal.vue";
 import PendingFallbackQueue from "../components/pending/PendingFallbackQueue.vue";
 import PendingPlanReviewModal from "../components/pending/PendingPlanReviewModal.vue";
@@ -252,7 +253,8 @@ const selectedRescanDisabled = computed(
   () => updates.loading || Boolean(selectedRescanDisabledMessage.value),
 );
 const pendingRescanAlertType = computed(() =>
-  updates.pendingRescan?.status === "success" ? "success" : "warning",
+  updates.pendingRescan?.status !== "success" || updates.pendingRescan?.skipped.length
+    ? "warning" : "info",
 );
 const pendingRescanMessage = computed(() => {
   const rescan = updates.pendingRescan;
@@ -260,19 +262,24 @@ const pendingRescanMessage = computed(() => {
     return "";
   }
   if (rescan.status === "blocked") {
-    const detail = rescan.wud_api.detail || "WUD API rescan is unavailable.";
-    return `WUD rescan did not run: ${detail}`;
+    return "WUD scan request did not run. Review current WUD health and request details.";
   }
   const requested = rescan.scope === "all"
     ? "Full WUD scan requested."
     : `WUD rescan requested for ${pluralize(rescan.watched_count, "container")}.`;
   if (rescan.status === "partial") {
-    const detail = rescan.skipped.length
-      ? `${pluralize(rescan.skipped.length, "selected entry")} skipped.`
-      : rescan.wud_api.detail || "Some requested containers are still degraded.";
-    return `${requested} ${detail}`;
+    const counts = rescan.scope === "selected"
+      ? ` ${pluralize(rescan.requested_count, "selected entry", "selected entries")}; ${pluralize(rescan.watched_count, "container scan request")} sent.`
+      : "";
+    const skipped = rescan.skipped.length
+      ? ` ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped.`
+      : "";
+    return `${rescan.scope === "all" ? `${requested} ` : ""}WUD reported a partial scan result.${counts}${skipped} Review request details.`;
   }
-  return requested;
+  if (rescan.skipped.length) {
+    return `${requested} ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped. Review request details.`;
+  }
+  return `${requested} Waiting for fresh WUD results.`;
 });
 const releaseNotificationsDisabledReason = computed(() => {
   if (updates.releaseNotes?.notifications_enabled === false) {
@@ -448,6 +455,22 @@ const {
   tagOverrideErrorForLines,
   unmatchedItems,
 });
+const pendingHealthReadiness = computed(() => {
+  if (selectedMetadataWarning.value) return selectedMetadataWarning.value;
+  if (applyPreflight.value && (!applyPreflight.value.ok || !updates.plan?.can_apply)) {
+    return `Selected plan blocked. ${applyReadinessSummary.value}`;
+  }
+  if (applyPreflight.value?.ok) {
+    return "Advisory for this plan: its readiness checks passed. Review warnings before confirming.";
+  }
+  return "Update readiness is not yet checked. Preview the selected plan to identify blockers.";
+});
+const pendingHealthCheckedAt = computed(() => {
+  const value = updates.pendingWudMetadataCheckedAt || updates.pending?.wud_api.last_checked_at;
+  return value && Number.isFinite(Date.parse(value))
+    ? new Date(value).toLocaleString()
+    : "Unavailable";
+});
 const {
   selectedHiddenCount,
   visibleUnmatchedIssueSummary,
@@ -570,9 +593,7 @@ async function retryPendingStatus(): Promise<void> {
     pendingStatusError.value = `WUDup status refresh failed: ${updates.error}`;
     return;
   }
-  pendingStatusMessage.value = pendingSourceDegraded.value
-    ? "WUDup status refreshed. Some container update checks are still unavailable."
-    : "WUDup status refreshed. Container update information is current.";
+  pendingStatusMessage.value = "WUDup status refreshed.";
 }
 
 function viewAffectedContainers(): void {
@@ -726,7 +747,7 @@ onBeforeUnmount(() => {
           class="text-link"
           :to="{ name: 'run-detail', params: { id: updates.pendingRescan.audit_run_id } }"
         >
-          Details
+          Request details
         </RouterLink>
       </n-flex>
     </n-alert>
@@ -741,29 +762,13 @@ onBeforeUnmount(() => {
         </RouterLink>
       </n-flex>
     </n-alert>
-    <n-alert
-      v-if="updates.applyJobRecovery"
-      type="warning"
-    >
-      {{ updates.applyJobRecovery }}
-      <n-flex inline class="inline-actions recovery-actions" align="center" :size="8">
-        <RouterLink class="text-link" to="/runs">Runs</RouterLink>
-        <RouterLink
-          v-if="latestRun"
-          class="text-link"
-          :to="{ name: 'run-detail', params: { id: latestRun.id } }"
-        >
-          Latest run
-        </RouterLink>
-        <RouterLink
-          v-if="latestRun"
-          class="text-link"
-          :to="{ name: 'run-log', params: { id: latestRun.id } }"
-        >
-          Log
-        </RouterLink>
-      </n-flex>
-    </n-alert>
+    <PendingApplyRecovery
+      v-for="notice in updates.applyJobRecoveries"
+      :key="notice.jobId"
+      :job-id="notice.jobId"
+      :run-id="notice.runId"
+      :acknowledged="notice.acknowledged"
+    />
 
     <PendingApplyJobPanel
       v-if="updates.applyJob"
@@ -837,26 +842,33 @@ onBeforeUnmount(() => {
       type="warning"
       role="status"
     >
-      {{ pendingSourceWarning }}
-      <n-flex
-        inline
-        class="inline-actions recovery-actions"
-        align="center"
-        :size="8"
-      >
-        <n-button size="small" type="primary" @click="viewAffectedContainers">
-          View affected containers
-        </n-button>
-        <n-button
-          size="small"
-          secondary
-          :loading="updates.loading"
-          title="Reads current WUD status without triggering a rescan."
-          @click="retryPendingStatus"
+      <details open>
+        <summary>
+          <strong>Current WUD health: needs attention</strong>
+          <span> · Last checked: {{ pendingHealthCheckedAt }}</span>
+        </summary>
+        <p>{{ pendingSourceWarning }}</p>
+        <p>{{ pendingHealthReadiness }}</p>
+        <n-flex
+          inline
+          class="inline-actions recovery-actions"
+          align="center"
+          :size="8"
         >
-          Refresh WUDup status
-        </n-button>
-      </n-flex>
+          <n-button size="small" type="primary" @click="viewAffectedContainers">
+            View affected containers
+          </n-button>
+          <n-button
+            size="small"
+            secondary
+            :loading="updates.loading"
+            title="Reads current WUD status without triggering a rescan."
+            @click="retryPendingStatus"
+          >
+            Refresh WUDup status
+          </n-button>
+        </n-flex>
+      </details>
     </n-alert>
     <n-alert
       v-if="pendingStatusMessage"

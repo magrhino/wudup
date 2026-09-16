@@ -535,7 +535,7 @@ describe("pending view fallback and release notes", () => {
     expect(lifecycle.loadSecurityScans).toHaveBeenCalledTimes(1);
     expect(lifecycle.refreshReleaseNotes).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain(
-      "WUDup status refreshed. Some container update checks are still unavailable.",
+      "WUDup status refreshed.",
     );
   });
 

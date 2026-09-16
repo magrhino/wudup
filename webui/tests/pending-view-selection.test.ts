@@ -644,9 +644,10 @@ describe("pending view selection actions", () => {
 
     expect(wrapper.text()).toContain("Full WUD scan requested.");
     expect(wrapper.text()).not.toContain("WUD rescan requested for 1 container.");
-    if (status === "partial") {
-      expect(wrapper.text()).toContain("Update status is unknown for 2 containers.");
-    }
+    expect(wrapper.text()).not.toContain("Update status is unknown for 2 containers.");
+    expect(wrapper.text()).toContain(status === "partial"
+      ? "WUD reported a partial scan result."
+      : "Waiting for fresh WUD results.");
   });
 
   it("disables WUD rescan controls in read-only mode", async () => {

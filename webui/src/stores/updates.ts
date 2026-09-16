@@ -63,7 +63,12 @@ import {
 import { useRunsStore } from "./runs";
 
 export const APPLY_JOB_RECOVERY_MESSAGE =
-  "Last known apply job state is unavailable because the WebUI process restarted. Check Runs -> Latest run and the updater log before applying more updates.";
+  "The update job is no longer available. The WebUI may have restarted. Review its run and log before applying more updates; the outcome is still unknown.";
+type ApplyJobRecovery = {
+  jobId: string;
+  runId: number | null;
+  acknowledged: boolean;
+};
 const PENDING_RESCAN_SELECTION_REQUIRED_MESSAGE =
   "Select at least one pending update to rescan.";
 const PENDING_PLAN_METADATA_CHANGED_MESSAGE =
@@ -195,7 +200,8 @@ export const useUpdatesStore = defineStore("updates", () => {
   const applyJob = ref<ApplyJobResponse | null>(null);
   const applyJobLog = ref<ApplyJobLogResponse | null>(null);
   const rememberedApplyJobId = ref(readRememberedApplyJobId());
-  const applyJobRecovery = ref("");
+  const rememberedApplyRunId = ref<number | null>(readApplyRecoveryStorage("applyJobRun", null));
+  const applyJobRecoveries = ref<ApplyJobRecovery[]>(readApplyRecoveryStorage("applyJobRecoveries", []));
   const loading = ref(false);
   const releaseNotesLoading = ref(false);
   const releaseNotesError = ref("");
@@ -331,6 +337,7 @@ export const useUpdatesStore = defineStore("updates", () => {
       };
     }
     pendingWudMetadataCheckedAt.value = response.wud_api.last_checked_at;
+    settlePendingRescan(response.wud_api.last_checked_at);
     if (metadataChanged) {
       clearReleaseNoteDisplay();
     }
@@ -972,11 +979,7 @@ export const useUpdatesStore = defineStore("updates", () => {
       throw new Error("Pending rescan did not return a response");
     }
     pendingRescan.value = rescanResponse;
-    try {
-      await loadPending({ freshAfterCurrent: true });
-    } finally {
-      pendingRescan.value = rescanResponse;
-    }
+    await loadPending({ freshAfterCurrent: true });
     await loadReleaseNotes().catch(() => undefined);
     await loadSecurityScans().catch(() => undefined);
     refreshReleaseNotes().catch(() => undefined);
@@ -994,7 +997,6 @@ export const useUpdatesStore = defineStore("updates", () => {
   ): Promise<void> {
     plan.value = null;
     pendingRemovalPlan.value = null;
-    pendingRescan.value = null;
     if (!options.preserveCleanup) {
       pendingCleanup.value = null;
     }
@@ -1004,6 +1006,14 @@ export const useUpdatesStore = defineStore("updates", () => {
   function setPending(response: PendingResponse): void {
     pending.value = response;
     pendingWudMetadataCheckedAt.value = response.wud_api.last_checked_at;
+    settlePendingRescan(response.wud_api.last_checked_at);
+  }
+
+  function settlePendingRescan(checkedAt: string): void {
+    const previous = pendingRescan.value?.wud_api.last_checked_at;
+    if (pendingRescan.value && Date.parse(checkedAt) > (Date.parse(previous ?? "") || 0)) {
+      pendingRescan.value = null;
+    }
   }
 
   function pendingLinesChanged(
@@ -1131,7 +1141,6 @@ export const useUpdatesStore = defineStore("updates", () => {
 
   function setApplyJob(job: ApplyJobResponse): void {
     applyJob.value = job;
-    applyJobRecovery.value = "";
     rememberApplyJob(job);
   }
 
@@ -1157,7 +1166,7 @@ export const useUpdatesStore = defineStore("updates", () => {
         caughtError instanceof ApiError &&
         caughtError.status === 404
       ) {
-        markApplyJobRecovery();
+        markApplyJobRecovery(jobId);
         return null;
       }
       error.value = errorMessage(caughtError);
@@ -1190,11 +1199,57 @@ export const useUpdatesStore = defineStore("updates", () => {
     }
   }
 
-  function markApplyJobRecovery(): void {
-    applyJob.value = null;
-    applyJobLog.value = null;
-    applyJobRecovery.value = APPLY_JOB_RECOVERY_MESSAGE;
-    clearRememberedApplyJobId();
+  function markApplyJobRecovery(jobId: string): void {
+    const runId = applyJob.value?.job_id === jobId
+      ? applyJob.value.run_id
+      : rememberedApplyJobId.value === jobId ? rememberedApplyRunId.value : null;
+    if (!applyJobRecoveries.value.some((notice) => notice.jobId === jobId)) {
+      applyJobRecoveries.value.push({ jobId, runId, acknowledged: false });
+      persistApplyJobRecoveries();
+    }
+    if (applyJob.value?.job_id === jobId) {
+      applyJob.value = null;
+      applyJobLog.value = null;
+    }
+    if (rememberedApplyJobId.value === jobId) clearRememberedApplyJobId();
+  }
+
+  function persistApplyJobRecoveries(): void {
+    writeApplyRecoveryStorage("applyJobRecoveries", applyJobRecoveries.value);
+  }
+
+  function acknowledgeApplyJobRecovery(jobId: string, acknowledged = true): void {
+    const notice = applyJobRecoveries.value.find((entry) => entry.jobId === jobId);
+    if (notice) notice.acknowledged = acknowledged;
+    persistApplyJobRecoveries();
+  }
+
+  function applyJobRecoveryResolved(runId: number | null): boolean {
+    const run = runId === null ? null : useRunsStore().runDetails[runId];
+    return Boolean(run?.finished_at && !run.dry_run && run.status === "success" &&
+      run.verification.status === "verified" && run.verification.total_count > 0);
+  }
+
+  function dismissResolvedApplyJobRecovery(jobId: string): void {
+    applyJobRecoveries.value = applyJobRecoveries.value.filter((notice) =>
+      notice.jobId !== jobId || !applyJobRecoveryResolved(notice.runId));
+    persistApplyJobRecoveries();
+  }
+
+  async function reviewApplyJobRecovery(jobId: string): Promise<void> {
+    const notice = applyJobRecoveries.value.find((entry) => entry.jobId === jobId);
+    if (!notice) return;
+    // Only a job response may establish correlation; run order is not evidence.
+    if (notice.runId === null) {
+      try {
+        const job = await webApi.job(jobId);
+        notice.runId = job.run_id;
+        persistApplyJobRecoveries();
+      } catch (caughtError) {
+        if (!(caughtError instanceof ApiError && caughtError.status === 404)) throw caughtError;
+      }
+    }
+    if (notice.runId !== null) await useRunsStore().loadRunDetail(notice.runId);
   }
 
   function rememberApplyJob(job: ApplyJobResponse): void {
@@ -1203,12 +1258,16 @@ export const useUpdatesStore = defineStore("updates", () => {
       return;
     }
     rememberedApplyJobId.value = job.job_id;
+    rememberedApplyRunId.value = job.run_id;
     writeRememberedApplyJobId(job.job_id);
+    writeApplyRecoveryStorage("applyJobRun", { jobId: job.job_id, runId: job.run_id });
   }
 
   function clearRememberedApplyJobId(): void {
     rememberedApplyJobId.value = "";
+    rememberedApplyRunId.value = null;
     removeRememberedApplyJobId();
+    writeApplyRecoveryStorage("applyJobRun", null);
   }
 
   function rescanLinesFor(
@@ -1265,7 +1324,11 @@ export const useUpdatesStore = defineStore("updates", () => {
     applyJob,
     applyJobLog,
     rememberedApplyJobId,
-    applyJobRecovery,
+    applyJobRecoveries,
+    acknowledgeApplyJobRecovery,
+    applyJobRecoveryResolved,
+    dismissResolvedApplyJobRecovery,
+    reviewApplyJobRecovery,
     loading,
     releaseNotesLoading,
     releaseNotesError,
@@ -1346,6 +1409,30 @@ function readRememberedApplyJobId(): string {
     return storage?.getItem(APPLY_JOB_STORAGE_KEY) ?? "";
   } catch {
     return "";
+  }
+}
+
+function readApplyRecoveryStorage<T>(key: string, fallback: T): T {
+  try {
+    const value = JSON.parse(sessionStorageAvailable()?.getItem(key) ?? "null");
+    if (key === "applyJobRun") {
+      return (value?.jobId === readRememberedApplyJobId() &&
+        Number.isSafeInteger(value?.runId) && value.runId > 0 ? value.runId : fallback) as T;
+    }
+    return (Array.isArray(value) ? value.filter((entry) =>
+      entry && typeof entry.jobId === "string" && entry.jobId &&
+      (entry.runId === null || (Number.isSafeInteger(entry.runId) && entry.runId > 0)) &&
+      typeof entry.acknowledged === "boolean") : fallback) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeApplyRecoveryStorage(key: string, value: unknown): void {
+  try {
+    sessionStorageAvailable()?.setItem(key, JSON.stringify(value));
+  } catch {
+    // Recovery remains available in memory if session storage is unavailable.
   }
 }
 
