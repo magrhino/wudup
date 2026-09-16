@@ -4,6 +4,22 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.60.0](https://github.com/magrhino/wudup/compare/v0.59.10...v0.60.0) (2026-09-16)
+
+
+### Features
+
+* **webui:** clarify the update review flow ([#682](https://github.com/magrhino/wudup/issues/682)) ([8f23295](https://github.com/magrhino/wudup/commit/8f23295d9223cb7dc4a8478e91d851a4d565b78e))
+* **webui:** promote candidate release information ([#683](https://github.com/magrhino/wudup/issues/683)) ([588cc40](https://github.com/magrhino/wudup/commit/588cc406a3543a8bdf2665a02e5727f75b3a0e24))
+
+
+### Bug Fixes
+
+* **webui:** clarify warning lifecycle and update recovery ([#681](https://github.com/magrhino/wudup/issues/681)) ([f91e922](https://github.com/magrhino/wudup/commit/f91e9223c1ac7261e39bd0891e4e9472069a0c5e))
+* **webui:** restore changelog loading and recovery ([#680](https://github.com/magrhino/wudup/issues/680)) ([b16ef44](https://github.com/magrhino/wudup/commit/b16ef44c36fe0408ffb3a9a9b17cb79a8a915d9f))
+* **webui:** streamline pending update review on mobile ([#684](https://github.com/magrhino/wudup/issues/684)) ([3a1d883](https://github.com/magrhino/wudup/commit/3a1d8831f042d9ef20f555fd284bdf4435463d8b))
+* **wud:** support image-only release notes for socket-proxy ([#678](https://github.com/magrhino/wudup/issues/678)) ([ec632da](https://github.com/magrhino/wudup/commit/ec632da4b4d8e178d228a15c946c243f90a0d0e2))
+
 ## [0.59.10](https://github.com/magrhino/wudup/compare/v0.59.9...v0.59.10) (2026-09-15)
 
 
