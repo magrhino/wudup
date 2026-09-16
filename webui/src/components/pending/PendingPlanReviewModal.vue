@@ -10,6 +10,7 @@ import type {
   PlanCleanupItem,
   PlanIssue,
   PlanResponse,
+  ReleaseNoteInfo,
   PlanTagStreamUpdate,
   TagStreamDecision,
 } from "../../api/client";
@@ -17,6 +18,8 @@ import {
   pendingMetadataStatusLabel,
   pendingMetadataStatusTagType,
   pendingMetadataStatusTitle,
+  releaseNoteReason,
+  releaseNoteStatus,
 } from "../../views/pending/pendingDisplay";
 import {
   planLineDigestPinLabel,
@@ -30,6 +33,7 @@ import {
   type PlanLineView,
 } from "../../views/pending/utils";
 import { tagStreamLabelApprovalIssueKey } from "../../views/pending/usePendingPlanReviewState";
+import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
 import PreflightFooterActions from "../preflight/PreflightFooterActions.vue";
 import PreflightMetricsGrid from "../preflight/PreflightMetricsGrid.vue";
@@ -78,6 +82,9 @@ const props = defineProps<{
   planDigestPinLabelRewrites: PlanDigestPinLabelRewriteView[];
   planDigestUnpinUpdates: PlanDigestUnpinUpdateView[];
   planLines: PlanLineView[];
+  releaseNotes: ReleaseNoteInfo[];
+  releaseNotesLoading: boolean;
+  releaseNotesError: string;
   planTagStreamUpdates: { stack: string; update: PlanTagStreamUpdate }[];
   planMetadataWarning: string;
   planStatusLabel: string;
@@ -101,6 +108,16 @@ const emit = defineEmits<{
   (event: "close"): void;
   (event: "open-cleanup"): void;
 }>();
+
+function releaseNoteProps(lineNo: number) {
+  const note = props.releaseNotes.find((item) => item.line_no === lineNo) ?? null;
+  const lookupError = note ? "" : props.releaseNotesError;
+  return {
+    releaseNote: note,
+    releaseNoteStatus: lookupError ? "Check failed" : releaseNoteStatus(note, props.releaseNotesLoading),
+    releaseNoteReason: releaseNoteReason(note) || lookupError,
+  };
+}
 
 function tagStreamDecisionsComplete(): boolean {
   return props.tagStreamDecisionIssues.every(
@@ -571,6 +588,11 @@ function tagStreamRulePreview(issue: PlanIssue): string {
                 <code>{{ line.target_image }}</code>
               </template>
             </em>
+            <PendingReleaseNotes class="plan-line-release"
+              :candidate-label="`${stack} / ${line.service} · ${line.target_image}`"
+              :candidate-tag="line.target_image.split('@')[0]?.split('/').pop()?.split(':')[1] || ''"
+              v-bind="releaseNoteProps(line.line_no)"
+            />
           </div>
         </div>
         <div v-else class="empty-state">No matched services.</div>
@@ -640,6 +662,11 @@ function tagStreamRulePreview(issue: PlanIssue): string {
                   <code>{{ line.target_image }}</code>
                 </template>
               </em>
+              <PendingReleaseNotes class="plan-line-release"
+                :candidate-label="`${stack} / ${line.service} · ${line.target_image}`"
+                :candidate-tag="line.target_image.split('@')[0]?.split('/').pop()?.split(':')[1] || ''"
+                v-bind="releaseNoteProps(line.line_no)"
+              />
             </div>
           </div>
           <div v-else class="empty-state">No matched services.</div>
@@ -729,6 +756,10 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 </template>
 
 <style scoped>
+.plan-line-release {
+  grid-column: 2 / -1;
+}
+
 .plan-actions {
   display: grid;
   gap: 8px;

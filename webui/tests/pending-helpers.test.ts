@@ -187,6 +187,9 @@ function pendingPlanReviewModalProps(
     planAlertType: "info",
     planDigestPinLabelRewrites: [],
     planDigestUnpinUpdates: [],
+    releaseNotes: [],
+    releaseNotesLoading: false,
+    releaseNotesError: "",
     planLines: [],
     planTagStreamUpdates: [],
     preflightDigestPinNotice: "",
@@ -1380,6 +1383,7 @@ describe("pending helper modules", () => {
     expect(wrapper.text()).toContain("sha256:abcdef...789");
     expect(wrapper.text()).toContain("Major bump");
     expect(wrapper.text()).toContain("GitHub release");
+    await wrapper.find('button[aria-haspopup="dialog"]').trigger("click");
     expect(wrapper.text()).toContain("Possible breaking change");
     expect(wrapper.find(".release-note-link").attributes("rel")).toBe(
       "noopener noreferrer",

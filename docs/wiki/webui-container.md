@@ -92,6 +92,16 @@ warnings from update blockers. Scan-request feedback clears when a newer WUD obs
 request acceptance alone does not mean the scan or update succeeded. Partial scan
 requests retain a warning and request details even when current health is good.
 
+Each candidate shows **Release notes** and available GitHub/source links beside
+its target, outside **Details**. Release notes open directly in a compact panel
+with version, source, and breaking/security evidence. The release body is shown
+as text; **Read changelog** optionally loads a linked changelog. Source links stay
+available if changelog loading fails. **Matched to candidate** means the release
+version matches the candidate tag; **Upstream context** is general information,
+not confirmation of what a mutable tag or digest contains. The same panel is
+available under **Services and images** during plan review. Close it or press
+Escape to return to the review without changing selection.
+
 If an update job disappears after a WebUI restart, its recovery notice links to
 the related run when known. Otherwise, review History to identify the update.
 **Check outcome** reads the related job/run evidence. **Acknowledge and collapse**

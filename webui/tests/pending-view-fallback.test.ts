@@ -181,7 +181,36 @@ describe("pending view fallback and release notes", () => {
     );
   });
 
-  it("bounds large stack previews while retaining overflow risks and precise advisory scope", () => {
+  it.each([
+    ["acme/app:5.1.0", "v5.1.0", true],
+    ["registry.example:5000/acme/app:v5.1.0", "5.1.0", true],
+    ["acme/app:latest", "latest", false],
+    ["acme/app@sha256:abc", "v5.0.0", false],
+    ["acme/app:5.1", "v5.1", false],
+    ["acme/app:v5.1", "v5.1", false],
+  ])("uses the recreate target %s for release matching", (targetImage, releaseTag, matched) => {
+    const item = pendingGroupedItem({
+      image: "acme/app:5.0.0",
+      repo: "acme/app",
+      current_tag: "5.0.0",
+      desired_tag: "",
+      target_image: targetImage,
+      action: "recreate_service",
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = { ...pendingResponse([item]), grouping: pendingGrouping([item]) };
+    updates.releaseNotes = releaseNotesResponse([
+      releaseNoteInfo({ line_no: item.line_no, release_tag: releaseTag }),
+    ]);
+    mockPendingLifecycle(settings, updates);
+    const wrapper = mountPendingView(pinia);
+    const release = wrapper.find(".stack-change-release");
+
+    expect(release.text()).toContain(matched ? "Matched to candidate" : "Upstream context");
+    expect(release.text()).not.toContain(matched ? "Upstream context" : "Matched to candidate");
+  });
+
+  it("shows release access for every candidate while retaining risks and precise advisory scope", () => {
     const items = Array.from({ length: 12 }, (_, index) => pendingGroupedItem({
       line_no: index + 1,
       selection_id: `selection-${index + 1}`,
@@ -209,15 +238,15 @@ describe("pending view fallback and release notes", () => {
     const wrapper = mountPendingView(pinia);
     const card = wrapper.find(".stack-card");
 
-    expect(card.findAll(".stack-change-row")).toHaveLength(2);
+    expect(card.findAll(".stack-change-row")).toHaveLength(12);
+    expect(card.findAll(".stack-change-release")).toHaveLength(12);
+    expect(card.findAll(".stack-details .candidate-release")).toHaveLength(0);
     expect(card.findAll(".stack-details .pending-update-row")).toHaveLength(12);
     expect(card.find(".stack-details").attributes("open")).toBeUndefined();
-    const overflow = card.find(".stack-change-overflow");
-    expect(overflow.text()).toContain("+10 more updates in Details");
-    expect(overflow.text()).toContain("1 more update with stale metadata");
-    expect(overflow.text()).toContain("Release advisory: critical");
-    expect(overflow.text()).toContain("Release advisory: needs review");
-    expect(overflow.findAll(".safety-badge").filter((cue) => cue.text() === "Major bump")).toHaveLength(1);
+    const preview = card.find(".stack-change-preview");
+    expect(preview.text()).toContain("Retained metadata");
+    expect(preview.text()).toContain("Release advisory: critical");
+    expect(preview.text()).toContain("Release advisory: needs review");
     expect(card.find(".stack-card-tags").text()).toContain("1 verified high/critical release update");
   });
 
@@ -789,7 +818,54 @@ describe("pending view fallback and release notes", () => {
     expect(clearState.find(".clear-queue-mark").exists()).toBe(true);
   });
 
-  it("renders release-note links with breaking cues", () => {
+  it.each(["ready", "blocked"] as const)("preserves release lookup states inside a %s plan", async (status) => {
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = pendingResponse();
+    updates.releaseNotesLoading = true;
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse({ status });
+    });
+    const wrapper = mountPendingView(pinia);
+    const review = wrapper.findAll("button").find((button) => button.text() === "Review media plan");
+    expect(review).toBeDefined();
+    await review!.trigger("click");
+    await flushPromises();
+
+    const plan = wrapper.find(".preflight-modal");
+    const releaseRow = plan.find(".plan-line-release");
+    expect(releaseRow.text()).toContain("Checking...");
+    await releaseRow.find("button").trigger("click");
+    const panel = plan.find(".release-panel");
+    expect(panel.text()).toContain("Loading release information");
+    expect(panel.text()).not.toContain("not available");
+
+    updates.releaseNotesLoading = false;
+    updates.releaseNotesError = "Release lookup failed. Try refreshing pending updates.";
+    await nextTick();
+    expect(releaseRow.text()).toContain("Check failed");
+    expect(panel.text()).toContain(updates.releaseNotesError);
+
+    updates.releaseNotesError = "";
+    updates.releaseNotes = releaseNotesResponse([releaseNoteInfo({
+      status: "unsupported", body: "", links: [],
+      error: "no supported GitHub release source found",
+    })]);
+    await nextTick();
+    expect(releaseRow.text()).toContain("Unavailable");
+    expect(panel.text()).toContain("Only GHCR and mapped LinuxServer.io images have release-note links.");
+
+    updates.releaseNotes = releaseNotesResponse([releaseNoteInfo()]);
+    await nextTick();
+    expect(panel.text()).toContain("Full release notes body.");
+    expect(panel.text()).not.toContain("Loading release information");
+    expect(panel.text()).not.toContain("Release lookup failed");
+    await panel.find(".release-panel-heading button").trigger("click");
+    expect(plan.exists()).toBe(true);
+    expect(wrapper.find('input[aria-label="Select stack media"]').element).toHaveProperty("checked", true);
+  });
+
+  it("renders release-note links with breaking cues", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(false);
     updates.pending = pendingResponse();
     updates.releaseNotes = releaseNotesResponse([
@@ -827,6 +903,7 @@ describe("pending view fallback and release notes", () => {
     const wrapper = mountPendingView(pinia);
 
     expect(wrapper.text()).toContain("GitHub release");
+    await wrapper.find('button[aria-label^="Release notes for"]').trigger("click");
     expect(wrapper.text()).toContain("Possible breaking change");
     expect(wrapper.text()).toContain("Verified High security update");
     expect(wrapper.text()).toContain("1 verified high/critical release update");
@@ -845,11 +922,11 @@ describe("pending view fallback and release notes", () => {
     expect(advisoryLink.attributes("target")).toBe("_blank");
     expect(advisoryLink.attributes("rel")).toBe("noopener noreferrer");
     expect(
-      wrapper.find('[role="status"][aria-label="Verified High security update"]').exists(),
+      wrapper.find('output[aria-label="Verified High security update"]').exists(),
     ).toBe(true);
   });
 
-  it("distinguishes security signals that still need review", () => {
+  it("distinguishes security signals that still need review", async () => {
     const { pinia, settings, updates } = setupStores(false);
     updates.pending = pendingResponse();
     updates.releaseNotes = releaseNotesResponse([
@@ -868,6 +945,7 @@ describe("pending view fallback and release notes", () => {
 
     const wrapper = mountPendingView(pinia);
 
+    await wrapper.find('button[aria-label^="Release notes for"]').trigger("click");
     expect(wrapper.text()).toContain("Security update needs review");
     expect(wrapper.text()).toContain(
       "Critical advisory found; running latest version could not be matched.",
@@ -929,6 +1007,7 @@ describe("pending view fallback and release notes", () => {
     const wrapper = mountPendingView(pinia);
 
     expect(fetchMock).not.toHaveBeenCalled();
+    await wrapper.find('button[aria-label^="Release notes for"]').trigger("click");
     const readButton = wrapper
       .findAll("button")
       .find((button) => button.text().includes("Read changelog"));

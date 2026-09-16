@@ -150,7 +150,6 @@ test("changelog uses native fetch and recovers from failed or unavailable notes"
     });
   });
   await page.goto(demoRoute("/#/pending"));
-  await page.getByLabel("Details for home", { exact: true }).click();
   const stack = page.locator("article").filter({
     has: page.getByLabel("Details for home", { exact: true }),
   });
@@ -159,25 +158,26 @@ test("changelog uses native fetch and recovers from failed or unavailable notes"
   expect(releaseUrl).toMatch(/^https:\/\/github\.com\/.+\/releases\/tag\//);
   expect(releaseRequests).toBe(0);
 
-  await stack.getByRole("button", { name: "Read changelog", exact: true }).click();
-  await expect(stack.getByRole("status").filter({ hasText: "Could not load notes." })).toBeVisible();
-  const fallbackLink = stack.getByRole("link", { name: "Open GitHub release", exact: true });
+  await stack.getByRole("button", { name: /^Release notes for/ }).click();
+  const panel = page.getByRole("dialog", { name: "Release notes", exact: true });
+  await panel.getByRole("button", { name: "Read changelog", exact: true }).click();
+  await expect(panel.getByRole("status").filter({ hasText: "Could not load notes." })).toBeVisible();
+  const fallbackLink = panel.getByRole("link", { name: "GitHub release", exact: true });
   await expect(fallbackLink).toHaveAttribute("href", releaseUrl!);
   await expect(fallbackLink).toHaveAttribute("target", "_blank");
   await expect(fallbackLink).toHaveAttribute("rel", "noopener noreferrer");
-  await expect(stack).not.toContainText("valid JSON");
-  await expect(stack).not.toContainText("Illegal invocation");
+  await expect(panel).not.toContainText("valid JSON");
+  await expect(panel).not.toContainText("Illegal invocation");
 
-  await stack.getByRole("button", { name: "Retry changelog", exact: true }).click();
-  await expect(stack.getByText("This release does not link to a changelog. Open the GitHub release for notes.")).toBeVisible();
+  await panel.getByRole("button", { name: "Retry changelog", exact: true }).click();
+  await expect(panel.getByText("This release does not link to a changelog. Open the GitHub release for notes.")).toBeVisible();
   await expect(fallbackLink).toBeVisible();
 
-  await stack.getByRole("button", { name: "Read changelog", exact: true }).click();
-  await expect(stack.getByRole("button", { name: "Changelog loaded", exact: true })).toBeVisible();
-  await stack.getByText("Changelog notes", { exact: true }).click();
-  await expect(stack.getByText("Controlled browser changelog notes", { exact: false })).toBeVisible();
-  await expect(stack).not.toContainText("Older notes");
-  await expect(stack.locator(".release-changelog-problem")).toHaveCount(0);
+  await panel.getByRole("button", { name: "Read changelog", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Changelog notes" })).toBeVisible();
+  await expect(panel.getByText("Controlled browser changelog notes", { exact: false })).toBeVisible();
+  await expect(panel).not.toContainText("Older notes");
+  await expect(panel.locator(".release-changelog-problem")).toHaveCount(0);
   expect(releaseRequests).toBe(3);
   expect(changelogRequests).toBe(1);
 });

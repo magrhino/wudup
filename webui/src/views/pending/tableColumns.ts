@@ -146,6 +146,8 @@ export function renderReleaseNotes(
 ): VNodeChild {
   const note = context.releaseNoteFor(row);
   return h(PendingReleaseNotes, {
+    candidateLabel: `${row.image} → ${row.desired_tag || row.current_tag}`,
+    candidateTag: row.desired_tag || row.current_tag,
     releaseNote: note,
     releaseNoteReason: context.releaseNoteReason(note),
     releaseNoteStatus: context.releaseNoteStatus(note),
