@@ -12,7 +12,6 @@ import type {
 } from "../../api/client";
 import { displayDigest } from "../../utils/digestProvenance";
 import {
-  groupChangePreviewItems,
   groupedItemActionLabel,
   groupedItemActionTagType,
   groupedItemServices,
@@ -34,6 +33,7 @@ import {
   pendingSelectionKey,
 } from "../../views/pending/usePendingSelectionState";
 import { pluralize } from "../../views/pending/utils";
+import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import PendingUpdateRow from "./PendingUpdateRow.vue";
 
 const props = defineProps<{
@@ -63,23 +63,6 @@ const emit = defineEmits<{
 function actionableRiskCues(item: PendingGroupedItem): SafetyCue[] {
   return props.riskCues(item).filter((cue) => cue.type === "warning" || cue.type === "error");
 }
-
-const previewItems = computed(() => groupChangePreviewItems(props.group));
-const overflowItems = computed(() => props.group.items.slice(previewItems.value.length));
-const overflowMetadataBlockedCount = computed(
-  () => overflowItems.value.filter((item) => pendingMetadataStatus(item) !== "fresh").length,
-);
-const overflowRiskCues = computed(() => {
-  const cues = new Map<string, SafetyCue>();
-  for (const item of overflowItems.value) {
-    for (const cue of actionableRiskCues(item)) {
-      if (cues.get(cue.label)?.type !== "error") {
-        cues.set(cue.label, cue);
-      }
-    }
-  }
-  return [...cues.values()];
-});
 
 const verifiedUpdateCount = computed(
   () =>
@@ -180,7 +163,7 @@ const previewDisabledMessage = computed(() =>
 
     <div class="stack-change-preview" aria-label="Change preview">
       <div
-        v-for="item in previewItems"
+        v-for="item in group.items"
         :key="`${group.name}-${item.line_no}-preview`"
         class="stack-change-row"
       >
@@ -246,23 +229,14 @@ const previewDisabledMessage = computed(() =>
             Choose stream
           </n-button>
         </span>
-      </div>
-      <div v-if="overflowItems.length" class="stack-change-overflow">
-        <span class="stack-change-more">+{{ overflowItems.length }} more updates in Details</span>
-        <n-tag v-if="overflowMetadataBlockedCount" size="small" type="warning">
-          {{ pluralize(overflowMetadataBlockedCount, "more update") }} with stale metadata
-        </n-tag>
-        <span v-if="overflowRiskCues.length" class="stack-change-risk-cues" aria-label="Risks in additional updates">
-          <n-tag
-            v-for="cue in overflowRiskCues"
-            :key="cue.label"
-            size="small"
-            :type="cue.type"
-            class="safety-badge"
-          >
-            {{ cue.label }}
-          </n-tag>
-        </span>
+        <PendingReleaseNotes
+          class="stack-change-release"
+          :candidate-label="`${groupedItemServices(item)} · ${groupedItemTarget(item)}`"
+          :candidate-tag="item.desired_tag || item.current_tag"
+          :release-note="releaseNoteFor(item)"
+          :release-note-status="releaseNoteStatus(releaseNoteFor(item))"
+          :release-note-reason="releaseNoteReason(releaseNoteFor(item))"
+        />
       </div>
     </div>
 
@@ -284,11 +258,7 @@ const previewDisabledMessage = computed(() =>
           :status-tag-type="groupedItemActionTagType(item)"
           :risk-cues="riskCues(item)"
           :tag-rewrite-label="groupedItemTagRewriteLabel(item)"
-          :release-note="releaseNoteFor(item)"
-          :release-note-status="releaseNoteStatus(releaseNoteFor(item))"
-          :release-note-reason="releaseNoteReason(releaseNoteFor(item))"
           :security-scan="securityScanFor(item)"
-          show-release-notes
           :show-diagnostic="Boolean(item.diagnostic)"
           :tag-override-value="tagOverrideValue(item)"
           :show-tag-input="Boolean(item.desired_tag)"
@@ -413,6 +383,10 @@ const previewDisabledMessage = computed(() =>
   line-height: 1.4;
 }
 
+.stack-change-release {
+  grid-column: 2;
+}
+
 .stack-change-service {
   color: var(--color-ink);
 }
@@ -432,19 +406,6 @@ const previewDisabledMessage = computed(() =>
 
 .stream-choice-trigger {
   margin-inline-start: 2px;
-}
-
-.stack-change-overflow,
-.stack-change-overflow .stack-change-risk-cues {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.stack-change-more {
-  color: var(--color-muted-text);
-  font-size: var(--text-metadata-size);
 }
 
 .stack-advisory-tag {
@@ -510,6 +471,10 @@ const previewDisabledMessage = computed(() =>
 }
 
 @media (--wud-compact) {
+  .stack-change-release {
+    grid-column: 1 / -1;
+  }
+
   .stack-card-header {
     display: grid;
   }

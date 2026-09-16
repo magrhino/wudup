@@ -90,6 +90,14 @@ function groupedItemTarget(item: PendingGroupedItem): string {
       <span>-></span>
       <code class="wrap-anywhere">{{ groupedItemTarget(item) }}</code>
     </div>
+    <PendingReleaseNotes
+      v-if="showReleaseNotes"
+      :candidate-label="`${serviceLabel} · ${groupedItemTarget(item)}`"
+      :candidate-tag="item.desired_tag || item.current_tag"
+      :release-note="releaseNote"
+      :release-note-status="releaseNoteStatus"
+      :release-note-reason="releaseNoteReason"
+    />
     <div class="pending-update-meta">
       <span class="wrap-anywhere">Pending file line #{{ item.line_no }}</span>
       <n-tag
@@ -122,12 +130,6 @@ function groupedItemTarget(item: PendingGroupedItem): string {
         {{ item.tag_stream.current_stream }} → {{ item.tag_stream.reported_stream }}
       </span>
       <span v-if="metaDetail" class="wrap-anywhere">{{ metaDetail }}</span>
-      <PendingReleaseNotes
-        v-if="showReleaseNotes"
-        :release-note="releaseNote"
-        :release-note-status="releaseNoteStatus"
-        :release-note-reason="releaseNoteReason"
-      />
     </div>
     <PendingSecurityScanDetails
       v-if="securityScan"

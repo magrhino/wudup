@@ -168,6 +168,7 @@ function releaseNotesResponse() {
         published_at: "2026-01-02T00:00:00Z",
         breaking: true,
         breaking_reasons: ["Release notes mention a migration."],
+        body: "This release improves library scanning and fixes interrupted imports.\n\nMigration: review the updated configuration before restarting the service.",
         links: [
           {
             label: "GitHub release",
@@ -954,8 +955,10 @@ test("mobile shell keeps page width stable and preserves link targets", async ({
 
   await page.goto("/#/pending");
   await expect(page.getByRole("checkbox", { name: /Select stack media/ })).toBeVisible();
-  await page.getByLabel("Details for media", { exact: true }).click();
-  await expect(page.getByText("Possible breaking change")).toBeVisible();
+  await page.getByRole("button", { name: /^Release notes for/ }).click();
+  const releasePanel = page.getByRole("dialog", { name: "Release notes", exact: true });
+  await expect(releasePanel.getByText("Possible breaking change")).toBeVisible();
+  await releasePanel.getByRole("button", { name: "Close release notes" }).click();
   await expect
     .poll(() =>
       page.evaluate(() => ({
@@ -1088,3 +1091,49 @@ test("logout returns to login and leaves storage empty", async ({ page }) => {
     session: [],
   });
 });
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test.describe(`release review at ${viewport.width}px`, () => {
+    test.use({ viewport, hasTouch: viewport.width < 560 });
+    test("keeps candidate context, keyboard focus, and plan selection", async ({ page }, testInfo) => {
+      const state = createState({ authenticated: true, mutationsEnabled: false });
+      await installApiFixtures(page, state);
+      await page.goto("/#/pending");
+      const trigger = page.locator(".stack-change-release").getByRole("button", { name: /^Release notes for/ });
+      await expect(trigger).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("pending-release-actions.png") });
+      await expect(page.locator(".stack-details")).not.toHaveAttribute("open");
+      const panel = page.getByRole("dialog", { name: "Release notes", exact: true });
+      if (viewport.width < 560) {
+        await trigger.tap();
+      } else {
+        await trigger.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(panel).toBeVisible();
+      await expect(panel.getByRole("button", { name: "Close release notes" })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(panel.getByRole("link", { name: "GitHub release", exact: true })).toBeFocused();
+      await panel.screenshot({ path: testInfo.outputPath("release-panel.png"), animations: "disabled" });
+      await page.keyboard.press("Escape");
+      await expect(panel).not.toBeVisible();
+      await expect(trigger).toBeFocused();
+      await page.getByRole("checkbox", { name: /Select stack media/ }).check();
+      await page.getByRole("button", { name: /Review selected \(/ }).click();
+      const plan = page.getByRole("dialog", { name: "Apply blocked", exact: true });
+      await expect(plan).toBeVisible();
+      const planTrigger = plan.getByRole("button", { name: /^Release notes for/ });
+      await planTrigger.click();
+      await expect(panel).toBeVisible();
+      await expect(panel.getByRole("button", { name: "Close release notes" })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(panel).not.toBeVisible();
+      await expect(plan).toBeVisible();
+      await expect(planTrigger).toBeFocused();
+      await plan.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.getByRole("checkbox", { name: /Select stack media/ })).toBeChecked();
+      expect(state.calls.some((call) => call.path === "/api/v1/plans/apply")).toBe(false);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  });
+}
