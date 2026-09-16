@@ -134,6 +134,16 @@ if [[ "$url" == https://discord.test/fail/* ]]; then
 fi
 
 case "$url" in
+  https://api.github.com/repos/linuxserver/docker-socket-proxy/releases/*|https://api.github.com/repos/linuxserver/docker-image-only-example/releases/*)
+    repo="${url#https://api.github.com/repos/}"
+    repo="${repo%/releases/*}"
+    case "$url" in
+      */releases/latest|*/releases/tags/3.4.4-r0-ls97)
+        write_body "$(release_json "3.4.4-r0-ls97" "$repo" $'## Changes\n- Routine image maintenance')"
+        ;;
+      *) write_body '{"message":"Not Found"}' ;;
+    esac
+    ;;
   https://api.github.com/repos/acme/app/releases/latest)
     write_body "$(release_json "v2.0.0" "acme/app" $'## Changes\n- Routine maintenance')"
     ;;
@@ -395,6 +405,55 @@ test_legacy_release_notes_linuxserver_payload_matches_snapshot_without_upstream_
   teardown_case
 }
 
+test_image_only_mapping_uses_container_release_for_all_routes(){
+  local name mode repo payload_file kind remote
+  for name in socket-proxy image-only-example; do
+    for mode in auto auto_digest explicit manager manager_digest; do
+      setup_case
+      kind=tag
+      remote=3.4.4-r0-ls97
+      if [[ "$mode" == *_digest ]]; then
+        kind=digest
+        remote=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      fi
+      repo="linuxserver/docker-$name"
+      payload_file="$TEST_TMP/payload.json"
+      printf '%s: %s\n' "$repo" "$repo" > "$TEST_TMP/upstreams.txt"
+      if [[ "$mode" == auto* ]]; then
+        FAKE_IMAGE_SOURCE="https://github.com/acme/app" \
+          update_kind_kind="$kind" update_kind_remote_value="$remote" \
+          result_tag=3.4.4-r0-ls97 \
+          run_notes "ghcr.io/linuxserver/$name:latest" "latest" "$payload_file"
+      elif [[ "$mode" == explicit ]]; then
+        PATH="$TEST_TMP/bin:$PATH" \
+          DISCORD_WEBHOOK=https://discord.test/webhook \
+          FAKE_WEBHOOK_PAYLOAD="$payload_file" \
+          FAKE_CURL_ARGS_LOG="$TEST_TMP/curl.args" \
+          "$GITHUB_EMBED" --provider lsio --lsio "$repo" --upstream "$repo" \
+          --tag 3.4.4-r0-ls97 > "$TEST_TMP/output.log" 2>&1 || fail "self-mapped wrapper failed"
+      else
+        PATH="$TEST_TMP/bin:$PATH" \
+          DISCORD_WEBHOOK=https://discord.test/webhook \
+          FAKE_WEBHOOK_PAYLOAD="$payload_file" \
+          FAKE_CURL_ARGS_LOG="$TEST_TMP/curl.args" \
+          UPSTREAM_MAP="$TEST_TMP/upstreams.txt" LOG_DIR="$TEST_TMP/logs" \
+          update_available=true image_name="linuxserver/$name" \
+          image_registry_url=https://ghcr.io update_kind_kind="$kind" \
+          update_kind_remote_value="$remote" result_tag=3.4.4-r0-ls97 \
+          "$TAG_MANAGER" > "$TEST_TMP/output.log" 2>&1 || fail "self-mapped tag-manager failed"
+      fi
+      jq -e --arg repo "$repo" \
+        '.embeds[0].fields[] | select(.name == "Repository" and .value == $repo)' \
+        "$payload_file" >/dev/null || fail "$mode used the wrong release repository"
+      jq -e '.embeds[0].description | contains("Routine image maintenance")' \
+        "$payload_file" >/dev/null || fail "$mode omitted image release notes"
+      grep -F "$repo/releases/tags/3.4.4-r0-ls97" "$TEST_TMP/curl.args" >/dev/null || fail "$mode lost the image build tag"
+      ! grep -F '/releases/latest' "$TEST_TMP/curl.args" >/dev/null || fail "$mode ignored the requested release tag"
+      teardown_case
+    done
+  done
+}
+
 test_legacy_tag_manager_missing_lsio_mapping_posts_admin_only(){
   setup_case
   local admin_payload_file="$TEST_TMP/admin-payload.json"
@@ -533,6 +592,7 @@ main(){
   run_test test_oci_source_label_uses_github_release_engine
   run_test test_legacy_release_notes_linuxserver_payload_matches_snapshot_without_upstream_map
   run_test test_legacy_tag_manager_missing_lsio_mapping_posts_admin_only
+  run_test test_image_only_mapping_uses_container_release_for_all_routes
   run_test test_legacy_tag_manager_ghcr_env_uses_wrapper
   run_test test_legacy_tag_manager_lsio_env_uses_upstream_map
   run_test test_missing_source_posts_minimal_notice

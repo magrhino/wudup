@@ -119,6 +119,13 @@ if [[ "$image_name" == linuxserver/* ]]; then
     exit 0
   fi
   args=("$RELEASE_EMBED" --provider lsio --lsio "$lsio_repo" --upstream "$upstream_repo" --debug)
+  if [[ "$upstream_repo" == "$lsio_repo" ]]; then
+    if [[ "$update_kind_kind" == "tag" && -n "$update_kind_remote_value" ]]; then
+      args+=(--tag "$update_kind_remote_value")
+    elif [[ -n "$result_tag" ]]; then
+      args+=(--tag "$result_tag")
+    fi
+  fi
   [[ -n "$DISCORD_WEBHOOK" ]] && args+=(--webhook "$DISCORD_WEBHOOK")
   run_embed "${args[@]}"
 elif [[ "$image_registry_url" == *ghcr.io* ]]; then

@@ -577,6 +577,20 @@ run_lsio() {
 resolve_auto_provider() {
   local source repo lsio_repo
 
+  if lsio_repo="$(extract_lsio_repo_from_image "$IMAGE" 2>/dev/null)" &&
+    [[ "$(lookup_upstream "$lsio_repo" || true)" == "$lsio_repo" ]]; then
+    set_upstream_repo "$lsio_repo"
+    if [[ -z "$TAG_OVERRIDE" ]]; then
+      if [[ "${update_kind_kind:-}" == tag && -n "${update_kind_remote_value:-}" ]]; then
+        TAG_OVERRIDE="$update_kind_remote_value"
+      else
+        TAG_OVERRIDE="${result_tag:-}"
+      fi
+    fi
+    PROVIDER="github"
+    return 0
+  fi
+
   source="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' 2>/dev/null || true)"
   if repo="$(extract_github_source_repo "$source" 2>/dev/null || true)" && [[ -n "$repo" ]]; then
     set_upstream_repo "$repo"
@@ -638,7 +652,11 @@ case "$PROVIDER" in
       err "Missing upstream repository; pass --upstream Owner/Repo"
       exit 2
     }
-    run_lsio
+    if [[ "$UPSTREAM_OWNER/$UPSTREAM_REPO" == "$LSIO_OWNER/$LSIO_REPO" ]]; then
+      run_github
+    else
+      run_lsio
+    fi
     ;;
   *)
     ;;

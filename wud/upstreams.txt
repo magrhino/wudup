@@ -127,6 +127,8 @@ linuxserver/docker-sickchill: SickChill/SickChill
 linuxserver/docker-sickgear: sickgear/sickgear
 linuxserver/docker-snapdrop: snapdrop/snapdrop
 linuxserver/docker-snipe-it: grokability/snipe-it
+# Self-mapping uses only this image's GitHub releases, without upstream enrichment.
+linuxserver/docker-socket-proxy: linuxserver/docker-socket-proxy
 linuxserver/docker-sonarr: Sonarr/Sonarr
 linuxserver/docker-speedtest-tracker: alexjustesen/speedtest-tracker
 linuxserver/docker-spotube: KRTirtho/spotube
