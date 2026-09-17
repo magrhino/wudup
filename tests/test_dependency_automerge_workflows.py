@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +17,10 @@ CANDIDATE_WORKFLOW = ROOT / ".github/workflows/dependency-automerge-candidate.ym
 
 
 class DependencyAutomergeWorkflowTests(unittest.TestCase):
+    @staticmethod
+    def _step(workflow: dict, job: str, name: str) -> dict:
+        return next(s for s in workflow["jobs"][job]["steps"] if s["name"] == name)
+
     @staticmethod
     def _workflow(path: Path) -> tuple[dict, str]:
         text = path.read_text(encoding="utf-8")
@@ -112,6 +119,169 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(rule["addLabels"], ["automerge"])
         self.assertNotIn("automerge", rule)
+
+    def test_dependency_review_checks_all_scopes_and_missing_licenses(self) -> None:
+        workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
+        options = self._step(
+            workflow, "dependency-review", "Check dependency changes"
+        )["with"]
+        self.assertEqual(options["fail-on-severity"], "high")
+        self.assertEqual(options["fail-on-scopes"], "runtime, development, unknown")
+        self.assertTrue(options["license-check"])
+        self.assertIn("MIT", options["allow-licenses"].split(", "))
+        self.assertNotIn("allow-ghsas", options)
+        self.assertNotIn("allow-dependencies-licenses", options)
+        program = self._step(
+            workflow, "dependency-review", "Require complete license evidence"
+        )["run"]
+        clean = {"unlicensed": [], "unresolved": [], "forbidden": []}
+        cases = [(json.dumps(clean), True), ("", False), ("{}", False)]
+        for key in clean:
+            cases.append((json.dumps({**clean, key: [{"name": "example"}]}), False))
+            cases.append((json.dumps({**clean, key: None}), False))
+        for payload, allowed in cases:
+            with self.subTest(payload=payload):
+                result = subprocess.run(
+                    ["bash", "-c", program],
+                    env={**os.environ, "LICENSE_RESULTS": payload},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode == 0, allowed, result.stderr)
+
+    def test_merge_waits_for_current_complete_workflows(self) -> None:
+        workflow, _ = self._workflow(PRIVILEGED_WORKFLOW)
+        program = self._step(
+            workflow, "merge-candidate",
+            "Merge the verified candidate when required checks pass",
+        )["run"]
+        fake_gh = r'''
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+scenario = os.environ["SCENARIO"]
+sha = "a" * 40
+root = Path(os.environ["RUNNER_TEMP"])
+pr = {"state": "open", "draft": False, "base": {"ref": "main"},
+      "head": {"sha": sha, "repo": {"full_name": "example/repo"}},
+      "user": {"login": "dependabot[bot]"}, "mergeable_state": "clean"}
+if scenario == "behind":
+    pr["mergeable_state"] = "behind"
+if scenario == "changed" and (root / "checked").exists():
+    pr["head"]["sha"] = "b" * 40
+if scenario == "retargeted" and (root / "checked").exists():
+    pr["base"]["ref"] = "other"
+if args[:2] == ["pr", "checks"]:
+    assert "--required" in args and "--watch" in args and "--fail-fast" in args
+    (root / "checked").touch()
+    sys.exit(1 if scenario == "required-failed" else 0)
+if args[:2] == ["run", "download"]:
+    target = Path(args[args.index("--dir") + 1])
+    (target / "candidate.json").write_text(json.dumps({
+        "schema": 1, "eligible": True, "repository": "example/repo",
+        "bot": "dependabot[bot]", "head_sha": sha, "pr_number": 1}))
+    sys.exit(0)
+path = next(a for a in args if a.startswith("repos/"))
+if path.endswith("/merge"):
+    assert "sha=" + sha in args
+    (root / "merged").touch()
+    data = {"merged": True}
+elif path.endswith("/pulls/1"):
+    data = pr
+elif "/commits?" in path:
+    data = [[{"author": {"login": "dependabot[bot]"},
+              "committer": {"login": "web-flow"},
+              "commit": {"verification": {"verified": True, "reason": "valid"}}}]]
+elif "/artifacts?" in path:
+    print("99")
+    sys.exit(0)
+elif path.endswith("dependency-automerge-candidate.yml"):
+    print("10")
+    sys.exit(0)
+elif path.endswith("/runs/99"):
+    data = {"workflow_id": 10, "name": "dependency auto-merge candidate",
+            "event": "pull_request_target", "conclusion": "success"}
+elif "/workflows/" in path and "/runs?" in path:
+    assert "head_sha=" + sha in path and "event=pull_request" in path
+    name = path.split("/workflows/")[1].split("/")[0]
+    run = {"id": {"ci.yml": 1, "security.yml": 2, "codeql.yml": 3}[name],
+           "head_sha": sha, "event": "pull_request", "status": "completed",
+           "conclusion": "success", "pull_requests": [{"number": 1}]}
+    if name == "ci.yml":
+        if scenario in ("failure", "cancelled", "skipped", "timed_out"):
+            run["conclusion"] = scenario
+        if scenario == "pending":
+            run.update(status="in_progress", conclusion=None)
+        if scenario == "stale":
+            run["head_sha"] = "b" * 40
+        if scenario == "wrong-pr":
+            run["pull_requests"] = [{"number": 2}]
+    if name == "security.yml" and scenario == "security-failure":
+        run["conclusion"] = "failure"
+    if name == "codeql.yml" and scenario == "codeql-pending":
+        run.update(status="in_progress", conclusion=None)
+    data = {"workflow_runs": [] if scenario == "missing-run" else [run]}
+    if scenario == "newer-failure":
+        data["workflow_runs"] = [{**run, "conclusion": "failure"}, run]
+elif "/jobs?" in path:
+    names = {"1": ["python tests", "shell tests", "webui checks"],
+             "2": ["dependency review", "workflow security"],
+             "3": ["Analyze (actions)", "Analyze (python)",
+                   "Analyze (javascript-typescript)"]}
+    run_id = path.split("/runs/")[1].split("/")[0]
+    jobs = [{"name": n, "status": "completed", "conclusion": "success"}
+            for n in names[run_id]]
+    jobs.append({"name": "optional", "status": "completed", "conclusion": "skipped"})
+    for job_id, job in enumerate(jobs):
+        job["id"] = job_id
+    if scenario in ("retried-pass", "retried-failure"):
+        jobs.append({**jobs[0], "id": 100,
+                     "conclusion": "success" if scenario == "retried-pass" else "failure"})
+    if scenario == "skipped-core" or scenario == "skipped-core-" + run_id:
+        jobs[0]["conclusion"] = "skipped"
+    if scenario == "missing-core":
+        jobs.pop(0)
+    if scenario == "api-error":
+        sys.exit(1)
+    data = [{"jobs": jobs}]
+else:
+    raise AssertionError(args)
+print(json.dumps(data))
+'''
+        cases = [
+            "green", "failure", "cancelled", "skipped", "timed_out", "pending",
+            "stale", "wrong-pr", "missing-run", "newer-failure", "skipped-core",
+            "missing-core", "required-failed", "behind", "changed", "api-error",
+            "retargeted", "security-failure", "codeql-pending",
+            "skipped-core-2", "skipped-core-3",
+            "retried-pass", "retried-failure",
+        ]
+        for scenario in cases:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                gh = root / "gh"
+                gh.write_text(f"#!{sys.executable}\n" + fake_gh, encoding="utf-8")
+                gh.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-c", program],
+                    env={**os.environ, "PATH": tmp + os.pathsep + os.environ["PATH"],
+                         "GH_REPO": "example/repo", "PR_NUMBER": "1",
+                         "RUNNER_TEMP": tmp, "SCENARIO": scenario,
+                         "MERGE_TOKEN": "example-only"},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    (root / "merged").exists(),
+                    scenario in ("green", "retried-pass"), result.stderr,
+                )
+                self.assertEqual(result.returncode, 1 if scenario == "api-error" else 0,
+                                 result.stderr)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,12 @@
 name: dependency auto-merge
 
 on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Dependency PR to recheck after checks or review complete.
+        required: true
+        type: number
   push:
     branches:
       - main
@@ -16,27 +22,30 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.pull_requests[0].number || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.workflow_run.pull_requests[0].number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   merge-candidate:
     name: merge eligible dependency PR
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
       pull-requests: read
     if: >-
       ${{
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
+        github.event_name == 'workflow_dispatch' ||
         (
-          github.event.workflow_run.event == 'pull_request' ||
-          github.event.workflow_run.event == 'pull_request_target'
-        ) &&
-        github.event.workflow_run.pull_requests[0].number != null
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          (
+            github.event.workflow_run.event == 'pull_request' ||
+            github.event.workflow_run.event == 'pull_request_target'
+          ) &&
+          github.event.workflow_run.pull_requests[0].number != null
+        )
       }}
 
     steps:
@@ -50,10 +59,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           MERGE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.workflow_run.pull_requests[0].number }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
 
           pr_json="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")"
           if ! jq -e \
@@ -113,6 +123,11 @@ jobs:
             exit 0
           fi
 
+          # External checks can finish after the final workflow_run event.
+          if ! gh pr checks "$PR_NUMBER" --repo "$GH_REPO" --required --watch --fail-fast --interval 10; then
+            exit 0
+          fi
+
           commits_json="$(
             gh api --paginate --slurp \
               "repos/$GH_REPO/pulls/$PR_NUMBER/commits?per_page=100"
@@ -156,7 +171,52 @@ jobs:
             fi
           fi
 
-          if ! gh pr checks "$PR_NUMBER" --repo "$GH_REPO" --required >/dev/null; then
+          # Require each complete workflow, not just branch-required jobs.
+          # Query the latest run for this head, never a previous successful run.
+          for workflow in ci.yml security.yml codeql.yml; do
+            run_json="$(
+              gh api "repos/$GH_REPO/actions/workflows/$workflow/runs?event=pull_request&head_sha=$head_sha&per_page=1"
+            )"
+            if ! jq -e \
+              --arg sha "$head_sha" \
+              --argjson pr "$PR_NUMBER" '
+                .workflow_runs[0] |
+                .head_sha == $sha and .event == "pull_request" and
+                .status == "completed" and .conclusion == "success" and
+                any(.pull_requests[]; .number == $pr)
+              ' >/dev/null <<<"$run_json"; then
+              printf 'Waiting for a successful %s run on the current PR commit.\n' "$workflow"
+              exit 0
+            fi
+
+            case "$workflow" in
+              ci.yml) required_jobs='["python tests", "shell tests", "webui checks"]' ;;
+              security.yml) required_jobs='["dependency review", "workflow security"]' ;;
+              codeql.yml) required_jobs='["Analyze (actions)", "Analyze (python)", "Analyze (javascript-typescript)"]' ;;
+            esac
+            run_id="$(jq -r '.workflow_runs[0].id' <<<"$run_json")"
+            # Keep successful jobs from earlier attempts when only failed jobs
+            # were rerun, but never accept an older result for a retried job.
+            jobs_json="$(gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$run_id/jobs?filter=all&per_page=100")"
+            if ! jq -e --argjson required "$required_jobs" '
+              ([.[] | .jobs[]] | group_by(.name) | map(max_by(.id))) as $jobs |
+              all($required[]; . as $name |
+                any($jobs[]; .name == $name and .status == "completed" and .conclusion == "success"))
+            ' >/dev/null <<<"$jobs_json"; then
+              printf 'Required jobs in %s must succeed; missing or skipped jobs do not qualify.\n' "$workflow"
+              exit 0
+            fi
+          done
+
+          # Respect branch protection even if the merge token has admin bypass.
+          pr_json="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")"
+          if ! jq -e --arg sha "$head_sha" --arg repository "$GH_REPO" '
+            .state == "open" and .draft == false and
+            .base.ref == "main" and .head.repo.full_name == $repository and
+            .head.sha == $sha and .mergeable_state == "clean" and
+            (.user.login != "renovate[bot]" or any(.labels[]; .name == "automerge"))
+          ' >/dev/null <<<"$pr_json"; then
+            printf 'PR changed or is not cleanly mergeable; leaving it open.\n'
             exit 0
           fi
 

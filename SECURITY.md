@@ -110,7 +110,9 @@ The repository keeps security checks high-signal and cost-conscious:
 - The security workflow runs workflow auditing with zizmor, failing on high
   severity findings with medium or higher confidence.
 - Dependency Review blocks high and critical severity dependency changes on
-  public pull requests. Its license check is currently disabled.
+  public pull requests, including runtime, development, and unknown scopes.
+  It checks license expressions against the routine-approval list below;
+  missing or unresolved license metadata also fails the check.
 - OSSF Scorecard runs as an advisory signal on non-PR events when the
   repository is public.
 
@@ -141,13 +143,17 @@ passing tests does not make a finding non-exploitable.
 
 ## Dependency License Rules
 
-Before adding or updating a dependency, record its version, upstream license
-text, SPDX license identifier or expression, and whether it is redistributed
+Before adding or updating a dependency, retain its version, upstream license
+reference, SPDX license identifier or expression, and whether it is redistributed
 in Python packages, browser assets, or either container image variant. Include
 transitive dependencies and base-image packages in release review.
 
-- MIT, BSD-2-Clause, BSD-3-Clause, ISC, and Apache-2.0 are eligible for routine
-  approval when their applicable notices and other obligations are satisfied.
+- MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, 0BSD, CC0-1.0,
+  Unlicense, BlueOak-1.0.0, PSF-2.0, Python-2.0, BSL-1.0, and Zlib are eligible
+  for automated routine approval when their applicable notices and other
+  obligations are satisfied. Dependency Review's retained JSON inventory and job
+  summary serve as the version and license review record; existing manifest and
+  packaging boundaries establish the distribution scope for routine updates.
 - Copyleft licenses, including GPL, LGPL, MPL, and AGPL, require explicit
   maintainer review of compatibility with this repository's GPLv3 license and
   the actual linking, bundling, modification, and distribution model. Copyleft
@@ -164,15 +170,55 @@ transitive dependencies and base-image packages in release review.
 
 An incompatible license or unmet obligation blocks distribution. A security risk
 exception cannot waive license terms. Build-only tools need their own usage
-review even when they are not redistributed. License review is currently manual;
-Dependency Review does not enforce these rules.
+review even when they are not redistributed. Dependency Review enforces the
+routine license list for detected changes; it does not prove that notices or
+source obligations are satisfied. New distribution models and licenses outside
+that list require maintainer review. License exceptions must identify the exact
+package version, license text, obligations, and approving review; do not add a
+package-wide license exclusion just to make an update green.
+
+## Routine Dependency Auto-Merge
+
+Verified Dependabot minor/patch updates and eligible Renovate Docker updates can
+merge without a separate human sign-off when all of these conditions hold:
+
+- The current PR contains only the verified dependency bot commit and is not a
+  draft. Major Dependabot updates are not eligible.
+- The latest `ci`, `security`, and `CodeQL Advanced` PR runs for that exact head
+  commit have completed successfully. Core Python, shell, WebUI, dependency
+  review, workflow auditing, and all three CodeQL analysis jobs must actually
+  pass; missing or skipped core jobs do not qualify. Optional checks may be
+  skipped by their normal path/label conditions, but any failure in a selected
+  workflow prevents auto-merge.
+- All repository-required checks pass, including CodeQL's findings check, and
+  GitHub reports the PR as cleanly mergeable. The final merge is conditional on
+  the verified head commit still being current.
+
+For routine updates within existing usage and distribution boundaries, successful
+check summaries are the automated review evidence authorized by this policy.
+There is no per-update manual approval form or VEX requirement for dependencies
+with no finding. Non-blocking lower-severity alerts remain subject to the response
+targets below and do not require pre-merge approval. Changes needing a license
+exception, vulnerability dismissal,
+or VEX assessment remain open for maintainer review; automation must not invent
+evidence or suppress a finding to make them eligible. A VEX record alone does
+not clear GitHub's Dependency Review check: fix/remove the dependency or have a
+maintainer handle the specific exception using the evidence requirements below.
+
+GitHub Dependency Review does not inspect container OS packages or every bundled
+tool. Renovate's green build and dependency checks do not establish that an image
+has no vulnerabilities; the artifact review requirements below still apply.
 
 ## Release-Blocking Conditions
 
 Before creating a release tag or starting publication, the releasing maintainer
-must record a security sign-off in the release PR or private security tracking
-record, with links to checks, findings, and their dispositions. Review the full
-candidate and its dependencies, not just newly introduced alerts. Do not publish
+must retain a security sign-off in the release PR or private security tracking
+record, with links to checks, findings, and their dispositions. Routine dependency
+PR check results may be reused as evidence for unchanged decisions; they do not
+require repeated manual license approval. Retain relevant dependency-review JSON
+with the release evidence before its 90-day Actions artifact retention expires.
+Review the full candidate and its
+dependencies, not just newly introduced alerts. Do not publish
 when any of the following remains unresolved:
 
 - A finding meets a blocking threshold above, including an inherited finding.
@@ -186,9 +232,12 @@ when any of the following remains unresolved:
 
 These are maintainer release requirements, not a claim of complete CI
 enforcement. CodeQL result review and branch protection depend on repository
-settings and service availability; Dependency Review only checks public PR
-dependency changes. The release workflow does not currently enforce a complete
-SAST/SCA, license, or VEX gate. Where a hosted scan is unavailable or skipped,
+settings and service availability. The repository's CodeQL merge rule must block
+high/critical security alerts and code-scanning errors, and its `CodeQL`,
+`dependency review`, and `workflow security` checks must remain required.
+Dependency Review only checks public PR dependency changes. The release workflow
+does not currently enforce a complete SAST/SCA, license, or VEX gate. Where a
+hosted scan is unavailable or skipped,
 retain equivalent analysis and maintainer review before publication; a skipped
 job or successful upload is not a clean security assessment. Scorecard remains
 advisory unless its underlying finding meets a blocking condition.

@@ -185,6 +185,50 @@ Optional checks are available when broader coverage is useful:
 - Workflow linting runs automatically when files under `.github/workflows/`
   change, and can also be run from manual CI dispatch.
 
+## Dependency Updates
+
+Dependabot's existing weekly schedules, grouping, and cooldowns are unchanged.
+Verified minor and patch updates are eligible for automatic squash merge;
+major updates require manual review. Renovate continues to mark eligible
+non-major Docker updates with its own `automerge` label.
+
+The merge workflow waits for all repository-required checks and verifies the
+latest `ci`, `security`, and `CodeQL Advanced` runs for the current PR head. All
+three workflows must succeed, including any selected Docker or browser tests.
+Core tests, dependency review, workflow auditing, and CodeQL analyses cannot be
+skipped. GitHub must also report the PR as cleanly mergeable, even when the merge
+token can bypass repository rules. Optional jobs can retain their normal skip
+conditions. No extra human approval is needed for a routine clean update.
+
+Dependency Review checks runtime, development, and unknown dependency scopes for
+high/critical vulnerabilities and the routine licenses listed in
+[`SECURITY.md`](../SECURITY.md#dependency-license-rules). Missing license metadata
+also stops the check. The workflow summary and `dependency-review-<PR>-<SHA>` JSON
+artifact (retained for 90 days) are the review evidence; failures need a
+dependency fix or an evidence-backed maintainer
+decision, not a broad allowlist or fabricated VEX record. Existing copyleft
+dependencies, such as MPL-licensed build tooling, still require review when
+updated; a previously merged version is not a blanket license exception.
+
+Keep the repository's required checks and CodeQL high-or-higher merge protection
+enabled. Dependency Review requires a public repository with dependency graph
+enabled (or separately configured licensed private-repository support); the
+current public-only workflow intentionally prevents unattended private-repository
+merges by requiring its core job to pass, not skip.
+
+The auto-merge workflow waits up to its 15-minute job limit for trailing required
+checks. To retry after a timeout or a late external check, run:
+
+```bash
+gh workflow run dependency-automerge.yml --ref main -f pr_number=123
+```
+
+The retry uses the same gates and does not bypass them. Candidate records are
+kept for seven days; if one has expired, rerun the candidate workflow for the
+current PR or trigger a PR label event to regenerate it. Security exceptions
+and VEX assessments remain maintainer work as described in `SECURITY.md`; this
+automation neither creates VEX claims nor consumes them to suppress alerts.
+
 ## Releases
 
 Release Please is the normal release path. When a Release Please PR is merged,

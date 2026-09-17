@@ -48,10 +48,52 @@ jobs:
           persist-credentials: false
 
       - name: Check dependency changes
+        id: dependencies
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          license-check: false
+          fail-on-scopes: runtime, development, unknown
+          license-check: true
+          allow-licenses: MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, 0BSD, CC0-1.0, Unlicense, BlueOak-1.0.0, PSF-2.0, Python-2.0, BSL-1.0, Zlib
+
+      # The action reports missing licenses without failing; enforce our policy.
+      - name: Require complete license evidence
+        env:
+          LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! jq -e '
+            type == "object" and
+            all(.unlicensed, .unresolved, .forbidden; type == "array" and length == 0)
+          ' >/dev/null <<<"$LICENSE_RESULTS"; then
+            printf 'Dependency license review is incomplete or needs maintainer review. See the dependency review summary and SECURITY.md.\n' >&2
+            exit 1
+          fi
+
+      - name: Record dependency review evidence
+        env:
+          DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
+          LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg base "$BASE_SHA" --arg head "$HEAD_SHA" \
+            --argjson changes "$DEPENDENCY_CHANGES" \
+            --argjson licenses "$LICENSE_RESULTS" \
+            '{base: $base, head: $head, changes: $changes, license_results: $licenses}' \
+            > "$RUNNER_TEMP/dependency-review.json"
+
+      - name: Retain dependency review evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-review-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/dependency-review.json
+          if-no-files-found: error
+          retention-days: 90
 
   workflow-security:
     name: workflow security

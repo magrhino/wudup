@@ -49,6 +49,8 @@ EOF
 
   run "$python_bin" -m compileall -q src tests webui/scripts
 
+  run "$python_bin" -m unittest tests.test_dependency_automerge_workflows
+
   run "$python_bin" -m pytest --cov=wudup --cov-branch --cov-report=xml
 }
 
