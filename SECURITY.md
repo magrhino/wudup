@@ -180,6 +180,10 @@ source obligations are satisfied. New distribution models and licenses outside
 that list require maintainer review. License exceptions must identify the exact
 package version, license text, obligations, and approving review; do not add a
 package-wide license exclusion just to make an update green.
+The two exact-version development-lock decisions in
+[SonarQube triage](docs/SONAR_TRIAGE.md#license-evidence) record the evidence for
+this hardening change. CI also checks their manifest, scope, and observed license
+metadata; future versions do not inherit these decisions.
 
 ## Routine Dependency Auto-Merge
 

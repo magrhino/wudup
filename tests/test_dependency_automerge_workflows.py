@@ -130,7 +130,10 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         self.assertTrue(options["license-check"])
         self.assertIn("MIT", options["allow-licenses"].split(", "))
         self.assertNotIn("allow-ghsas", options)
-        self.assertNotIn("allow-dependencies-licenses", options)
+        self.assertEqual(
+            options["allow-dependencies-licenses"].split(", "),
+            ["pkg:pypi/certifi@2026.7.22", "pkg:pypi/typing-extensions@4.16.0"],
+        )
         program = self._step(
             workflow, "dependency-review", "Require complete license evidence"
         )["run"]
@@ -143,12 +146,51 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 result = subprocess.run(
                     ["bash", "-c", program],
-                    env={**os.environ, "LICENSE_RESULTS": payload},
+                    env={**os.environ, "LICENSE_RESULTS": payload, "DEPENDENCY_CHANGES": "[]"},
                     capture_output=True,
                     text=True,
                     check=False,
                 )
                 self.assertEqual(result.returncode == 0, allowed, result.stderr)
+
+    def test_license_decisions_are_limited_to_reviewed_usage(self) -> None:
+        workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
+        program = self._step(
+            workflow, "dependency-review", "Require complete license evidence"
+        )["run"]
+        for package, license_expression in (
+            ("pkg:pypi/certifi@2026.7.22", "MPL-2.0"),
+            ("pkg:pypi/typing-extensions@4.16.0", "PSF-2.0"),
+            ("pkg:pypi/typing-extensions@4.16.0", (
+                "Python-2.0 AND GPL-1.0-or-later AND Python-2.0 AND BSD-3-Clause "
+                "AND Python-2.0 AND BSD-3-Clause AND 0BSD"
+            )),
+        ):
+            reviewed = {
+                "change_type": "added", "package_url": package,
+                "manifest": "requirements-dev.txt", "scope": "development",
+                "license": license_expression,
+            }
+            cases = [(json.dumps([reviewed]), True), ("", False), ("{}", False)]
+            for field, value in (
+                ("manifest", "requirements.txt"), ("scope", "runtime"),
+                ("scope", "unknown"), ("license", None), ("license", "AGPL-3.0"),
+            ):
+                cases.append((json.dumps([{**reviewed, field: value}]), False))
+            cases.append((json.dumps([{
+                **reviewed, "change_type": "removed", "scope": "runtime",
+            }]), True))
+            for changes, allowed in cases:
+                with self.subTest(package=package, changes=changes):
+                    result = subprocess.run(
+                        ["bash", "-c", program],
+                        env={**os.environ, "DEPENDENCY_CHANGES": changes,
+                             "LICENSE_RESULTS": json.dumps({
+                                 "unlicensed": [], "unresolved": [], "forbidden": [],
+                             })},
+                        capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(result.returncode == 0, allowed, result.stderr)
 
     def test_merge_waits_for_current_complete_workflows(self) -> None:
         workflow, _ = self._workflow(PRIVILEGED_WORKFLOW)

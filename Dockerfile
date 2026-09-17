@@ -62,7 +62,8 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 WORKDIR /app
 
 COPY requirements.txt requirements-build.txt /app/
-RUN python -m pip install --require-hashes --only-binary=:all: --no-cache-dir -r requirements.txt -r requirements-build.txt
+RUN python -m pip install --require-hashes --only-binary=:all: --no-cache-dir \
+    -r requirements.txt -r requirements-build.txt
 
 COPY pyproject.toml README.md /app/
 COPY src/ /app/src/

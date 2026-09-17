@@ -21,7 +21,7 @@ runs:
         python -m venv .venv
         . .venv/bin/activate
         python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
-        # Editable repository source is intentional; dependency downloads are not.
-        python -m pip install --no-deps --no-build-isolation -e '.[dev]'
+        # Local editable source still builds; binary-only applies to index candidates.
+        python -m pip install --only-binary=:all: --no-deps --no-build-isolation -e '.[dev]'
         python -m pip check
         echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"

@@ -12,7 +12,7 @@ in a virtual environment before running the full local suite:
 python3.14 -m venv .venv
 . .venv/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
-python -m pip install --no-deps --no-build-isolation -e '.[dev]'
+python -m pip install --only-binary=:all: --no-deps --no-build-isolation -e '.[dev]'
 ```
 
 WUDup still supports Python 3.10 and newer. To work on another supported Python

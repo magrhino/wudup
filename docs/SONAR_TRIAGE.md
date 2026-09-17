@@ -53,6 +53,34 @@ builds from silently fetching new tools; it does not sandbox project code.
 The host installer and ad hoc developer installs are outside the CI/image
 locking guarantee.
 
+## License evidence
+
+The first consolidated PR analysis found two license decisions in the newly
+recorded development lock. Owner: `@magrhino`; maintainer acceptance of
+[PR #688](https://github.com/magrhino/wudup/pull/688) records approval of these
+specific uses. Neither decision waives vulnerability scanning or adds a license
+to the routine allowlist. The workflow limits them to the exact package versions,
+`requirements-dev.txt`, development scope, and the recorded license metadata.
+Changed versions, distribution scope, or metadata require renewed review.
+
+- `pkg:pypi/certifi@2026.7.22`: the installed wheel and
+  [upstream license](https://github.com/certifi/python-certifi/blob/2026.07.22/LICENSE)
+  identify MPL-2.0. This is the unchanged CA bundle used by HTTPX in development
+  and tests, absent from the runtime/build locks and default image. Preserve the
+  upstream license and source reference; do not modify or redistribute the bundle
+  under this development-only decision. Mozilla's
+  [MPL guidance](https://www.mozilla.org/en-US/MPL/2.0/FAQ/#q5-i-want-to-use-software-which-is-available-under-the-mpl-what-do-i-have-to-do)
+  distinguishes private use from distribution obligations.
+- `pkg:pypi/typing-extensions@4.16.0`: the installed wheel's
+  `License-Expression` and
+  [versioned project metadata](https://github.com/python/typing_extensions/blob/4.16.0/pyproject.toml)
+  identify PSF-2.0. The
+  [license text](https://github.com/python/typing_extensions/blob/4.16.0/LICENSE)
+  distinguishes GPL compatibility from GPL licensing; GitHub's compound
+  expression containing `GPL-1.0-or-later` is a metadata misclassification.
+  Preserve the shipped license/notices. This version already exists in the
+  runtime lock; this decision covers its additional development-lock entry.
+
 ## Gate and enforcement
 
 Keep the project's current new-code gate: security, reliability, and
@@ -79,6 +107,12 @@ local build is not evidence that the remote analysis has seen a patch.
 The next PR analysis must confirm both the issue decisions and the required
 check. Repository settings are remote state and cannot be enforced by
 `sonar-project.properties` alone.
+
+The first consolidated PR analysis also flagged the intentional editable source
+install (`AaCxGW2ed_v-xkWRipEA`). Its command now specifies binary-only index
+candidates as well as no dependency resolution/build isolation. Pip still builds
+the explicitly named local project; this flag does not claim to sandbox source
+or eliminate the reviewed local build.
 
 ## Validation and maintenance
 
@@ -127,6 +161,8 @@ Validation recorded on 2026-09-17:
   volume for temporary directories. The initial macOS bind-mount run built the
   image but failed database-owner verification; the unmodified harness passed
   with Linux-native storage, including permission repair and script syncing.
+- The consolidated change also passed `tests/container-build.sh` on Linux arm64
+  with disposable Linux-native storage, including the default and Trivy images.
 - SonarQube MCP `analyze_file_list` failed to request analysis; automatic
   analysis was restored. The six source fixes still require remote PR analysis.
 

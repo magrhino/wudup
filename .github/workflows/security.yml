@@ -55,11 +55,15 @@ jobs:
           fail-on-scopes: runtime, development, unknown
           license-check: true
           allow-licenses: MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, 0BSD, CC0-1.0, Unlicense, BlueOak-1.0.0, PSF-2.0, Python-2.0, BSL-1.0, Zlib
+          # Exact-version evidence: docs/SONAR_TRIAGE.md#license-evidence.
+          # The next step limits these exceptions to the reviewed dev manifest.
+          allow-dependencies-licenses: pkg:pypi/certifi@2026.7.22, pkg:pypi/typing-extensions@4.16.0
 
       # The action reports missing licenses without failing; enforce our policy.
       - name: Require complete license evidence
         env:
           LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
+          DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
         shell: bash
         run: |
           set -euo pipefail
@@ -68,6 +72,21 @@ jobs:
             all(.unlicensed, .unresolved, .forbidden; type == "array" and length == 0)
           ' >/dev/null <<<"$LICENSE_RESULTS"; then
             printf 'Dependency license review is incomplete or needs maintainer review. See the dependency review summary and SECURITY.md.\n' >&2
+            exit 1
+          fi
+          if ! jq -e '
+            type == "array" and all(.[];
+              if .change_type == "removed" then true
+              elif .package_url == "pkg:pypi/certifi@2026.7.22" then
+                .manifest == "requirements-dev.txt" and .scope == "development" and
+                .license == "MPL-2.0"
+              elif .package_url == "pkg:pypi/typing-extensions@4.16.0" then
+                .manifest == "requirements-dev.txt" and .scope == "development" and
+                (.license == "PSF-2.0" or .license ==
+                  "Python-2.0 AND GPL-1.0-or-later AND Python-2.0 AND BSD-3-Clause AND Python-2.0 AND BSD-3-Clause AND 0BSD")
+              else true end)
+          ' >/dev/null <<<"$DEPENDENCY_CHANGES"; then
+            printf 'A version-specific license decision no longer matches its reviewed usage or metadata. See docs/SONAR_TRIAGE.md.\n' >&2
             exit 1
           fi
 
