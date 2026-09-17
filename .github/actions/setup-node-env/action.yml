@@ -18,4 +18,4 @@ runs:
     - name: Install frontend dependencies
       if: ${{ inputs.install-dependencies == 'true' }}
       shell: bash
-      run: npm --prefix webui ci
+      run: npm --prefix webui ci --ignore-scripts

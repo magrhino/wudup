@@ -16,6 +16,7 @@ short; detailed setup and behavior notes live here.
 | Configuration reference | [CONFIGURATION.md](CONFIGURATION.md) |
 | Generated host/helper configuration | [COMMAND_RUNNER.md#init-wizard](COMMAND_RUNNER.md#init-wizard) |
 | Development, CI, and release automation | [DEVELOPMENT.md](DEVELOPMENT.md) |
+| SonarQube installation findings and gate policy | [SONAR_TRIAGE.md](SONAR_TRIAGE.md) |
 | Docker Compose example | [examples/docker-compose.example.yml](examples/docker-compose.example.yml) |
 | Long-running WebUI Docker Compose example | [examples/docker-compose.webui.yml](examples/docker-compose.webui.yml) |
 | Long-running WebUI env example | [examples/webui.env.example](examples/webui.env.example) |

@@ -115,6 +115,10 @@ The repository keeps security checks high-signal and cost-conscious:
   missing or unresolved license metadata also fails the check.
 - OSSF Scorecard runs as an advisory signal on non-PR events when the
   repository is public.
+- SonarCloud Code Analysis is a required merge check. Its new-code quality gate
+  and scoped installation/build exceptions are documented in
+  [SonarQube triage](docs/SONAR_TRIAGE.md). Successful analysis alone is not a
+  passing quality gate.
 
 These checks do not replace private vulnerability reporting.
 
@@ -190,7 +194,8 @@ merge without a separate human sign-off when all of these conditions hold:
   pass; missing or skipped core jobs do not qualify. Optional checks may be
   skipped by their normal path/label conditions, but any failure in a selected
   workflow prevents auto-merge.
-- All repository-required checks pass, including CodeQL's findings check, and
+- All repository-required checks pass, including CodeQL's findings check and
+  SonarCloud Code Analysis, and
   GitHub reports the PR as cleanly mergeable. The final merge is conditional on
   the verified head commit still being current.
 
@@ -234,7 +239,8 @@ These are maintainer release requirements, not a claim of complete CI
 enforcement. CodeQL result review and branch protection depend on repository
 settings and service availability. The repository's CodeQL merge rule must block
 high/critical security alerts and code-scanning errors, and its `CodeQL`,
-`dependency review`, and `workflow security` checks must remain required.
+`dependency review`, `workflow security`, and `SonarCloud Code Analysis` checks
+must remain required, bound to their publishing GitHub Apps.
 Dependency Review only checks public PR dependency changes. The release workflow
 does not currently enforce a complete SAST/SCA, license, or VEX gate. Where a
 hosted scan is unavailable or skipped,
@@ -264,6 +270,9 @@ compensating controls, a remediation issue, and an expiry within 90 days, and
 must be reconsidered before renewal. They cannot waive a blocking condition.
 Do not suppress a whole rule or package to silence one alert. Keep sensitive
 evidence private and publish only a sanitized rationale when disclosure is safe.
+The two MEDIUM optional TrueNAS build findings and their review deadline are
+tracked in [SonarQube triage](docs/SONAR_TRIAGE.md#exception-limits). These are
+scoped source-build decisions, not dependency CVE dismissals or VEX claims.
 
 ## VEX For Non-Exploitable Dependency Findings
 

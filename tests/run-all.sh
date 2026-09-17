@@ -135,7 +135,7 @@ run_webui_checks() {
 
   if command -v npm >/dev/null 2>&1 && [[ -f webui/package-lock.json ]]; then
     run node --check webui/scripts/dev-server.mjs
-    run npm --prefix webui ci
+    run npm --prefix webui ci --ignore-scripts
     run npm --prefix webui run typecheck
     run npm --prefix webui run test
     run npm --prefix webui run build

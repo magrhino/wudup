@@ -7,7 +7,7 @@ FROM node:26-bookworm-slim@sha256:79723b41edbedf595f62e943a9f8b0ba9af5b1e61045c5
 WORKDIR /webui
 
 COPY webui/package*.json /webui/
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY webui/ /webui/
 COPY src/wudup/discord_webhook_policy.json /src/wudup/discord_webhook_policy.json
@@ -16,6 +16,7 @@ RUN npm run build
 
 FROM python:3.14.6-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9 AS wudup-runtime
 
+# Optional version-specific source build; reviewed exceptions: docs/SONAR_TRIAGE.md.
 ARG TRUENAS_API_CLIENT_REF=""
 ARG APT_REFRESH="local"
 
@@ -60,14 +61,15 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 
 WORKDIR /app
 
-COPY requirements.txt /app/
-RUN python -m pip install --require-hashes --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-build.txt /app/
+RUN python -m pip install --require-hashes --only-binary=:all: --no-cache-dir -r requirements.txt -r requirements-build.txt
 
 COPY pyproject.toml README.md /app/
 COPY src/ /app/src/
 COPY --from=webui-build /webui/dist/ /app/src/wudup/web_static/
 
-RUN python -m pip install --no-deps --no-cache-dir .
+# Build trusted repository source with the locked backend, without fetching dependencies.
+RUN python -m pip install --no-deps --no-build-isolation --no-cache-dir .
 
 COPY bin/ /app/bin/
 COPY wud/ /app/wud/

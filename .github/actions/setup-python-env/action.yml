@@ -6,9 +6,13 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
-        python-version: "3.x"
+        # Match the interpreter used to generate the CI lock.
+        python-version: "3.14"
         cache: pip
-        cache-dependency-path: pyproject.toml
+        cache-dependency-path: |
+          requirements.txt
+          requirements-build.txt
+          requirements-dev.txt
 
     - name: Install Python dev dependencies
       shell: bash
@@ -16,5 +20,8 @@ runs:
         set -euo pipefail
         python -m venv .venv
         . .venv/bin/activate
-        python -m pip install -e '.[dev]'
+        python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
+        # Editable repository source is intentional; dependency downloads are not.
+        python -m pip install --no-deps --no-build-isolation -e '.[dev]'
+        python -m pip check
         echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"

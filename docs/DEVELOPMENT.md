@@ -5,14 +5,22 @@ deployment docs start in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Local Setup
 
-Install the Python development dependencies in a virtual environment before
-running the full local suite:
+Use Python 3.14 for the locked CI/development toolchain. Install its dependencies
+in a virtual environment before running the full local suite:
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[dev]'
+python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
+python -m pip install --no-deps --no-build-isolation -e '.[dev]'
 ```
+
+WUDup still supports Python 3.10 and newer. To work on another supported Python
+version, create the venv with that interpreter and use
+`python -m pip install -e '.[dev]'`; this deliberately resolves dependencies for
+that interpreter rather than consuming the Python 3.14 CI lock. Regenerate the
+committed locks with Python 3.14, since environment markers can change the
+dependency set on older interpreters.
 
 Run the full validation entrypoint:
 
@@ -66,7 +74,7 @@ artifact keeps the repository-local image build path used by smoke tests.
 Install the frontend dependencies before running the Vue/Vite checks:
 
 ```bash
-npm --prefix webui ci
+npm --prefix webui ci --ignore-scripts
 npm --prefix webui run typecheck
 npm --prefix webui run test
 npm --prefix webui run build
@@ -157,6 +165,12 @@ wudup web --host 127.0.0.1 --port 7417 --static-dir webui/dist
 
 ## CI
 
+CI and Docker installs use hashed Python locks and disable third-party install
+scripts where supported. Run `make lock` with the installed development tools
+to regenerate the runtime, build-backend, and development locks together.
+See [SonarQube triage and gate policy](SONAR_TRIAGE.md) for the per-finding
+decisions, required source-build exceptions, and merge enforcement.
+
 CI runs on pull requests targeting `main` and pushes to `main`. The default path
 is intentionally Linux-only to keep private repository Actions usage predictable.
 The `python-tests` and `webui-checks` jobs generate coverage reports and upload
@@ -211,7 +225,11 @@ dependencies, such as MPL-licensed build tooling, still require review when
 updated; a previously merged version is not a blanket license exception.
 
 Keep the repository's required checks and CodeQL high-or-higher merge protection
-enabled. Dependency Review requires a public repository with dependency graph
+enabled, including the app-bound SonarCloud Code Analysis gate documented in
+[SonarQube triage](SONAR_TRIAGE.md#gate-and-enforcement). Keep all three Python
+locks in the existing root Dependabot update entry so shared pins update together;
+CI installs them in one hashed, wheel-only transaction and rejects conflicts.
+Dependency Review requires a public repository with dependency graph
 enabled (or separately configured licensed private-repository support); the
 current public-only workflow intentionally prevents unattended private-repository
 merges by requiring its core job to pass, not skip.
