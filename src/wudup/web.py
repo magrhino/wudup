@@ -650,8 +650,6 @@ def run_web_from_namespace(args: object) -> int:
         print(exc, file=sys.stderr)
         return 1
 
-    import uvicorn
-
     app = create_app(settings)
     setup_claim = str(getattr(app.state, "web_setup_claim", ""))
     web_startup.print_web_startup_summary(
@@ -661,7 +659,15 @@ def run_web_from_namespace(args: object) -> int:
         setup_claim=setup_claim,
         environ=env,
     )
-    uvicorn.run(app, host=host, port=port)
+    try:
+        web_startup.run_web_server(app, host=host, port=port)
+    except OSError as exc:
+        print(
+            f"The WebUI could not open its listening port: {exc.strerror}. "
+            "Check that the bind address is available and the port is not in use.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

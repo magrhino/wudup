@@ -1,11 +1,18 @@
-"""WebUI startup summary helpers."""
+"""WebUI listeners and startup summary helpers."""
 
 from __future__ import annotations
 
+import errno
+import logging
 import os
+import socket
 import sys
 from collections.abc import Mapping
+from contextlib import ExitStack
 from pathlib import Path
+
+import uvicorn
+from fastapi import FastAPI
 
 from .doctor import DEFAULT_CONTAINER_SCRIPTS_DIR, MANAGED_SCRIPTS_MARKER
 from .web_auth import _setup_url
@@ -15,6 +22,51 @@ SCRIPT_SYNC_STATUS_ENV = "WUD_SCRIPT_SYNC_STATUS"
 DOCTOR_COMMAND = "docker compose exec wudup doctor"
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def run_web_server(app: FastAPI, *, host: str, port: int) -> None:
+    """Serve the container wildcard on both families; keep specific binds exact."""
+    if host == "0.0.0.0":
+        addresses = [(socket.AF_INET, (host, port)), (socket.AF_INET6, ("::", port))]
+    else:
+        addresses = list(dict.fromkeys(
+            (family, address)
+            for family, _kind, _protocol, _name, address in socket.getaddrinfo(
+                host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE,
+            )
+        ))
+
+    # Separate sockets preserve native IPv4 client addresses for auth/readiness.
+    with ExitStack() as stack:
+        listeners = []
+        for family, address in addresses:
+            if listeners:
+                address = (address[0], listeners[0].getsockname()[1], *address[2:])
+            try:
+                listener = socket.create_server(address, family=family)
+            except OSError as exc:
+                if (
+                    (host == "0.0.0.0" and family == socket.AF_INET)
+                    or len(addresses) == 1
+                    or exc.errno not in {
+                        errno.EAFNOSUPPORT,
+                        errno.EPROTONOSUPPORT,
+                        errno.EADDRNOTAVAIL,
+                    }
+                ):
+                    raise
+                logging.getLogger(__name__).warning(
+                    "A WebUI listening address is unavailable; continuing with other "
+                    "available addresses. Check the host/container network if both "
+                    "IPv4 and IPv6 connections are needed."
+                )
+            else:
+                listeners.append(stack.enter_context(listener))
+        if not listeners:
+            raise OSError(errno.EADDRNOTAVAIL, "No WebUI bind address is available")
+        uvicorn.Server(uvicorn.Config(app, host=host, port=port)).run(
+            sockets=listeners,
+        )
 
 
 def print_web_startup_summary(

@@ -207,6 +207,15 @@ scanner contract and cache identity rules.
 
 ## Network Exposure
 
+The container automatically listens on IPv4 and IPv6 on port `7417` (or
+`WUD_WEB_PORT`). No bind-address override is needed: the image's default
+`WUD_WEB_HOST=0.0.0.0` opens separate IPv4 and IPv6 listeners. If IPv6 is
+unavailable, it logs a warning and continues with IPv4. Reverse proxies on the
+same Docker network can forward to `wudup:7417` using either address family.
+An explicit concrete bind address remains limited to that address; `::`
+explicitly selects IPv6 only. Outside the container, the CLI still defaults
+to IPv4 loopback (`127.0.0.1`).
+
 For a local workstation, keep the default loopback port binding. For LAN or
 reverse-proxy exposure, change the published bind address intentionally and set
 the browser-visible origin:
