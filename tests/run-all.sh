@@ -89,6 +89,7 @@ EOF
     tests/test-wud-append-updates.sh \
     tests/test-install.sh \
     tests/test-publish-release-image.sh \
+    .github/scripts/publish-release-image.sh \
     tests/test-updates-wrapper.sh \
     tests/fakes/docker
 
@@ -122,6 +123,7 @@ EOF
     tests/test-wud-append-updates.sh \
     tests/test-install.sh \
     tests/test-publish-release-image.sh \
+    .github/scripts/publish-release-image.sh \
     tests/test-updates-wrapper.sh \
     tests/fakes/docker
 

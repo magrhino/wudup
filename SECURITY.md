@@ -313,6 +313,33 @@ status, retain prior records, and link the superseding record. Reopen affected
 alerts and notify users through an advisory if an earlier non-exploitability
 claim is invalidated. Never apply a VEX dismissal beyond its assessed products.
 
+## Release Image Policy
+
+Before promoting any production image tag or publishing the GitHub Release,
+the release publisher scans the staged `default` and `trivy` images for both
+`linux/amd64` and `linux/arm64`. Each scan exports the image pulled by its
+immutable platform digest and uses the digest-pinned Trivy scanner from
+`Dockerfile`, independently of the scanned image's binaries. Promotion uses
+the same verified multi-platform manifest digests, without rebuilding.
+
+The blocking policy is:
+
+- Scan all detectable OS and language-library dependencies in each final image,
+  including Python packages and embedded Go dependencies in shipped binaries.
+- Block on any HIGH or CRITICAL vulnerability, including findings with no fix
+  available. No ignore list or automatic exception is applied.
+- Block on an end-of-life OS, scanner failure, database download failure, or
+  missing platform digest. All four images must pass before any production tag
+  is moved. Fix the reported dependency or scan failure and retry the release.
+
+Scan findings, target digests, and scanner errors are recorded in the release
+workflow log. Lower-severity findings do not block publication under this
+policy. Scanner coverage depends on supported package metadata and vulnerability
+data; compiled frontend assets and build-only dependencies still require the
+source dependency checks. This gate does not certify the absence of vulnerabilities
+or enforce dependency license rules. Staging images remain in GHCR after failure;
+production tag promotion is blocked, but staging uploads are required for checks.
+
 ## Disclosure And Fixes
 
 This is a maintainer-run project without a staffed incident-response service.
