@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.60.1](https://github.com/magrhino/wudup/compare/v0.60.0...v0.60.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **webui:** accept IPv4 and IPv6 connections by default ([#685](https://github.com/magrhino/wudup/issues/685)) ([aca71bb](https://github.com/magrhino/wudup/commit/aca71bba5be7b7fda1c0f6d57c1d6f83d80fb088))
+
 ## [0.60.0](https://github.com/magrhino/wudup/compare/v0.59.10...v0.60.0) (2026-09-16)
 
 
