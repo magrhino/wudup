@@ -26,31 +26,44 @@ FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 def run_web_server(app: FastAPI, *, host: str, port: int) -> None:
     """Serve the container wildcard on both families; keep specific binds exact."""
-    if host != "0.0.0.0":
-        uvicorn.run(app, host=host, port=port)
-        return
+    if host == "0.0.0.0":
+        addresses = [(socket.AF_INET, (host, port)), (socket.AF_INET6, ("::", port))]
+    else:
+        addresses = list(dict.fromkeys(
+            (family, address)
+            for family, _kind, _protocol, _name, address in socket.getaddrinfo(
+                host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE,
+            )
+        ))
 
     # Separate sockets preserve native IPv4 client addresses for auth/readiness.
     with ExitStack() as stack:
-        ipv4 = stack.enter_context(socket.create_server((host, port)))
-        listeners = [ipv4]
-        try:
-            ipv6 = socket.create_server(
-                ("::", ipv4.getsockname()[1]), family=socket.AF_INET6,
-            )
-        except OSError as exc:
-            if exc.errno not in {
-                errno.EAFNOSUPPORT,
-                errno.EPROTONOSUPPORT,
-                errno.EADDRNOTAVAIL,
-            }:
-                raise
-            logging.getLogger(__name__).warning(
-                "IPv6 is unavailable; the WebUI will accept IPv4 connections only. "
-                "Enable IPv6 on the host/container network to accept IPv6 connections."
-            )
-        else:
-            listeners.append(stack.enter_context(ipv6))
+        listeners = []
+        for family, address in addresses:
+            if listeners:
+                address = (address[0], listeners[0].getsockname()[1], *address[2:])
+            try:
+                listener = socket.create_server(address, family=family)
+            except OSError as exc:
+                if (
+                    (host == "0.0.0.0" and family == socket.AF_INET)
+                    or len(addresses) == 1
+                    or exc.errno not in {
+                        errno.EAFNOSUPPORT,
+                        errno.EPROTONOSUPPORT,
+                        errno.EADDRNOTAVAIL,
+                    }
+                ):
+                    raise
+                logging.getLogger(__name__).warning(
+                    "A WebUI listening address is unavailable; continuing with other "
+                    "available addresses. Check the host/container network if both "
+                    "IPv4 and IPv6 connections are needed."
+                )
+            else:
+                listeners.append(stack.enter_context(listener))
+        if not listeners:
+            raise OSError(errno.EADDRNOTAVAIL, "No WebUI bind address is available")
         uvicorn.Server(uvicorn.Config(app, host=host, port=port)).run(
             sockets=listeners,
         )
