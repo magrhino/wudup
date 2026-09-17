@@ -28,7 +28,7 @@ comments are used.
 
 ## Exception limits
 
-Both open exception records above have Sonar security impact `MEDIUM`, not
+Both accepted exception records above have Sonar security impact `MEDIUM`, not
 `HIGH` or `CRITICAL`. Owner: repository maintainer `@magrhino`. The existing
 Sonar issue IDs track the residual risk and any follow-up remediation; maintainer
 review of the consolidated PR is the approval record. Assessed on 2026-09-17;
@@ -104,7 +104,7 @@ See [the common auto-merge policy](../SECURITY.md#routine-dependency-auto-merge)
 Keep genuine-fix issues open until the changed code is analyzed remotely.
 Only the two TrueNAS exceptions should be accepted during this triage; a green
 local build is not evidence that the remote analysis has seen a patch.
-The next PR analysis must confirm both the issue decisions and the required
+Every PR analysis must confirm both the issue decisions and the required
 check. Repository settings are remote state and cannot be enforced by
 `sonar-project.properties` alone.
 
@@ -164,7 +164,9 @@ Validation recorded on 2026-09-17:
 - The consolidated change also passed `tests/container-build.sh` on Linux arm64
   with disposable Linux-native storage, including the default and Trivy images.
 - SonarQube MCP `analyze_file_list` failed to request analysis; automatic
-  analysis was restored. The six source fixes still require remote PR analysis.
+  analysis was restored. Remote SonarCloud Code Analysis and dependency review
+  passed for consolidated PR #688 at revision `a9c1fbcb` after the scoped fixes
+  above. Main-branch issue closure still requires analysis after merge.
 
 References: [pip secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/),
 [npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/), and
