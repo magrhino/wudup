@@ -5,14 +5,22 @@ deployment docs start in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Local Setup
 
-Install the Python development dependencies in a virtual environment before
-running the full local suite:
+Use Python 3.14 for the locked CI/development toolchain. Install its dependencies
+in a virtual environment before running the full local suite:
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[dev]'
+python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt
+python -m pip install --only-binary=:all: --no-deps --no-build-isolation -e '.[dev]'
 ```
+
+WUDup still supports Python 3.10 and newer. To work on another supported Python
+version, create the venv with that interpreter and use
+`python -m pip install -e '.[dev]'`; this deliberately resolves dependencies for
+that interpreter rather than consuming the Python 3.14 CI lock. Regenerate the
+committed locks with Python 3.14, since environment markers can change the
+dependency set on older interpreters.
 
 Run the full validation entrypoint:
 
@@ -66,7 +74,7 @@ artifact keeps the repository-local image build path used by smoke tests.
 Install the frontend dependencies before running the Vue/Vite checks:
 
 ```bash
-npm --prefix webui ci
+npm --prefix webui ci --ignore-scripts
 npm --prefix webui run typecheck
 npm --prefix webui run test
 npm --prefix webui run build
@@ -157,6 +165,12 @@ wudup web --host 127.0.0.1 --port 7417 --static-dir webui/dist
 
 ## CI
 
+CI and Docker installs use hashed Python locks and disable third-party install
+scripts where supported. Run `make lock` with the installed development tools
+to regenerate the runtime, build-backend, and development locks together.
+See [SonarQube triage and gate policy](SONAR_TRIAGE.md) for the per-finding
+decisions, required source-build exceptions, and merge enforcement.
+
 CI runs on pull requests targeting `main` and pushes to `main`. The default path
 is intentionally Linux-only to keep private repository Actions usage predictable.
 The `python-tests` and `webui-checks` jobs generate coverage reports and upload
@@ -184,6 +198,54 @@ Optional checks are available when broader coverage is useful:
   (`webui-demo`).
 - Workflow linting runs automatically when files under `.github/workflows/`
   change, and can also be run from manual CI dispatch.
+
+## Dependency Updates
+
+Dependabot's existing weekly schedules, grouping, and cooldowns are unchanged.
+Verified minor and patch updates are eligible for automatic squash merge;
+major updates require manual review. Renovate continues to mark eligible
+non-major Docker updates with its own `automerge` label.
+
+The merge workflow waits for all repository-required checks and verifies the
+latest `ci`, `security`, and `CodeQL Advanced` runs for the current PR head. All
+three workflows must succeed, including any selected Docker or browser tests.
+Core tests, dependency review, workflow auditing, and CodeQL analyses cannot be
+skipped. GitHub must also report the PR as cleanly mergeable, even when the merge
+token can bypass repository rules. Optional jobs can retain their normal skip
+conditions. No extra human approval is needed for a routine clean update.
+
+Dependency Review checks runtime, development, and unknown dependency scopes for
+high/critical vulnerabilities and the routine licenses listed in
+[`SECURITY.md`](../SECURITY.md#dependency-license-rules). Missing license metadata
+also stops the check. The workflow summary and `dependency-review-<PR>-<SHA>` JSON
+artifact (retained for 90 days) are the review evidence; failures need a
+dependency fix or an evidence-backed maintainer
+decision, not a broad allowlist or fabricated VEX record. Existing copyleft
+dependencies, such as MPL-licensed build tooling, still require review when
+updated; a previously merged version is not a blanket license exception.
+
+Keep the repository's required checks and CodeQL high-or-higher merge protection
+enabled, including the app-bound SonarCloud Code Analysis gate documented in
+[SonarQube triage](SONAR_TRIAGE.md#gate-and-enforcement). Keep all three Python
+locks in the existing root Dependabot update entry so shared pins update together;
+CI installs them in one hashed, wheel-only transaction and rejects conflicts.
+Dependency Review requires a public repository with dependency graph
+enabled (or separately configured licensed private-repository support); the
+current public-only workflow intentionally prevents unattended private-repository
+merges by requiring its core job to pass, not skip.
+
+The auto-merge workflow waits up to its 15-minute job limit for trailing required
+checks. To retry after a timeout or a late external check, run:
+
+```bash
+gh workflow run dependency-automerge.yml --ref main -f pr_number=123
+```
+
+The retry uses the same gates and does not bypass them. Candidate records are
+kept for seven days; if one has expired, rerun the candidate workflow for the
+current PR or trigger a PR label event to regenerate it. Security exceptions
+and VEX assessments remain maintainer work as described in `SECURITY.md`; this
+automation neither creates VEX claims nor consumes them to suppress alerts.
 
 ## Releases
 

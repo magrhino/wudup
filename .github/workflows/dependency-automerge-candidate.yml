@@ -163,4 +163,4 @@ jobs:
           name: dependency-candidate-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           path: candidate.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7

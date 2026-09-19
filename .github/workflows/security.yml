@@ -48,10 +48,81 @@ jobs:
           persist-credentials: false
 
       - name: Check dependency changes
+        id: dependencies
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          license-check: false
+          fail-on-scopes: runtime, development, unknown
+          license-check: true
+          allow-licenses: MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, 0BSD, CC0-1.0, Unlicense, BlueOak-1.0.0, PSF-2.0, Python-2.0, BSL-1.0, Zlib
+          # Exact-version evidence: docs/SONAR_TRIAGE.md#license-evidence.
+          # The next step limits these exceptions to the reviewed dev manifest.
+          allow-dependencies-licenses: pkg:pypi/certifi@2026.7.22, pkg:pypi/typing-extensions@4.16.0
+
+      # The action reports missing licenses without failing; enforce our policy.
+      - name: Require complete license evidence
+        id: license_evidence
+        if: ${{ always() }}
+        env:
+          LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
+          DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! jq -e '
+            type == "object" and
+            all(.unlicensed, .unresolved, .forbidden; type == "array" and length == 0)
+          ' >/dev/null <<<"$LICENSE_RESULTS"; then
+            printf 'Dependency license review is incomplete or needs maintainer review. See the dependency review summary and SECURITY.md.\n' >&2
+            exit 1
+          fi
+          if ! jq -e '
+            type == "array" and all(.[];
+              if .change_type == "removed" then true
+              elif .package_url == "pkg:pypi/certifi@2026.7.22" then
+                .manifest == "requirements-dev.txt" and .scope == "development" and
+                .license == "MPL-2.0"
+              elif .package_url == "pkg:pypi/typing-extensions@4.16.0" then
+                .manifest == "requirements-dev.txt" and .scope == "development" and
+                (.license == "PSF-2.0" or .license ==
+                  "Python-2.0 AND GPL-1.0-or-later AND Python-2.0 AND BSD-3-Clause AND Python-2.0 AND BSD-3-Clause AND 0BSD")
+              else true end)
+          ' >/dev/null <<<"$DEPENDENCY_CHANGES"; then
+            printf 'A version-specific license decision no longer matches its reviewed usage or metadata. See docs/SONAR_TRIAGE.md.\n' >&2
+            exit 1
+          fi
+
+      - name: Record dependency review evidence
+        if: ${{ always() }}
+        env:
+          DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
+          LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_OUTCOME: ${{ steps.dependencies.outcome }}
+          LICENSE_OUTCOME: ${{ steps.license_evidence.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg base "$BASE_SHA" --arg head "$HEAD_SHA" \
+            --arg review_outcome "$REVIEW_OUTCOME" --arg license_outcome "$LICENSE_OUTCOME" \
+            --arg changes "$DEPENDENCY_CHANGES" \
+            --arg licenses "$LICENSE_RESULTS" \
+            'def evidence: . as $raw | try fromjson catch {unavailable: true, raw: $raw};
+             {base: $base, head: $head,
+              review_outcome: $review_outcome, license_outcome: $license_outcome,
+              changes: ($changes | evidence), license_results: ($licenses | evidence)}' \
+            > "$RUNNER_TEMP/dependency-review.json"
+
+      - name: Retain dependency review evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-review-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/dependency-review.json
+          if-no-files-found: error
+          retention-days: 90
 
   workflow-security:
     name: workflow security
