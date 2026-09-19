@@ -107,6 +107,9 @@ const summary = computed(() => {
     return props.previewJob.error || "Retag preview failed.";
   }
   if (!props.plan) {
+    if (!previewActive.value && !props.previewJob) {
+      return "Retag targets or selections changed. Close this preview and preview your current selection again.";
+    }
     return "Building a preview from the selected candidates.";
   }
   if (props.plan.status === "blocked") {

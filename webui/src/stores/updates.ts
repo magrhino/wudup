@@ -153,13 +153,15 @@ export const useUpdatesStore = defineStore("updates", () => {
   const retagTargetTags = ref<Record<string, string>>({});
   const retagPlan = ref<RetagPlanResponse | null>(null);
   const retagGithubLatestFallback = ref(readRememberedRetagGithubLatestFallback());
-  let retagPreviewStart: (() => Promise<RetagPreviewJobResponse>) | null = null;
+  let retagPreviewStart:
+    | ((isCurrent: () => boolean) => Promise<RetagPreviewJobResponse | null>)
+    | null = null;
   const retagPreviewPoller = usePolledJob<RetagPreviewJobResponse>(
-    () => {
+    (isCurrent) => {
       if (retagPreviewStart === null) {
         throw new Error("Retag preview was not started");
       }
-      return retagPreviewStart();
+      return retagPreviewStart(isCurrent);
     },
     (job) => webApi.retagPreviewJob(job.preview_job_id),
     (job) => TERMINAL_RETAG_PREVIEW_STATUSES.has(job.status),
@@ -203,6 +205,7 @@ export const useUpdatesStore = defineStore("updates", () => {
   const rememberedApplyRunId = ref<number | null>(readApplyRecoveryStorage("applyJobRun", null));
   const applyJobRecoveries = ref<ApplyJobRecovery[]>(readApplyRecoveryStorage("applyJobRecoveries", []));
   const loading = ref(false);
+  let activeLoads = 0;
   const releaseNotesLoading = ref(false);
   const releaseNotesError = ref("");
   const releaseNotificationLoading = ref(false);
@@ -215,7 +218,13 @@ export const useUpdatesStore = defineStore("updates", () => {
   let pendingLoadTrailingPreservesCleanup = true;
 
   async function loadWithState(work: () => Promise<void>): Promise<void> {
-    await runWithStoreState(loading, error, work);
+    activeLoads += 1;
+    try {
+      await runWithStoreState(loading, error, work);
+    } finally {
+      activeLoads -= 1;
+      loading.value = activeLoads > 0;
+    }
   }
 
   function startPendingLoad(options: PendingLoadOptions): Promise<void> {
@@ -512,7 +521,7 @@ export const useUpdatesStore = defineStore("updates", () => {
       );
   }
 
-  async function createRetagPlan(): Promise<RetagPlanResponse> {
+  async function createRetagPlan(): Promise<RetagPlanResponse | null> {
     const auth = useAuthStore();
     let response: RetagPlanResponse | null = null;
     await loadWithState(async () => {
@@ -520,11 +529,18 @@ export const useUpdatesStore = defineStore("updates", () => {
       applyJob.value = null;
       applyJobLog.value = null;
       const choices = retagChoiceRequests();
-      const csrfToken = await auth.ensureCsrf();
       const options = { github_latest_fallback: retagGithubLatestFallback.value };
-      retagPreviewStart = () =>
-        webApi.startRetagPreview(choices, csrfToken, options);
+      retagPreviewStart = async (isCurrent) => {
+        const csrfToken = await auth.ensureCsrf();
+        if (!isCurrent()) {
+          return null;
+        }
+        return webApi.startRetagPreview(choices, csrfToken, options);
+      };
       const job = await retagPreviewPoller.run();
+      if (job === null) {
+        return;
+      }
       if (job.status === "failure") {
         throw new Error(job.error || "Retag preview failed");
       }
@@ -534,9 +550,6 @@ export const useUpdatesStore = defineStore("updates", () => {
       response = job.plan;
       retagPlan.value = job.plan;
     });
-    if (response === null) {
-      throw new Error("Retag plan did not return a response");
-    }
     return response;
   }
 
@@ -546,13 +559,24 @@ export const useUpdatesStore = defineStore("updates", () => {
     if (planToApply === null) {
       throw new Error("Retag preview must be loaded before applying");
     }
+    const choicesToApply = retagChoiceRequests();
+    const githubLatestFallback = retagGithubLatestFallback.value;
     await loadWithState(async () => {
       applyJobLog.value = null;
+      const csrfToken = await auth.ensureCsrf();
+      if (
+        retagPlan.value !== planToApply ||
+        retagGithubLatestFallback.value !== githubLatestFallback
+      ) {
+        throw new Error(
+          "Retag preview changed. Preview the current selection again.",
+        );
+      }
       const job = await webApi.applyRetagPlan(
         planToApply.plan_id,
-        retagChoiceRequests(),
-        await auth.ensureCsrf(),
-        { github_latest_fallback: retagGithubLatestFallback.value },
+        choicesToApply,
+        csrfToken,
+        { github_latest_fallback: githubLatestFallback },
       );
       setApplyJob(job);
     });

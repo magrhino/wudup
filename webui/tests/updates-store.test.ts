@@ -1545,7 +1545,7 @@ describe("updates store", () => {
       const plan = await planPromise;
 
       expect(ensureCsrf).toHaveBeenCalledTimes(1);
-      expect(plan.plan_id).toBe("retag-plan-test");
+      expect(plan?.plan_id).toBe("retag-plan-test");
       expect(updates.retagPlan?.selected_count).toBe(1);
       expect(updates.retagPreviewJob?.status).toBe("success");
       expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/retag-plans/preview");
@@ -1572,6 +1572,123 @@ describe("updates store", () => {
       vi.useRealTimers();
     }
   });
+
+  it("cancels an overlapping preview when GitHub refresh finishes, then previews the new selection", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-retag");
+    const refresh = deferred<ReturnType<typeof retagTargetsResponse>>();
+    vi.spyOn(webApi, "refreshRetagGithubLatest").mockReturnValue(refresh.promise);
+    const start = vi
+      .spyOn(webApi, "startRetagPreview")
+      .mockResolvedValueOnce(
+        retagPreviewJobResponse({ status: "running", plan: null }),
+      )
+      .mockResolvedValue(retagPreviewJobResponse());
+    const poll = vi
+      .spyOn(webApi, "retagPreviewJob")
+      .mockResolvedValue(retagPreviewJobResponse({ status: "running", plan: null }));
+    const updates = useUpdatesStore();
+    try {
+      const refreshRun = updates.refreshRetagGithubLatest();
+      await flushPromises();
+      const preview = updates.createRetagPlan();
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(400);
+      refresh.resolve(retagTargetsResponse());
+      await refreshRun;
+      expect(updates.loading).toBe(true);
+      await vi.advanceTimersByTimeAsync(400);
+      await expect(preview).resolves.toBeNull();
+      expect(poll).toHaveBeenCalledTimes(1);
+      expect(updates.retagPreviewJob).toBeNull();
+      expect(updates.retagPlan).toBeNull();
+      expect(updates.error).toBe("");
+      expect(updates.loading).toBe(false);
+      const target = updates.retagTargets!.items[0];
+      updates.setRetagTargetTag(target.target_id, "2.0");
+      await expect(updates.createRetagPlan()).resolves.toEqual(retagPlanResponse());
+      expect(start.mock.calls[1][0][0].target_tag).toBe("2.0");
+      expect(updates.retagPlan?.can_apply).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not submit a cancelled preview after CSRF resolves and allows a fresh retry", async () => {
+    const csrf = deferred<string>();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockReturnValue(csrf.promise);
+    const start = vi.spyOn(webApi, "startRetagPreview").mockResolvedValue(
+      retagPreviewJobResponse(),
+    );
+    const updates = useUpdatesStore();
+    updates.retagTargets = retagTargetsResponse();
+    const preview = updates.createRetagPlan();
+    updates.setRetagTargetTag(updates.retagTargets.items[0].target_id, "2.0");
+    csrf.resolve("csrf-retag");
+    await expect(preview).resolves.toBeNull();
+    expect(start).not.toHaveBeenCalled();
+    expect(updates.retagPlan).toBeNull();
+    expect(updates.retagPreviewJob).toBeNull();
+    expect(updates.error).toBe("");
+    await expect(updates.createRetagPlan()).resolves.toEqual(retagPlanResponse());
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0][0][0].target_tag).toBe("2.0");
+  });
+
+  it("does not submit an older preview when its CSRF resolves after a newer preview", async () => {
+    const csrf = deferred<string>();
+    vi.spyOn(useAuthStore(), "ensureCsrf")
+      .mockReturnValueOnce(csrf.promise)
+      .mockResolvedValue("csrf-new");
+    const start = vi.spyOn(webApi, "startRetagPreview").mockResolvedValue(
+      retagPreviewJobResponse(),
+    );
+    const updates = useUpdatesStore();
+    const oldPreview = updates.createRetagPlan();
+    await expect(updates.createRetagPlan()).resolves.toEqual(retagPlanResponse());
+    csrf.resolve("csrf-old");
+    await expect(oldPreview).resolves.toBeNull();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0][1]).toBe("csrf-new");
+    expect(updates.retagPlan).toEqual(retagPlanResponse());
+    expect(updates.error).toBe("");
+    expect(updates.loading).toBe(false);
+  });
+
+  it.each(["start", "poll"] as const)(
+    "discards a late %s plan after the selection changes",
+    async (phase) => {
+      vi.useFakeTimers();
+      vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-retag");
+      const stale = deferred<ReturnType<typeof retagPreviewJobResponse>>();
+      vi.spyOn(webApi, "startRetagPreview").mockImplementation(() =>
+        phase === "start"
+          ? stale.promise
+          : Promise.resolve(retagPreviewJobResponse({ status: "running", plan: null })),
+      );
+      vi.spyOn(webApi, "retagPreviewJob").mockReturnValue(stale.promise);
+      const updates = useUpdatesStore();
+      updates.retagTargets = retagTargetsResponse();
+      try {
+        const preview = updates.createRetagPlan();
+        await flushPromises();
+        if (phase === "poll") {
+          await vi.advanceTimersByTimeAsync(400);
+        }
+        updates.setRetagTargetTag(updates.retagTargets.items[0].target_id, "2.0");
+        stale.resolve(retagPreviewJobResponse());
+        await expect(preview).resolves.toBeNull();
+        expect(updates.retagPlan).toBeNull();
+        expect(updates.retagPreviewJob).toBeNull();
+        expect(updates.error).toBe("");
+        await expect(updates.applyRetagPlan()).rejects.toThrow(
+          "Retag preview must be loaded before applying",
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("keeps duplicate retag service keys separate by target id", async () => {
     const fetchMock = mockFetch(retagPreviewJobResponse());
@@ -1802,14 +1919,18 @@ describe("updates store", () => {
   it("applies a retag plan as a tracked apply job", async () => {
     const fetchMock = mockFetch(applyJobResponse({ job_id: "retag-job" }));
     const auth = useAuthStore();
-    const ensureCsrf = vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-retag");
+    const csrf = deferred<string>();
+    const ensureCsrf = vi.spyOn(auth, "ensureCsrf").mockReturnValue(csrf.promise);
     const updates = useUpdatesStore();
     const retagItems = [retagTarget()];
     updates.retagTargets = retagTargetsResponse(retagItems);
     updates.retagChoices = { [retagItems[0].target_id]: "switch-to-concrete" };
     updates.retagPlan = retagPlanResponse();
 
-    const job = await updates.applyRetagPlan();
+    const applying = updates.applyRetagPlan();
+    expect(fetchMock).not.toHaveBeenCalled();
+    csrf.resolve("csrf-retag");
+    const job = await applying;
 
     expect(ensureCsrf).toHaveBeenCalledTimes(1);
     expect(job.job_id).toBe("retag-job");
@@ -1829,6 +1950,46 @@ describe("updates store", () => {
       confirmation: "apply-retags",
     });
   });
+
+  it.each(["selection", "refresh", "replacement", "fallback"] as const)(
+    "does not apply after %s invalidates the confirmation during CSRF setup",
+    async (change) => {
+      const csrf = deferred<string>();
+      vi.spyOn(useAuthStore(), "ensureCsrf").mockReturnValue(csrf.promise);
+      const apply = vi.spyOn(webApi, "applyRetagPlan").mockResolvedValue(
+        applyJobResponse({ job_id: "unexpected-retag-job" }),
+      );
+      vi.spyOn(webApi, "retagTargets").mockResolvedValue(retagTargetsResponse());
+      const updates = useUpdatesStore();
+      updates.retagTargets = retagTargetsResponse();
+      updates.setRetagChoice(
+        updates.retagTargets.items[0].target_id,
+        "switch-to-concrete",
+      );
+      updates.retagPlan = retagPlanResponse();
+      const applying = updates.applyRetagPlan();
+      const expectedError =
+        "Retag preview changed. Preview the current selection again.";
+      const rejected = expect(applying).rejects.toThrow(expectedError);
+
+      if (change === "selection") {
+        updates.setRetagTargetTag(updates.retagTargets.items[0].target_id, "2.0");
+      } else if (change === "refresh") {
+        await updates.loadRetagTargets();
+      } else if (change === "replacement") {
+        updates.retagPlan = retagPlanResponse({ plan_id: "replacement-plan" });
+      } else {
+        updates.retagGithubLatestFallback = true;
+      }
+      csrf.resolve("csrf-retag");
+      await rejected;
+
+      expect(apply).not.toHaveBeenCalled();
+      expect(updates.applyJob).toBeNull();
+      expect(updates.error).toBe(expectedError);
+      expect(updates.loading).toBe(false);
+    },
+  );
 
   it("surfaces retag target loading errors", async () => {
     const fetchMock = vi

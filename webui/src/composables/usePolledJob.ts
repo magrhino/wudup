@@ -5,7 +5,7 @@ export type PolledJobOptions = {
 };
 
 export function usePolledJob<TJob>(
-  start: () => Promise<TJob>,
+  start: (isCurrent: () => boolean) => Promise<TJob | null>,
   poll: (job: TJob) => Promise<TJob>,
   isTerminal: (job: TJob) => boolean,
   options: PolledJobOptions = {},
@@ -16,27 +16,33 @@ export function usePolledJob<TJob>(
   const intervalMs = options.intervalMs ?? 500;
   let runId = 0;
 
-  async function run(): Promise<TJob> {
+  // A reset or newer run cancels this caller as well as its visible state.
+  async function run(): Promise<TJob | null> {
     const activeRunId = ++runId;
     polling.value = true;
     error.value = "";
     try {
-      let current = await start();
-      if (activeRunId === runId) {
-        job.value = current;
+      let current = await start(() => activeRunId === runId);
+      if (activeRunId !== runId || current === null) {
+        return null;
       }
+      job.value = current;
       while (!isTerminal(current)) {
         await delay(intervalMs);
         if (activeRunId !== runId) {
-          break;
+          return null;
         }
         current = await poll(current);
-        if (activeRunId === runId) {
-          job.value = current;
+        if (activeRunId !== runId) {
+          return null;
         }
+        job.value = current;
       }
       return current;
     } catch (caughtError) {
+      if (activeRunId !== runId) {
+        return null;
+      }
       error.value =
         caughtError instanceof Error ? caughtError.message : String(caughtError);
       throw caughtError;
