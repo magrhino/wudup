@@ -4,6 +4,18 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.60.2](https://github.com/magrhino/wudup/compare/v0.60.1...v0.60.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* **retags:** prevent stale preview results and submissions ([#693](https://github.com/magrhino/wudup/issues/693)) ([beb9d91](https://github.com/magrhino/wudup/commit/beb9d91c1f843f581411cc252a47c2de2b07642c))
+
+
+### Dependencies
+
+* **deps:** upgrade pip to 26.2.1 ([#689](https://github.com/magrhino/wudup/issues/689)) ([9a2adb0](https://github.com/magrhino/wudup/commit/9a2adb003d972c89f8a870cdc7ea1dc4e3e72617))
+
 ## [0.60.1](https://github.com/magrhino/wudup/compare/v0.60.0...v0.60.1) (2026-09-17)
 
 
