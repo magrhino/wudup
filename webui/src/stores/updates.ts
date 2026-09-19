@@ -559,13 +559,24 @@ export const useUpdatesStore = defineStore("updates", () => {
     if (planToApply === null) {
       throw new Error("Retag preview must be loaded before applying");
     }
+    const choicesToApply = retagChoiceRequests();
+    const githubLatestFallback = retagGithubLatestFallback.value;
     await loadWithState(async () => {
       applyJobLog.value = null;
+      const csrfToken = await auth.ensureCsrf();
+      if (
+        retagPlan.value !== planToApply ||
+        retagGithubLatestFallback.value !== githubLatestFallback
+      ) {
+        throw new Error(
+          "Retag preview changed. Preview the current selection again.",
+        );
+      }
       const job = await webApi.applyRetagPlan(
         planToApply.plan_id,
-        retagChoiceRequests(),
-        await auth.ensureCsrf(),
-        { github_latest_fallback: retagGithubLatestFallback.value },
+        choicesToApply,
+        csrfToken,
+        { github_latest_fallback: githubLatestFallback },
       );
       setApplyJob(job);
     });
