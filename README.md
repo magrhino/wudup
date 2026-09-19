@@ -1,6 +1,6 @@
 # WUDup
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/magrhino/wudup/badge)](https://scorecard.dev/viewer/?uri=github.com/magrhino/wudup)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/magrhino/wudup/badge)](https://scorecard.dev/viewer/?uri=github.com/magrhino/wudup) [![Codecov](https://codecov.io/gh/magrhino/wudup/branch/main/graph/badge.svg)](https://codecov.io/gh/magrhino/wudup)
 
 <p align="center">
   <img src="docs/assets/wudup-mark.png" alt="WUDup logo" width="128">
