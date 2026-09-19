@@ -123,6 +123,7 @@ def _make_retag_fixture(
     env: dict[str, str] | None = None,
     image: str = "repo/app@sha256:old",
     label_value: str = "^latest$$",
+    resolved_tag: str = "2.0",
     retag_digest_pins: bool = False,
 ) -> _RetagFixture:
     fake_env, fake_root = _fake_docker_env(tmp_path)
@@ -151,7 +152,7 @@ def _make_retag_fixture(
         service_key="stack/app",
         image=image,
         source_image="repo/app:latest",
-        resolved_tag="2.0",
+        resolved_tag=resolved_tag,
         watch_tag="latest",
         target_digest="sha256:old",
         final_image="repo/app@sha256:old",

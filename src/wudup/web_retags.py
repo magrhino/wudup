@@ -34,6 +34,7 @@ from .compose_rewrite import (
     _backup_compose,
     apply_compose_digest_pins,
     apply_compose_retag_updates,
+    compose_escape_dollars,
     compose_unescape_dollars,
     render_compose_digest_pins,
     render_compose_retag_updates,
@@ -68,6 +69,7 @@ from .release_notes import (
     github_latest_candidate_from_info,
     refresh_release_notes,
 )
+from .tag_streams import retag_tag_include_regex
 from .updater_digest_pin import digest_pin_update_from_values
 from .updater_lifecycle_health import (
     CONTAINER_SUMMARY_FORMAT,
@@ -76,6 +78,7 @@ from .updater_lifecycle_health import (
 )
 from .updater_models import (
     AppliedDigestPinUpdate,
+    DigestPinUpdate,
     ResolvedTagMarkerConflictError,
     UpdaterProgressEvent,
 )
@@ -662,11 +665,7 @@ def _retag_plan_update_for_choice(
             service=item.service,
         )
     if not digest_pins:
-        update = replace(
-            update,
-            final_image=update.resolved_image,
-            marker="",
-        )
+        update = _selected_tag_retag_update(update)
     return (
         _RetagPlanUpdate(
             target_id=item.target_id,
@@ -750,11 +749,7 @@ def _manual_retag_plan_update_for_choice(
         services=(item.service,),
     )
     if not digest_pins:
-        update = replace(
-            update,
-            final_image=update.resolved_image,
-            marker="",
-        )
+        update = _selected_tag_retag_update(update)
     return (
         _RetagPlanUpdate(
             target_id=item.target_id,
@@ -768,6 +763,17 @@ def _manual_retag_plan_update_for_choice(
             digest_pin=digest_pins,
         ),
         None,
+    )
+
+
+def _selected_tag_retag_update(update: DigestPinUpdate) -> DigestPinUpdate:
+    return replace(
+        update,
+        final_image=update.resolved_image,
+        marker="",
+        label_value=compose_escape_dollars(
+            retag_tag_include_regex(update.watch_tag)
+        ),
     )
 
 

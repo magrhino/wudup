@@ -18,6 +18,7 @@ from wudup.compose import ComposeStack, ServiceImage
 from wudup.tag_streams import (
     pending_tag_stream_hint,
     plan_tag_stream_changes,
+    retag_tag_include_regex,
     tag_stream_include_regex,
 )
 from wudup.updater_models import Match, TagStreamDecision
@@ -608,3 +609,21 @@ def test_stream_regex_preserves_leading_v() -> None:
     assert tag_stream_include_regex("v2.34.4-distroless") == (
         r"^v\d+\.\d+\.\d+-distroless$"
     )
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        ("v1.2.3", r"^v\d+\.\d+\.\d+$"),
+        ("1.2.3.4-ls5", r"^\d+\.\d+\.\d+\.\d+-ls\d+$"),
+        ("10.11.12ubu2404-ls44", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
+        ("2026.8.3", r"^\d+\.\d+\.\d+$"),
+        ("1", r"^\d+$"),
+        ("2.7-alpine", r"^\d+\.\d+-alpine$"),
+        ("2026-07-24-r1", r"^\d+-\d+-\d+-r\d+$"),
+        ("v5", r"^v\d+$"),
+        ("stable", r"^stable$"),
+    ],
+)
+def test_retag_regex_generalizes_numeric_parts(tag: str, expected: str) -> None:
+    assert retag_tag_include_regex(tag) == expected
