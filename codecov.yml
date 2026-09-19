@@ -7,8 +7,9 @@ coverage:
         informational: true
     patch:
       default:
-        target: auto
-        informational: true
+        target: 70%
+        threshold: 0%
+        informational: false
       webui-contract:
         target: 70%
         threshold: 30%
@@ -25,4 +26,4 @@ coverage:
 comment:
   layout: "reach, diff, flags, files"
   behavior: default
-  require_changes: true
+  require_changes: false
