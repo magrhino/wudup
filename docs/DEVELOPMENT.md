@@ -262,8 +262,14 @@ gh workflow run release.yml --ref main -f release_tag=v1.2.3
 
 The release publisher runs parallel blocking validation jobs, builds and
 publishes Docker images for Linux amd64 and arm64 to `ghcr.io/magrhino/wudup`,
-validates the published multi-arch manifests, and then creates or publishes the
-GitHub Release. The public GitHub Release is published only after the GHCR image
+scans both the default and `-trivy` variants by immutable platform digest,
+validates the multi-arch manifests, and then creates or publishes the GitHub
+Release. All four scans must pass the [release image policy](../SECURITY.md#release-image-policy)
+before any production image tag is promoted. HIGH/CRITICAL findings (including
+unfixed vulnerabilities), end-of-life operating systems, and scan errors block
+the release. The pinned scanner checks OS and language packages in the final
+images; the former four-package upgrade check is no longer the release gate.
+The public GitHub Release is published only after the GHCR image
 tags are available. The release gate includes Python, shell, WebUI, WebUI smoke,
 container build, and Docker Compose E2E validation. Image tags are published as
 `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `latest`. Direct pushes of stable `vX.Y.Z` tags
