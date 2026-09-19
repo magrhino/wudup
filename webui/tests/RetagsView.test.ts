@@ -10,6 +10,7 @@ import {
   applyJobResponse,
   authSession,
   retagPlanResponse,
+  retagPreviewJobResponse,
   retagTarget,
   retagTargetsResponse,
 } from "./helpers/fixtures";
@@ -484,6 +485,58 @@ describe("RetagsView", () => {
     expect(confirmation.text()).toContain(
       "archive/unknown) has unknown runtime state. Apply may create or recreate and start it.",
     );
+  });
+
+  it("shows recovery guidance and blocks apply when a refresh cancels the preview", async () => {
+    vi.useFakeTimers();
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const auth = useAuthStore();
+    auth.session = authSession({ mutations_enabled: true });
+    vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-retag");
+    const updates = useUpdatesStore();
+    updates.retagTargets = retagTargetsResponse();
+    updates.setRetagChoice(
+      updates.retagTargets.items[0].target_id,
+      "switch-to-concrete",
+    );
+    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(webApi, "startRetagPreview").mockResolvedValue(
+      retagPreviewJobResponse({ status: "running", plan: null }),
+    );
+    vi.spyOn(webApi, "refreshRetagGithubLatest").mockResolvedValue(
+      retagTargetsResponse(),
+    );
+    const apply = vi.spyOn(webApi, "applyRetagPlan");
+    const wrapper = mountWithApp(RetagsView, { pinia });
+    try {
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((button) => button.text().includes("Preview retag changes"))!
+        .trigger("click");
+      await flushPromises();
+      expect(wrapper.get(".preflight-modal").text()).toContain(
+        "Building a preview",
+      );
+      await updates.refreshRetagGithubLatest();
+      await vi.advanceTimersByTimeAsync(400);
+      await flushPromises();
+      const preview = wrapper.get(".preflight-modal");
+      expect(preview.text()).toContain(
+        "Retag targets or selections changed. Close this preview and preview your current selection again.",
+      );
+      expect(preview.text()).not.toContain("Retag preview did not return a plan");
+      expect(preview.text()).not.toContain("Building a preview");
+      const applyButton = preview
+        .findAll("button")
+        .find((button) => button.text().includes("Apply selected retags"))!;
+      expect(applyButton.attributes("disabled")).toBeDefined();
+      expect(apply).not.toHaveBeenCalled();
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("shows preview start failures in the review modal", async () => {

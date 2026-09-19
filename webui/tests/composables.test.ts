@@ -8,6 +8,7 @@ import type {
   PlanIssue,
   PlanSelectionRequest,
 } from "../src/api/client";
+import { deferred } from "./helpers/storeActions";
 import { usePolledJob } from "../src/composables/usePolledJob";
 import { useUpdateTargetOptions } from "../src/composables/useUpdateTargetOptions";
 import { useAuthStore } from "../src/stores/auth";
@@ -205,7 +206,7 @@ describe("usePolledJob", () => {
     job.reset();
     resolveStart(success);
 
-    await expect(run).resolves.toEqual(success);
+    await expect(run).resolves.toBeNull();
     expect(poll).not.toHaveBeenCalled();
     expect(job.job.value).toBeNull();
     expect(job.polling.value).toBe(false);
@@ -240,7 +241,7 @@ describe("usePolledJob", () => {
       job.reset();
       resolvePoll(success);
 
-      await expect(run).resolves.toEqual(success);
+      await expect(run).resolves.toBeNull();
       expect(job.job.value).toBeNull();
       expect(job.polling.value).toBe(false);
     } finally {
@@ -270,7 +271,7 @@ describe("usePolledJob", () => {
       job.reset();
       await vi.advanceTimersByTimeAsync(25);
 
-      await expect(run).resolves.toEqual(queued);
+      await expect(run).resolves.toBeNull();
       expect(poll).not.toHaveBeenCalled();
       expect(job.job.value).toBeNull();
       expect(job.polling.value).toBe(false);
@@ -278,6 +279,43 @@ describe("usePolledJob", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each(["start", "poll"] as const)(
+    "ignores a stale %s failure after a newer run succeeds",
+    async (phase) => {
+      vi.useFakeTimers();
+      const stale = deferred<TestPreviewJob>();
+      const queued: TestPreviewJob = { id: "old", status: "queued" };
+      const success: TestPreviewJob = { id: "new", status: "success" };
+      const start = vi
+        .fn()
+        .mockImplementationOnce(() =>
+          phase === "start" ? stale.promise : Promise.resolve(queued),
+        )
+        .mockResolvedValue(success);
+      const job = usePolledJob(
+        start,
+        () => stale.promise,
+        (value) => value.status === "success",
+        { intervalMs: 25 },
+      );
+      try {
+        const oldRun = job.run();
+        await flushPromises();
+        if (phase === "poll") {
+          await vi.advanceTimersByTimeAsync(25);
+        }
+        await expect(job.run()).resolves.toEqual(success);
+        stale.reject(new Error("obsolete request failed"));
+        await expect(oldRun).resolves.toBeNull();
+        expect(job.job.value).toEqual(success);
+        expect(job.error.value).toBe("");
+        expect(job.polling.value).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });
 
 function failedApplyPreflight(code: string, detail: string) {
