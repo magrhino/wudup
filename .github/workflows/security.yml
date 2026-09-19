@@ -61,6 +61,8 @@ jobs:
 
       # The action reports missing licenses without failing; enforce our policy.
       - name: Require complete license evidence
+        id: license_evidence
+        if: ${{ always() }}
         env:
           LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
           DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
@@ -91,22 +93,30 @@ jobs:
           fi
 
       - name: Record dependency review evidence
+        if: ${{ always() }}
         env:
           DEPENDENCY_CHANGES: ${{ steps.dependencies.outputs.dependency-changes }}
           LICENSE_RESULTS: ${{ steps.dependencies.outputs.invalid-license-changes }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_OUTCOME: ${{ steps.dependencies.outcome }}
+          LICENSE_OUTCOME: ${{ steps.license_evidence.outcome }}
         shell: bash
         run: |
           set -euo pipefail
           jq -n \
             --arg base "$BASE_SHA" --arg head "$HEAD_SHA" \
-            --argjson changes "$DEPENDENCY_CHANGES" \
-            --argjson licenses "$LICENSE_RESULTS" \
-            '{base: $base, head: $head, changes: $changes, license_results: $licenses}' \
+            --arg review_outcome "$REVIEW_OUTCOME" --arg license_outcome "$LICENSE_OUTCOME" \
+            --arg changes "$DEPENDENCY_CHANGES" \
+            --arg licenses "$LICENSE_RESULTS" \
+            'def evidence: . as $raw | try fromjson catch {unavailable: true, raw: $raw};
+             {base: $base, head: $head,
+              review_outcome: $review_outcome, license_outcome: $license_outcome,
+              changes: ($changes | evidence), license_results: ($licenses | evidence)}' \
             > "$RUNNER_TEMP/dependency-review.json"
 
       - name: Retain dependency review evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dependency-review-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}

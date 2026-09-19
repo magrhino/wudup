@@ -192,6 +192,65 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode == 0, allowed, result.stderr)
 
+    def test_dependency_evidence_survives_failed_checks(self) -> None:
+        workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
+        job = workflow["jobs"]["dependency-review"]
+        self.assertFalse(job.get("continue-on-error", False))
+        for step in job["steps"]:
+            self.assertFalse(step.get("continue-on-error", False))
+        validate, record, upload = [self._step(workflow, "dependency-review", name) for name in (
+            "Require complete license evidence", "Record dependency review evidence",
+            "Retain dependency review evidence",
+        )]
+        for step in (validate, record, upload):
+            self.assertEqual(step["if"], "${{ always() }}")
+        self.assertEqual(record["env"]["REVIEW_OUTCOME"], "${{ steps.dependencies.outcome }}")
+        self.assertEqual(
+            record["env"]["LICENSE_OUTCOME"],
+            "${{ steps." + validate["id"] + ".outcome }}",
+        )
+        self.assertEqual(upload["with"]["path"], "${{ runner.temp }}/dependency-review.json")
+        clean = json.dumps({"unlicensed": [], "unresolved": [], "forbidden": []})
+        cases = (
+            ("clean", "success", "[]", clean, True),
+            ("vulnerability", "failure", '[{"vulnerabilities": [{"severity": "high"}]}]', clean, True),
+            ("license", "failure", "[]", json.dumps({
+                "unlicensed": [], "unresolved": [], "forbidden": [{"license": "AGPL-3.0"}],
+            }), False),
+            ("exception", "success", json.dumps([{
+                "change_type": "added", "package_url": "pkg:pypi/certifi@2026.7.22",
+                "manifest": "requirements.txt", "scope": "runtime", "license": "MPL-2.0",
+            }]), clean, False),
+            ("missing", "failure", "", "", False),
+            ("malformed", "failure", "not-json", "{", False),
+        )
+        for name, outcome, changes, licenses, valid in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                env = {
+                    **os.environ, "DEPENDENCY_CHANGES": changes, "LICENSE_RESULTS": licenses,
+                    "BASE_SHA": "b" * 40, "HEAD_SHA": "a" * 40, "RUNNER_TEMP": temp,
+                    "REVIEW_OUTCOME": outcome,
+                }
+                result = subprocess.run(
+                    ["bash", "-c", validate["run"]], env=env,
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                env["LICENSE_OUTCOME"] = "success" if valid else "failure"
+                subprocess.run(
+                    ["bash", "-c", record["run"]], env=env,
+                    capture_output=True, text=True, check=True,
+                )
+                evidence = json.loads((Path(temp) / "dependency-review.json").read_text())
+                self.assertEqual(evidence["base"], env["BASE_SHA"])
+                self.assertEqual(evidence["head"], env["HEAD_SHA"])
+                self.assertEqual(evidence["review_outcome"], outcome)
+                self.assertEqual(evidence["license_outcome"], env["LICENSE_OUTCOME"])
+                for key, raw in (("changes", changes), ("license_results", licenses)):
+                    expected = ({"unavailable": True, "raw": raw}
+                                if name in ("missing", "malformed") else json.loads(raw))
+                    self.assertEqual(evidence[key], expected)
+
     def test_merge_waits_for_current_complete_workflows(self) -> None:
         workflow, _ = self._workflow(PRIVILEGED_WORKFLOW)
         program = self._step(
