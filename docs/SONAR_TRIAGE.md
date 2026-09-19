@@ -128,7 +128,7 @@ update with conflicting runtime/development pins must stay red; regenerate the
 locks together when repairing it. Green minor/patch PRs retain the same automatic
 merge path, including the required Sonar check.
 Use the locked toolchain when regenerating: older pip-tools 7.5.3 fails with
-pip 26.2.1 (`stdlib_pkgs` import); the recorded pip 25.3 / pip-tools 7.6.1 pair
+pip 26.2.1 (`stdlib_pkgs` import); the recorded pip 26.2.1 / pip-tools 7.6.1 pair
 is tested. Lock generation is an intentional maintainer operation that can run
 build metadata hooks; normal CI installs consume the locks.
 
