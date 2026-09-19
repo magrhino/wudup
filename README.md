@@ -1,5 +1,7 @@
 # WUDup
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/magrhino/wudup/badge)](https://scorecard.dev/viewer/?uri=github.com/magrhino/wudup)
+
 <p align="center">
   <img src="docs/assets/wudup-mark.png" alt="WUDup logo" width="128">
 </p>
