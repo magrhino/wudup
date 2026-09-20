@@ -1870,7 +1870,7 @@ def _digest_pin_label_rewrite(
     if not current_label_value:
         return None
 
-    proposed_label_regex = exact_tags_regex((update.watch_tag,))
+    proposed_label_regex = compose_unescape_dollars(update.label_value)
     if current_label_value == proposed_label_regex:
         return None
 

@@ -115,6 +115,12 @@ default. To retain digest-pinned retags, enable **Retag digest pins** under
 Settings → Preferences. The preview then identifies the change as a digest pin
 and the apply writes `repo/app@sha256:<digest>` with the resolved-tag marker.
 
+Selected-tag retags also rewrite `wud.tag.include` to follow the approved tag's
+shape: numeric runs can advance while punctuation and text stay fixed. For
+example, `v1.36.2` becomes `^v\d+\.\d+\.\d+$`, and
+`6.3.0.10514-ls313` becomes `^\d+\.\d+\.\d+\.\d+-ls\d+$`.
+Digest-pinned retags keep an exact-tag include rule instead.
+
 This preference only controls the Retags workflow. It is separate from
 `WUD_DIGEST_PIN_UPDATES`, which controls approved tag updates in standard update
 plans.

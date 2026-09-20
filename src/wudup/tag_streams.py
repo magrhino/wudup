@@ -13,7 +13,7 @@ from .compose_rewrite import (
     plan_compose_tag_stream_update,
 )
 from .docker_cli import DockerCli
-from .images import image_repo_ref, image_tag, image_with_tag
+from .images import image_repo_ref, image_tag, image_with_tag, tag_value_valid
 from .lsio_updates import is_lsio_repo, parse_lsio_tag
 from .plan_models import DryRunPlanIssue, PlanInputError
 from .updater_models import (
@@ -29,6 +29,7 @@ _STRICT_VERSION_TAG_RE = re.compile(
     r"^(?P<version>v?\d+\.\d+\.\d+)(?P<suffix>[-_.].+)?$",
     re.ASCII,
 )
+_NUMERIC_TAG_PART_RE = re.compile(r"\d+", re.ASCII)
 _REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
 
 
@@ -113,6 +114,19 @@ def tag_stream_include_regex(tag: str) -> str:
     prefix = "v" if parts.version.startswith("v") else ""
     suffix = _REGEX_SPECIAL_RE.sub(r"\\\1", parts.suffix)
     return rf"^{prefix}\d+\.\d+\.\d+{suffix}$"
+
+
+def retag_tag_include_regex(tag: str) -> str:
+    if not tag_value_valid(tag):
+        raise ValueError(f"tag is not valid: {tag}")
+    fragments: list[str] = []
+    offset = 0
+    for match in _NUMERIC_TAG_PART_RE.finditer(tag):
+        fragments.append(_REGEX_SPECIAL_RE.sub(r"\\\1", tag[offset : match.start()]))
+        fragments.append(r"\d+")
+        offset = match.end()
+    fragments.append(_REGEX_SPECIAL_RE.sub(r"\\\1", tag[offset:]))
+    return f"^{''.join(fragments)}$"
 
 
 def plan_tag_stream_changes(
