@@ -8,10 +8,11 @@ web
 
 ## Users
 
-WUDup is used by self-hosted operators who maintain Docker Compose stacks,
-review update signals from What's Up Docker (WUD), and decide when to snooze,
-preview, or apply container updates. They usually work in an admin context
-where speed matters, but where a mistaken update can affect running services.
+WUDup is used by self-hosted Docker Compose operators, especially homelab
+administrators, who review update signals from What's Up Docker (WUD) and
+decide when to snooze, preview, or apply container updates. They usually work
+in an admin context where speed matters, but where a mistaken update can
+affect running services.
 
 ## Product Purpose
 
