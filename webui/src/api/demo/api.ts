@@ -25,6 +25,14 @@ async function rejectStaticDemoMutationAsync(): Promise<never> {
   return rejectStaticDemoMutation();
 }
 
+function demoSuggestedTrackingRegex(tag: string): string {
+  if (!/^v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(tag)) return "";
+  if (/^v?\d+(?:\.\d+)+$/.test(tag)) {
+    return `^${tag.startsWith("v") ? "v" : ""}\\d+(?:\\.\\d+)+$`;
+  }
+  return `^${tag.replace(/\d+/g, "\\d+").replaceAll(".", "\\.")}$`;
+}
+
 export function createDemoWebApi(): WebApi {
   const state = new DemoApiState();
 
@@ -63,6 +71,52 @@ export function createDemoWebApi(): WebApi {
       state.pendingMetadata(request),
     updateTargets: async () => state.updateTargets(),
     retagTargets: async () => state.retagTargets(),
+    trackedContainers: async () => {
+      const retags = state.retagTargets();
+      return {
+        status: retags.status,
+        count: retags.count,
+        wud_status: null,
+        warnings: retags.warnings,
+        items: retags.items.map((item) => {
+          const trackingRegex = item.label_value.replaceAll("$$", "$");
+          const suggestedRegex = demoSuggestedTrackingRegex(item.current_tag);
+          const exactTagRegex = `^${item.current_tag.replaceAll(".", "\\.")}$`;
+          const trackingHealth = !trackingRegex
+            ? "no-filter"
+            : trackingRegex === exactTagRegex
+              ? (suggestedRegex ? "frozen" : "exact-tag")
+              : trackingRegex === suggestedRegex ? "version-pattern" : "custom";
+          return {
+            target_id: item.target_id || item.service_key,
+            service_key: item.service_key,
+            stack: item.stack,
+            service: item.service,
+            image: item.image,
+            current_tag: item.current_tag,
+            runtime_state: item.runtime_state,
+            tracking_regex: trackingRegex,
+            tracking_health: trackingHealth,
+            tracking_detail: trackingHealth === "exact-tag"
+              ? "The filter matches this tag only. Same-tag image changes require WUD digest watching."
+              : trackingHealth === "frozen" ? "The filter matches only the installed version tag."
+                : trackingRegex ? "Demo tracking filter; inspect which tags it matches."
+                  : "No WUD tag filter is set.",
+            suggested_regex: suggestedRegex === trackingRegex ? "" : suggestedRegex,
+            wud: null,
+            wud_match_state: "unknown" as const,
+            wud_update_available: null,
+            last_image_recorded_at: "",
+            last_action_at: "",
+            last_action_status: "",
+            last_action_run_id: null,
+            retag_available: item.retag_available,
+          };
+        }),
+      };
+    },
+    createTrackingRepairPlan: rejectStaticDemoMutationAsync,
+    applyTrackingRepair: rejectStaticDemoMutationAsync,
     refreshRetagGithubLatest: rejectStaticDemoMutationAsync,
     startRetagPreview: async (
       choices: RetagChoiceRequest[],

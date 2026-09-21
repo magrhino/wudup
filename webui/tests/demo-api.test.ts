@@ -88,6 +88,20 @@ describe("demo web API", () => {
     await expect(api.updateTargets()).resolves.toMatchObject({ count: 5 });
     const retagTargets = await api.retagTargets();
     expect(retagTargets).toMatchObject({ count: 5 });
+    const tracked = await api.trackedContainers();
+    expect(tracked.wud_status).toBeNull();
+    expect(tracked.warnings).toEqual([]);
+    expect(tracked.items.find((item) => item.service_key === "data/postgres")?.suggested_regex)
+      .toBe("");
+    expect(tracked.items.find((item) => item.service_key === "jarvis/task-runner")?.suggested_regex)
+      .toBe(String.raw`^\d+\.\d+\.\d+-distroless$`);
+    expect(tracked.items.find((item) => item.service_key === "media/radarr")?.suggested_regex)
+      .toBe("^\\d+(?:\\.\\d+)+$");
+    expect(tracked.items.find((item) => item.service_key === "media/wudup")).toMatchObject({
+      tracking_regex: "^latest$",
+      tracking_health: "exact-tag",
+      suggested_regex: "",
+    });
     expect(retagTargets.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

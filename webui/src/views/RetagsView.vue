@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { AlertTriangle, CheckCircle2, Info, RefreshCw, Search } from "@lucide/vue";
 import {
   NAlert,
@@ -70,7 +71,11 @@ const DUPLICATE_RETAG_CHOICES_PREFIXES = [
 const updates = useUpdatesStore();
 const auth = useAuthStore();
 const isMobile = useDataCardsBreakpoint();
-const searchQuery = ref("");
+const route = useRoute();
+const searchQuery = ref(typeof route?.query?.search === "string" ? route.query.search : "");
+watch(() => route?.query?.search, (value) => {
+  searchQuery.value = typeof value === "string" ? value : "";
+});
 const statusFilter = ref<RetagFilter>("all");
 const runtimeFilter = ref<RetagRuntimeFilter>("all");
 const applyJobPanelRef = ref<PendingApplyJobPanelRef | null>(null);

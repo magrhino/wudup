@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { Plus, Trash2 } from "@lucide/vue";
 import {
   NAlert,
@@ -24,6 +25,7 @@ import { useUpdatesStore } from "../stores/updates";
 import { runInBackground } from "../utils/promises";
 
 const settings = useSettingsStore();
+const route = useRoute();
 const updates = useUpdatesStore();
 const auth = useAuthStore();
 const { serviceKeyOptions } = useUpdateTargetOptions();
@@ -35,7 +37,7 @@ const showDeleteConfirm = ref(false);
 const deleteTarget = ref<SnoozeRecord | null>(null);
 
 const snoozeForm = reactive({
-  serviceKey: "",
+  serviceKey: typeof route?.query?.service === "string" ? route.query.service : "",
   waitForServiceKey: "",
   snoozedUntil: futureIso(24),
   reason: "",
@@ -80,6 +82,12 @@ function resetSnoozeForm(): void {
   snoozeForm.snoozedUntil = futureIso(24);
   snoozeForm.reason = "";
 }
+
+watch(() => route?.query?.service, (value) => {
+  showCreateConfirm.value = false;
+  resetSnoozeForm();
+  snoozeForm.serviceKey = typeof value === "string" ? value : "";
+});
 
 function setSnoozeServiceKey(value: string | number | null): void {
   snoozeForm.serviceKey = value === null ? "" : String(value);

@@ -17,6 +17,7 @@ Rules for files under `webui/`. Root `AGENTS.md` controls repo-wide safety, rele
 | `src/api/client.ts` | Typed backend API client and response mapping. | Matching backend route/model plus consuming store. | Duplicating fetch logic in components or stores. |
 | `src/stores/connection.ts` | Status, doctor, restart, diagnostics. | API client and consuming view. | Mixing pending-update or settings state here. |
 | `src/stores/updates.ts` | Pending updates, release notes, self-update, apply jobs. | API client, job/release-note views, focused tests. | Sharing mutation state through localStorage. |
+| `src/stores/tracking.ts`, `src/views/TrackedContainersView.vue` | Compose service inventory, WUD tracking evidence, and plan-first tracking repair. | Typed tracking API and focused view/backend tests. | Treating unavailable WUD inventory as confirmed untracked or enabling demo repair mutations. |
 | `src/stores/runs.ts` | Run history and logs. | API client and run/log views. | Duplicating run state in other stores. |
 | `src/stores/settings.ts` | Settings, onboarding, policies, snoozes, tag exclusions. | API client and settings/onboarding views. | Cross-store writes without a clear owner. |
 | `src/views/`, `src/components/` | Presentation and user interaction. | Owning store and nearby component tests. | Backend calls outside the typed client. |

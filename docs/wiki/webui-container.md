@@ -120,6 +120,22 @@ Remove WUD command triggers that call `/wud/append-updates.sh`,
 trigger configuration is gone. In that mode, script sync installs no WUD command
 scripts, and WebUI pending behavior is API-first.
 
+## Tracked Containers
+
+The Containers page lists discovered Compose services even when WUD observations
+are unavailable. An unknown WUD status does not mean a service is untracked.
+Select a service to compare its installed tag, current `wud.tag.include` filter,
+and any candidate WUD has observed.
+
+An exact filter such as `^latest$` watches only that tag; detecting a new image
+published under the same tag depends on WUD digest watching. A version filter
+such as `^v\d+(?:\.\d+)+$` can follow differently named releases. WUDup does
+not automatically broaden a single-number channel such as `16` to `^\d+$`,
+which would also include other major-version tags. The on-page tester checks
+tag names, not registry availability or whether digest watching is configured.
+Changing a filter requires a previewed Compose-label diff and explicit approval
+before WUDup recreates that service.
+
 ## WUD API Authentication
 
 WUD and WUDup have separate accounts. In the Compose env file, set
