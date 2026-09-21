@@ -10,6 +10,7 @@ from tests.web_test_helpers import (
     _csrf_headers,
     _fake_docker_calls,
     _fake_docker_env,
+    _fake_image_state_file,
     _install_wud_api,
     _make_fake_stack,
     _wait_apply_job,
@@ -45,6 +46,11 @@ def _tracking_fixture(
         f"services:\n  bindery:\n    image: repo/bindery:{tag}\n"
         + (f"    labels:\n      - wud.tag.include={regex.replace('$', '$$')}\n" if regex else ""),
         encoding="utf-8",
+    )
+    image_id = "sha256:" + "a" * 64
+    (fake_root / "containers" / "cid-bindery.image-id").write_text(image_id, encoding="utf-8")
+    _fake_image_state_file(fake_root, f"repo/bindery:{tag}", "id").write_text(
+        image_id, encoding="utf-8"
     )
     return client, fake_root, compose_path
 
@@ -357,6 +363,82 @@ def test_repair_plan_apply_recreates_only_selected_service(tmp_path: Path) -> No
     assert "idx_update_events_service_latest" in indexes
     inventory = client.get("/api/v1/tracked-containers").json()["items"][0]
     assert inventory["last_action_run_id"] == job["run_id"]
+
+
+def test_repair_applies_to_crlf_compose_file(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(tmp_path)
+    compose_path.write_bytes(compose_path.read_bytes().replace(b"\n", b"\r\n"))
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers)
+    assert preview.status_code == 200
+    assert preview.json()["can_apply"] is True
+    response = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": preview.json()["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    job = _wait_apply_job(client, response.json()["job_id"])
+    assert job["status"] == "success", job["error"]
+    assert rb"wud.tag.include=^v\d+(?:\.\d+)+$$" in compose_path.read_bytes()
+
+
+def test_repair_blocks_when_local_image_tag_moves(tmp_path: Path) -> None:
+    client, fake_root, compose_path = _tracking_fixture(tmp_path)
+    original = compose_path.read_bytes()
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers)
+    assert preview.json()["can_apply"] is True
+    _fake_image_state_file(fake_root, "repo/bindery:v1.36.2", "id").write_text(
+        "sha256:" + "b" * 64, encoding="utf-8"
+    )
+
+    apply = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": preview.json()["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+
+    assert apply.status_code == 409
+    assert compose_path.read_bytes() == original
+    assert " up " not in _fake_docker_calls(fake_root)
+
+
+def test_repair_does_not_recreate_after_tag_moves_during_label_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, fake_root, compose_path = _tracking_fixture(tmp_path)
+    original = compose_path.read_bytes()
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers).json()
+    original_apply = web_tracking.apply_compose_tracking_label
+
+    def move_tag_after_write(*args, **kwargs) -> None:
+        original_apply(*args, **kwargs)
+        _fake_image_state_file(fake_root, "repo/bindery:v1.36.2", "id").write_text(
+            "sha256:" + "b" * 64, encoding="utf-8"
+        )
+
+    monkeypatch.setattr(web_tracking, "apply_compose_tracking_label", move_tag_after_write)
+    response = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": preview["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+    job = _wait_apply_job(client, response.json()["job_id"])
+
+    assert job["status"] == "failure"
+    assert "Running image changed" in job["error"]
+    assert compose_path.read_bytes() == original
+    assert " up " not in _fake_docker_calls(fake_root)
 
 
 def test_repair_rejects_stale_plan_and_read_only_mode(tmp_path: Path) -> None:

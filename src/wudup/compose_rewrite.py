@@ -74,7 +74,7 @@ def _load_compose_yaml(
     *,
     width: int | None = None,
 ) -> tuple[str, YAML, CommentedMap, CommentedMap]:
-    source = compose_path.read_text(encoding="utf-8")
+    source = compose_path.read_bytes().decode("utf-8")
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
     if width is not None:

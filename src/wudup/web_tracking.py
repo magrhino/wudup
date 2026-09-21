@@ -16,7 +16,7 @@ from threading import Condition
 from fastapi import HTTPException, Request
 
 from . import web_database, web_jobs, web_retags, web_wud_api
-from .command import CommandRunner
+from .command import CommandError, CommandRunner
 from .compose import (
     ComposeCli,
     ComposeStack,
@@ -32,6 +32,7 @@ from .compose_rewrite import (
     render_compose_tracking_label,
 )
 from .db import init_db, insert_update_event, insert_update_run, open_db, utc_timestamp
+from .docker_cli import DockerCli
 from .images import image_tag
 from .tag_streams import retag_tag_include_regex
 from .updater_models import ComposeTagRewriteError, UpdaterProgressEvent
@@ -327,6 +328,25 @@ def _validated_regex(regex: str, tag: str) -> None:
         )
 
 
+def _matching_runtime_image_id(
+    settings: WebSettings, stack: ComposeStack, service: str, image: str
+) -> str:
+    runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
+    compose = ComposeCli(runner=runner)
+    try:
+        container_ids = compose.ps_quiet_checked(
+            stack.directory, stack.file, [service],
+            project_directory=stack.project_directory,
+        )
+    except CommandError:
+        return ""
+    if len(container_ids) != 1:
+        return ""
+    docker = DockerCli(runner=runner)
+    running_image_id = docker.try_container_image_id(container_ids[0])
+    return running_image_id if running_image_id and running_image_id == docker.image_id(image) else ""
+
+
 def api_tracking_repair_plan(
     payload: TrackingRepairRequest, request: Request
 ) -> TrackingRepairPlan:
@@ -353,7 +373,7 @@ def build_tracking_repair_plan(
         raise HTTPException(status_code=422, detail="Tracking regex is already set to this value.")
     compose_path = record.stack.directory / record.stack.file
     try:
-        source = compose_path.read_text(encoding="utf-8")
+        source = compose_path.read_bytes().decode("utf-8")
         source_hash = hashlib.sha256(source.encode()).hexdigest()
         rendered = render_compose_tracking_label(
             compose_path, item.service, item.image, current, payload.regex,
@@ -373,8 +393,14 @@ def build_tracking_repair_plan(
         issues.append("Duplicate service identity; choose an unambiguous Compose service.")
     if item.runtime_state != "running":
         issues.append("Service must be confirmed running before automatic recreation.")
+    runtime_image_id = (
+        _matching_runtime_image_id(settings, record.stack, item.service, item.image)
+        if item.runtime_state == "running" else ""
+    )
+    if item.runtime_state == "running" and not runtime_image_id:
+        issues.append("Running image differs from the local Compose image or could not be verified; repair tracking only after the image is reconciled.")
     plan_id = hashlib.sha256(
-        "\0".join((payload.target_id, payload.regex, item.image, current, source)).encode()
+        "\0".join((payload.target_id, payload.regex, item.image, current, source, runtime_image_id)).encode()
     ).hexdigest()
     return TrackingRepairPlan(
         plan_id=plan_id,
@@ -440,6 +466,8 @@ def _run_tracking_repair(
     plan: TrackingRepairPlan | None = None
     record: web_retags._RetagTargetRecord | None = None
     changed = False
+    recreate_started = False
+    expected_image_id = ""
     retain_backup = False
     try:
         web_jobs._append_apply_job_progress(
@@ -452,6 +480,11 @@ def _run_tracking_repair(
             raise RuntimeError("Tracking repair plan changed; preview it again.")
         stack = record.stack
         item = record.item
+        expected_image_id = _matching_runtime_image_id(
+            settings, stack, item.service, item.image
+        )
+        if not expected_image_id:
+            raise RuntimeError("Running image changed before tracking repair; reconcile the image and preview again.")
         runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
         compose = ComposeCli(runner=runner)
         project_name = compose.try_config_project_name(
@@ -490,10 +523,13 @@ def _run_tracking_repair(
         )
         # Recreate only this service; ComposeCli.up explicitly forbids pull and build.
         _require_approved_compose_source(path, plan.rendered_hash)
+        if _matching_runtime_image_id(settings, stack, item.service, item.image) != expected_image_id:
+            raise RuntimeError("Running image changed before tracking repair; reconcile the image and preview again.")
         web_jobs._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="running", message="Recreating only the selected service without a pull."),
         )
+        recreate_started = True
         compose.up(
             stack.directory, stack.file, [item.service],
             force_recreate=True, no_deps=True, remove_orphans=False,
@@ -501,11 +537,14 @@ def _run_tracking_repair(
             project_directory=stack.project_directory,
         )
         _require_approved_compose_source(path, plan.rendered_hash)
-        if not compose.ps_quiet(
+        container_ids = compose.ps_quiet(
             stack.directory, stack.file, [item.service],
             project_directory=stack.project_directory,
-        ):
+        )
+        if len(container_ids) != 1:
             raise RuntimeError("Service did not restart after tracking repair.")
+        if DockerCli(runner=runner).try_container_image_id(container_ids[0]) != expected_image_id:
+            raise RuntimeError("Service restarted with a different image; inspect it before retrying tracking repair.")
         web_jobs._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="success", message="Selected service is running after recreation."),
@@ -525,15 +564,18 @@ def _run_tracking_repair(
             try:
                 restore_path = record.stack.directory / record.stack.file
                 _atomic_replace_compose(
-                    restore_path, backup.read_text(encoding="utf-8"),
+                    restore_path, backup.read_bytes().decode("utf-8"),
                     prefix="tracking-rollback", expected_source_hash=plan.rendered_hash,
                 )
-                restore_runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
-                ComposeCli(runner=restore_runner).up(
-                    record.stack.directory, record.stack.file, [record.item.service],
-                    force_recreate=True, no_deps=True, remove_orphans=False,
-                    project_directory=record.stack.project_directory,
-                )
+                if recreate_started:
+                    restore_runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
+                    if DockerCli(runner=restore_runner).image_id(record.item.image) != expected_image_id:
+                        raise RuntimeError("Local image changed; automatic recreation would use a different image")
+                    ComposeCli(runner=restore_runner).up(
+                        record.stack.directory, record.stack.file, [record.item.service],
+                        force_recreate=True, no_deps=True, remove_orphans=False,
+                        project_directory=record.stack.project_directory,
+                    )
             except Exception as restore_exc:  # noqa: BLE001 - include rollback failure.
                 rollback_error = _safe_exception_detail(settings, "rollback failed", restore_exc)
                 retain_backup = True
