@@ -119,6 +119,9 @@ def tag_stream_include_regex(tag: str) -> str:
 def retag_tag_include_regex(tag: str) -> str:
     if not tag_value_valid(tag):
         raise ValueError(f"tag is not valid: {tag}")
+    dotted_version = re.fullmatch(r"(v?)\d+(?:\.\d+)+", tag)
+    if dotted_version is not None:
+        return rf"^{dotted_version.group(1)}\d+(?:\.\d+)+$"
     fragments: list[str] = []
     offset = 0
     for match in _NUMERIC_TAG_PART_RE.finditer(tag):

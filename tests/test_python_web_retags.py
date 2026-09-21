@@ -717,7 +717,7 @@ def test_retag_plan_manual_target_allows_non_latest_service(
     assert update["source_image"] == "repo/app:1.0"
     assert update["target_tag"] == "3.0"
     assert update["final_image"] == "repo/app:3.0"
-    assert update["label_value"] == r"^\d+\.\d+$$"
+    assert update["label_value"] == r"^\d+(?:\.\d+)+$$"
     _assert_pending_grouping_did_not_mutate(_fake_docker_calls(fake_root))
 
 

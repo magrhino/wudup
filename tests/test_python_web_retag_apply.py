@@ -69,7 +69,7 @@ def test_retag_plan_and_apply_rewrites_pulls_recreates_and_audits(
     content = (compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
     assert "# wudup.resolved-tag=" not in content
     assert "image: repo/app:2.0" in content
-    assert "wud.tag.include=^\\d+\\.\\d+$$" in content
+    assert "wud.tag.include=^\\d+(?:\\.\\d+)+$$" in content
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
     assert "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate --no-deps app" in calls
@@ -114,9 +114,9 @@ def test_retag_selected_tag_tracks_numeric_tag_shape(tmp_path: Path) -> None:
     plan = _create_retag_plan(fixture.client, headers)
 
     update = plan["stacks"][0]["tag_updates"][0]
-    assert update["label_value"] == r"^v\d+\.\d+\.\d+$$"
+    assert update["label_value"] == r"^v\d+(?:\.\d+)+$$"
     assert update["label_rewrites"][0]["proposed_label_regex"] == (
-        r"^v\d+\.\d+\.\d+$"
+        r"^v\d+(?:\.\d+)+$"
     )
 
     response = _apply_retag_plan(fixture.client, headers, plan)
@@ -128,7 +128,7 @@ def test_retag_selected_tag_tracks_numeric_tag_shape(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     assert "image: repo/app:v1.2.3" in content
-    assert r"wud.tag.include=^v\d+\.\d+\.\d+$$" in content
+    assert r"wud.tag.include=^v\d+(?:\.\d+)+$$" in content
 
 
 def test_retag_digest_pin_setting_preserves_digest_rewrites(tmp_path: Path) -> None:
