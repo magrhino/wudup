@@ -47,6 +47,7 @@ from . import (
     web_startup,
     web_state,
     web_static,
+    web_tracking,
     web_wud_api,
 )
 from .config import (
@@ -317,6 +318,25 @@ def create_app(
         web_retags.api_retag_targets,
         methods=["GET"],
         response_model=web_models.RetagTargetsResponse,
+    )
+    router.add_api_route(
+        "/tracked-containers",
+        web_tracking.api_tracked_containers,
+        methods=["GET"],
+        response_model=web_models.TrackedContainersResponse,
+    )
+    router.add_api_route(
+        "/tracking-repairs",
+        web_tracking.api_tracking_repair_plan,
+        methods=["POST"],
+        response_model=web_models.TrackingRepairPlan,
+    )
+    router.add_api_route(
+        "/tracking-repairs/apply",
+        web_tracking.api_apply_tracking_repair,
+        methods=["POST"],
+        response_model=web_models.ApplyJobResponse,
+        status_code=202,
     )
     router.add_api_route(
         "/retag-targets/github-latest/refresh",

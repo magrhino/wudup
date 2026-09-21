@@ -829,8 +829,20 @@ def _retag_target_records(
     stacks_or_response = _discover_retag_stacks(settings)
     if isinstance(stacks_or_response, RetagTargetsResponse):
         return stacks_or_response
-    stacks = stacks_or_response
+    return _retag_target_records_for_stacks(
+        settings, stacks_or_response,
+        github_latest_fallback=github_latest_fallback,
+        github_latest_by_target_id=github_latest_by_target_id,
+    )
 
+
+def _retag_target_records_for_stacks(
+    settings: WebSettings,
+    stacks: Sequence[ComposeStack],
+    *,
+    github_latest_fallback: bool = False,
+    github_latest_by_target_id: Mapping[str, _RetagGitHubLatestFallback] | None = None,
+) -> tuple[_RetagTargetRecord, ...]:
     known_by_service = web_database.known_digest_state_by_service(settings)
     service_counts = _retag_service_counts(stacks)
     if github_latest_by_target_id is not None:

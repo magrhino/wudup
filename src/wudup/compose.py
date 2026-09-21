@@ -9,6 +9,9 @@ from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+
 from .command import CommandError, CommandResult, CommandRunner
 from .config import DEFAULT_COMPOSE_IGNORE_PATHS, format_compose_ignore_paths
 from .platforms import ImagePlatform, parse_platform
@@ -71,6 +74,8 @@ class ComposeStack:
     service_images: tuple[ServiceImage, ...]
     project_directory: Path | None = None
     project_name: str = ""
+    service_names: tuple[str, ...] = ()
+    inspection_complete: bool = True
 
 
 def compose_runtime_service_keys(
@@ -373,6 +378,7 @@ class ComposeCli:
             )
             required = directory.name in required_names
             project_name = ""
+            inspection_complete = True
             try:
                 config = self.config_json(
                     directory,
@@ -380,9 +386,14 @@ class ComposeCli:
                     project_directory=project_directory,
                 )
                 service_images = _service_image_pairs_from_config_json(config.stdout)
+                service_names = tuple(sorted(
+                    service for service in _services_from_config_json(config.stdout)
+                    if isinstance(service, str)
+                ))
                 project_name = _project_name_from_config_json(config.stdout)
                 images = tuple(sorted({item.image for item in service_images}))
             except (CommandError, ValueError) as exc:
+                inspection_complete = False
                 if required:
                     raise ComposeDiscoveryError(
                         "Could not inspect a required Compose stack."
@@ -398,6 +409,12 @@ class ComposeCli:
                 except CommandError:
                     continue
                 service_images = ()
+                try:
+                    service_names = tuple(sorted(set(self.config_services(
+                        directory, file_name, project_directory=project_directory,
+                    ))))
+                except CommandError:
+                    service_names = _service_names_from_compose_yaml(compose_file)
             stacks.append(
                 ComposeStack(
                     index=len(stacks) + 1,
@@ -408,6 +425,8 @@ class ComposeCli:
                     service_images=service_images,
                     project_directory=project_directory,
                     project_name=project_name,
+                    service_names=service_names,
+                    inspection_complete=inspection_complete,
                 )
             )
         if not stacks:
@@ -509,12 +528,16 @@ class ComposeCli:
         force_recreate: bool = False,
         no_deps: bool = True,
         no_start: bool = False,
+        remove_orphans: bool = True,
         project_directory: str | Path | None = None,
     ) -> CommandResult:
         # Pulling and verification happen before recreation. Do not let Compose
         # replace that local image via pull_policy (including latest) or a build.
         # Missing images/unsupported flags must fail, never retry without guards.
-        args = ["up", "-d", "--remove-orphans", "--pull", "never", "--no-build"]
+        args = ["up", "-d"]
+        if remove_orphans:
+            args.append("--remove-orphans")
+        args.extend(["--pull", "never", "--no-build"])
         if force_recreate:
             args.append("--force-recreate")
         if services and no_deps:
@@ -892,6 +915,17 @@ def _service_image_pairs_from_config_json(config_json: str) -> tuple[ServiceImag
                 )
             )
     return tuple(sorted(pairs, key=lambda pair: (pair.service, pair.image)))
+
+
+def _service_names_from_compose_yaml(compose_file: Path) -> tuple[str, ...]:
+    try:
+        parsed = YAML(typ="safe").load(compose_file.read_text(encoding="utf-8"))
+    except (OSError, YAMLError):
+        return ()
+    services = parsed.get("services") if isinstance(parsed, dict) else None
+    if not isinstance(services, dict):
+        return ()
+    return tuple(sorted(service for service in services if isinstance(service, str)))
 
 
 def _project_name_from_config_json(config_json: str) -> str:

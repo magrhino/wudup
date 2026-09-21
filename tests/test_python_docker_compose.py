@@ -343,9 +343,14 @@ class ComposeCliTests(FakeDockerCase):
         self.assertEqual(stacks[0].directory, stack)
         self.assertEqual(stacks[0].images, ("repo/app:latest",))
         self.assertEqual(stacks[0].service_images, ())
+        self.assertEqual(stacks[0].service_names, ("app",))
+        self.assertFalse(stacks[0].inspection_complete)
         self.assertEqual(
             self.call_commands(),
-            ["compose -f docker-compose.yml config --images"],
+            [
+                "compose -f docker-compose.yml config --images",
+                "compose -f docker-compose.yml config --services",
+            ],
         )
 
     def test_try_config_project_name_returns_empty_for_invalid_json(self) -> None:

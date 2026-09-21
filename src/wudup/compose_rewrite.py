@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -1544,7 +1545,10 @@ def service_resolved_tag_marker(
     return _service_resolved_tag_marker(services, service, service_config)
 
 
-def _atomic_replace_compose(compose_path: Path, rendered: str, *, prefix: str) -> None:
+def _atomic_replace_compose(
+    compose_path: Path, rendered: str, *, prefix: str,
+    expected_source_hash: str | None = None,
+) -> None:
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{compose_path.name}.{prefix}.",
         dir=str(compose_path.parent),
@@ -1556,6 +1560,8 @@ def _atomic_replace_compose(compose_path: Path, rendered: str, *, prefix: str) -
         st = compose_path.stat()
         os.chown(tmp_path, st.st_uid, st.st_gid)
         os.chmod(tmp_path, st.st_mode & 0o7777)
+        if expected_source_hash is not None and hashlib.sha256(compose_path.read_bytes()).hexdigest() != expected_source_hash:
+            raise ComposeTagRewriteError("Compose file changed before tracking repair; preview it again.")
         os.replace(tmp_path, compose_path)
         tmp_path = None
     finally:
@@ -2285,6 +2291,70 @@ def _set_service_label_value(
         labels.append(replacement)
         return
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
+
+
+def render_compose_tracking_label(
+    compose_path: Path,
+    service: str,
+    expected_image: str,
+    expected_label: str,
+    proposed_regex: str,
+    *,
+    expected_source_hash: str | None = None,
+) -> str:
+    """Preview a single service's WUD tracking-label change without touching its image."""
+
+    source, yaml, parsed, services = _load_compose_yaml(compose_path, width=4096)
+    if expected_source_hash is not None and hashlib.sha256(source.encode()).hexdigest() != expected_source_hash:
+        raise ComposeTagRewriteError("Compose file changed before tracking repair; preview it again.")
+    service_config = _rewrite_service_config(
+        services, service, direct_image_required=True
+    )
+    if service_config.get("image") != expected_image:
+        raise ComposeTagRewriteError(
+            f"Service {service} image changed before tracking repair."
+        )
+    _prepare_service_labels(services, service, service_config)
+    labels = service_config.get("labels")
+    if isinstance(labels, CommentedSeq) and sum(
+        isinstance(entry, str) and entry.partition("=")[0] == WUD_TAG_INCLUDE_LABEL
+        for entry in labels
+    ) > 1:
+        raise ComposeTagRewriteError(
+            f"Service {service} has duplicate WUD tag filters; remove the duplicates before repair."
+        )
+    current = compose_unescape_dollars(
+        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL)
+    )
+    if current != expected_label:
+        raise ComposeTagRewriteError(
+            f"Service {service} tracking label changed before repair."
+        )
+    _set_service_label_value(
+        service_config,
+        WUD_TAG_INCLUDE_LABEL,
+        compose_escape_dollars(proposed_regex),
+    )
+    return _dump_compose_yaml(yaml, parsed)
+
+
+def apply_compose_tracking_label(
+    compose_path: Path,
+    service: str,
+    expected_image: str,
+    expected_label: str,
+    proposed_regex: str,
+    *,
+    expected_source_hash: str | None = None,
+) -> None:
+    rendered = render_compose_tracking_label(
+        compose_path, service, expected_image, expected_label, proposed_regex,
+        expected_source_hash=expected_source_hash,
+    )
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="tracking-repair",
+        expected_source_hash=expected_source_hash,
+    )
 
 
 def _backup_compose(compose_path: Path) -> Path:
