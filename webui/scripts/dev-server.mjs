@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createDemoWudApiServer } from "./demo-wud-api.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const webuiDir = resolve(scriptDir, "..");
@@ -12,6 +13,7 @@ const fakeDockerRoot = join(localDevRoot, "fake-docker");
 const fakeDockerBin = join(repoRoot, "tests", "fakes");
 const backendHost = "127.0.0.1";
 const backendPort = process.env.WUD_WEB_DEV_BACKEND_PORT ?? "7417";
+const demoWudPort = process.env.WUD_WEB_DEV_WUD_PORT ?? "7418";
 const frontendHost = "127.0.0.1";
 const frontendPort = process.env.WUD_WEB_DEV_FRONTEND_PORT ?? "5173";
 const pythonBin = resolvePython();
@@ -20,9 +22,23 @@ const pythonPath = process.env.PYTHONPATH
   ? `${join(repoRoot, "src")}${pathSeparator}${process.env.PYTHONPATH}`
   : join(repoRoot, "src");
 let vite = null;
+let demoWudServer = null;
 let shuttingDown = false;
 
 runSeeder();
+
+if (!process.env.WUD_API_BASE_URL) {
+  demoWudServer = createDemoWudApiServer(join(localDevRoot, "docker"));
+  try {
+    await new Promise((resolveListening, rejectListening) => {
+      demoWudServer.once("error", rejectListening);
+      demoWudServer.listen(Number(demoWudPort), backendHost, resolveListening);
+    });
+  } catch (error) {
+    console.error(`Could not start the local demo WUD API on ${backendHost}:${demoWudPort}: ${error.message}. Choose a free WUD_WEB_DEV_WUD_PORT.`);
+    process.exit(1);
+  }
+}
 
 const backend = spawn(
   pythonBin,
@@ -52,6 +68,7 @@ const backend = spawn(
       PATH: `${fakeDockerBin}${pathSeparator}${process.env.PATH ?? ""}`,
       FAKE_DOCKER_ROOT: fakeDockerRoot,
       WUD_PENDING_SOURCE: process.env.WUD_PENDING_SOURCE || "file",
+      WUD_API_BASE_URL: process.env.WUD_API_BASE_URL || `http://${backendHost}:${demoWudPort}`,
       WUD_WEB_DEV_NO_AUTH: "true",
       WUD_WEB_MUTATIONS_ENABLED: "true",
       WUD_WEB_RESTART_CONTAINER: "demo-wudup",
@@ -154,6 +171,7 @@ function shutdown(reason) {
   if (vite && vite.exitCode === null) {
     vite.kill("SIGTERM");
   }
+  demoWudServer?.close();
   if (typeof reason === "number") {
     process.exitCode = reason;
   } else if (reason && reason !== "SIGINT" && reason !== "SIGTERM") {
