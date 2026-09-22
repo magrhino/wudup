@@ -20,6 +20,7 @@ from .web_models import (
     ReleaseNoteLink,
     ReleaseNotificationItem,
     ReleaseNotificationTrigger,
+    ReleaseSecurityAssessment,
     WebSettings,
 )
 from .web_settings import effective_release_notification_webhook
@@ -141,15 +142,9 @@ def _notification_digest_reason(
     current_version: str,
     target_version: str,
 ) -> tuple[str, str, str]:
-    security = note.security
-    if security.outcome == "verified_critical_high":
-        advisory_label = ", ".join(security.advisory_ids[:3])
-        label = f"{security.severity.title()} security update"
-        if advisory_label:
-            label = f"{label} ({advisory_label})"
-        return "security_urgent", "verified_security", label
-    if security.outcome == "needs_review":
-        return "needs_review", "security_needs_review", "security update needs review"
+    security_reason = _security_digest_reason(note.security)
+    if security_reason is not None:
+        return security_reason
     semver_diff = str(getattr(metadata, "semver_diff", "") or "").lower()
     if not semver_diff:
         semver_diff = _semver_diff(current_version, target_version)
@@ -200,6 +195,20 @@ def _notification_digest_reason(
     if _is_digest_update(target, metadata):
         return "routine", "routine_digest", "image digest update"
     return "routine", "routine_update", "update metadata available"
+
+
+def _security_digest_reason(
+    security: ReleaseSecurityAssessment,
+) -> tuple[str, str, str] | None:
+    if security.outcome == "verified_critical_high":
+        advisory_label = ", ".join(security.advisory_ids[:3])
+        label = f"{security.severity.title()} security update"
+        if advisory_label:
+            label = f"{label} ({advisory_label})"
+        return "security_urgent", "verified_security", label
+    if security.outcome == "needs_review":
+        return "needs_review", "security_needs_review", "security update needs review"
+    return None
 
 
 def _mutable_latest_digest_reason(

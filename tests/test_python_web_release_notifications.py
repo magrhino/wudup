@@ -533,6 +533,14 @@ def test_digest_reason_priority_uses_deterministic_metadata() -> None:
         "verified_security",
         "Critical security update (GHSA-aaaa-bbbb-cccc)",
     )
+    assert reason(
+        breaking=True,
+        semver_diff="major",
+        security={"outcome": "needs_review"},
+    ) == ("needs_review", "security_needs_review", "security update needs review")
+    assert reason(
+        security={"outcome": "verified_critical_high", "severity": "high"},
+    ) == ("security_urgent", "verified_security", "High security update")
     assert reason(breaking=True, semver_diff="major") == (
         "needs_review",
         "breaking_change",
