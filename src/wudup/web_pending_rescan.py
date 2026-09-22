@@ -16,7 +16,6 @@ from . import (
     web_wud_refresh,
 )
 from .db import DatabaseError
-from .web_auth import _safe_exception_detail, _settings
 from .web_models import (
     PendingRescanLine,
     PendingRescanRequest,
@@ -25,6 +24,8 @@ from .web_models import (
     PendingRescanStatus,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 
 def api_pending_rescan(

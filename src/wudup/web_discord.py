@@ -14,7 +14,6 @@ from dataclasses import dataclass
 
 from . import web_wud_api
 from .images import image_repo_ref, image_tag
-from .web_auth import _redact_sensitive_text
 from .web_models import (
     ReleaseNoteInfo,
     ReleaseNoteLink,
@@ -23,6 +22,7 @@ from .web_models import (
     ReleaseSecurityAssessment,
     WebSettings,
 )
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
 from .web_settings import effective_release_notification_webhook
 from .wud_file import WudTarget, is_digest_target_line
 

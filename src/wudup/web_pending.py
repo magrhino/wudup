@@ -52,12 +52,8 @@ from .plans import (
 )
 from .tag_streams import pending_tag_stream_hint
 from .updater_models import CompletedUpdateSelection
-from .web_auth import (
-    _immediate_transaction,
-    _request_actor_type,
-    _safe_exception_detail,
-    _settings,
-)
+from .web_auth import request_actor_type as _request_actor_type
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_models import (
     PendingCleanupLine,
@@ -84,6 +80,8 @@ from .web_models import (
     WebSettings,
     WudApiStatus,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 from .wud_file import (
     ParsedWudFile,
     parse_wud_file,

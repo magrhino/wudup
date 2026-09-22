@@ -15,11 +15,6 @@ from fastapi import HTTPException, Query, Request
 from .config import VALID_UPDATE_MODES
 from .db import DatabaseError
 from .digest_provenance import digest_provenance_from_row
-from .web_auth import (
-    _safe_exception_detail,
-    _sanitize_support_bundle_value,
-    _settings,
-)
 from .web_database import (
     ReadOnlyDatabaseMissing,
 )
@@ -37,6 +32,11 @@ from .web_models import (
     RunVerificationSummary,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_redaction import (
+    sanitize_support_bundle_value as _sanitize_support_bundle_value,
+)
+from .web_request_context import request_settings as _settings
 from .web_run_verification import verification_from_run_records
 
 DEFAULT_RUN_LIMIT = 50

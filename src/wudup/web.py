@@ -37,6 +37,7 @@ from . import (
     web_plans,
     web_release_notes,
     web_release_notifications,
+    web_request_context,
     web_retags,
     web_rollback,
     web_runs,
@@ -730,7 +731,7 @@ def run_web_reset_admin_from_namespace(args: object) -> int:
 
 
 def api_status(request: Request) -> web_models.StatusResponse:
-    settings = web_auth._settings(request)
+    settings = web_request_context.request_settings(request)
     pending = web_pending.pending_response(
         settings,
         include_grouping=False,
@@ -787,7 +788,7 @@ def api_job_stream(
         ge=1,
     ),
 ) -> StreamingResponse:
-    settings = web_auth._settings(request)
+    settings = web_request_context.request_settings(request)
     web_jobs._require_apply_job(job_id, request)
     return StreamingResponse(
         web_jobs._apply_job_stream(

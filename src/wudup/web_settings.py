@@ -34,15 +34,8 @@ from .config import (
 )
 from .db import DatabaseError, init_db, open_db, utc_timestamp
 from .web_auth import (
-    SENSITIVE_ENV_KEYS,
-    _delete_web_setting,
     _parse_allowed_hosts,
-    _safe_exception_detail,
     _secure_cookie,
-    _set_web_setting,
-    _settings,
-    _web_setting,
-    _web_setting_or_none,
 )
 from .web_database import (
     ReadOnlyDatabaseMissing,
@@ -50,6 +43,10 @@ from .web_database import (
 from .web_database import (
     connect_readonly_db as _connect_readonly_db,
 )
+from .web_database import delete_web_setting as _delete_web_setting
+from .web_database import set_web_setting as _set_web_setting
+from .web_database import web_setting as _web_setting
+from .web_database import web_setting_or_none as _web_setting_or_none
 from .web_models import (
     ManagedSettingEntry,
     ManagedSettingsUpdateRequest,
@@ -61,11 +58,14 @@ from .web_models import (
     WebSettings,
 )
 from .web_onboarding import ONBOARDING_DISMISSED_AT_KEY
+from .web_redaction import SENSITIVE_ENV_KEYS
+from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_release_notification_state import (
     DEFAULT_RELEASE_NOTIFICATIONS_DELIVERY_MODE,
     RELEASE_NOTIFICATIONS_DELIVERY_MODE_VALUES,
     ReleaseNotificationConfig,
 )
+from .web_request_context import request_settings as _settings
 from .web_state import _insert_managed_settings_audit
 from .web_static import (
     resolve_static_dir as _resolve_static_dir,

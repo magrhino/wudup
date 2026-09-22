@@ -15,11 +15,6 @@ from pydantic import BaseModel
 from . import __version__, web_jobs, web_pending, web_runs, web_settings, web_wud_api
 from .db import DatabaseError
 from .plans import DryRunPlan
-from .web_auth import (
-    _redact_sensitive_text,
-    _sanitize_support_bundle_value_with_secrets,
-    _settings,
-)
 from .web_database import (
     ReadOnlyDatabaseMissing,
     connect_readonly_db,
@@ -35,6 +30,11 @@ from .web_models import (
     LogTail,
     WebSettings,
 )
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import (
+    sanitize_support_bundle_value_with_secrets as _sanitize_support_bundle_value_with_secrets,
+)
+from .web_request_context import request_settings as _settings
 
 _WUD_METADATA_CHECK_LABEL = "Selected update metadata"
 

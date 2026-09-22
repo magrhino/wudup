@@ -16,12 +16,12 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from .web_auth import (
-    WebConfigError,
-    _redact_sensitive_text,
-    _redact_unknown_absolute_paths,
-)
+from .web_auth import WebConfigError
 from .web_models import WebSettings, WudApiClientConfig
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import (
+    redact_unknown_absolute_paths as _redact_unknown_absolute_paths,
+)
 
 DEFAULT_WUD_API_BASE_URL = "http://wud:3000"
 WUD_API_BASE_URL_ENV = "WUD_API_BASE_URL"

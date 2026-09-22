@@ -35,7 +35,6 @@ from .docker_cli import DockerCli
 from .images import image_tag, tag_value_valid
 from .tag_streams import retag_tag_include_regex
 from .updater_models import ComposeTagRewriteError, UpdaterProgressEvent
-from .web_auth import _safe_exception_detail, _settings
 from .web_database import ReadOnlyDatabaseMissing
 from .web_metadata import json_object
 from .web_models import (
@@ -48,6 +47,8 @@ from .web_models import (
     WebApplyJob,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 # A deliberately small JS/Python-common subset. It prevents catastrophic regexes,
 # lookarounds, backreferences, and syntax that WUD might interpret differently.
