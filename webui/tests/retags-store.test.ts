@@ -558,13 +558,10 @@ describe("retags store", () => {
     });
   });
 
-  it("sends manual retag target tags for fallback rows", async () => {
-    const fetchMock = mockFetch(retagPreviewJobResponse());
-    const auth = useAuthStore();
-    vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-retag");
-    const retags = useRetagsStore();
-    const retagItems = [
-      retagTarget({
+  it.each([
+    {
+      name: "sends manual retag target tags for fallback rows",
+      item: retagTarget({
         service_key: "media/radarr",
         service: "radarr",
         image: "repo/radarr:5.21.1",
@@ -579,43 +576,32 @@ describe("retags store", () => {
         choices: ["keep-current"],
         digest_provenance: null,
       }),
-    ];
-    retags.retagTargets = retagTargetsResponse(retagItems);
-
-    retags.setRetagTargetTag(retagItems[0].target_id, "5.22.4");
-    await retags.createRetagPlan();
-
-    expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
-      choices: [
-        {
-          service_key: "media/radarr",
-          target_id: retagItems[0].target_id,
-          choice: "switch-to-concrete",
-          target_tag: "5.22.4",
-        },
-      ],
-      github_latest_fallback: false,
-    });
-  });
-
-  it("uses edited automatch target tags as manual overrides", async () => {
+      tag: "5.22.4",
+      serviceKey: "media/radarr",
+    },
+    {
+      name: "uses edited automatch target tags as manual overrides",
+      item: retagTarget(),
+      tag: "1.2",
+      serviceKey: "media/app",
+    },
+  ])("$name", async ({ item, tag, serviceKey }) => {
     const fetchMock = mockFetch(retagPreviewJobResponse());
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-retag");
     const retags = useRetagsStore();
-    const retagItems = [retagTarget()];
-    retags.retagTargets = retagTargetsResponse(retagItems);
+    retags.retagTargets = retagTargetsResponse([item]);
 
-    retags.setRetagTargetTag(retagItems[0].target_id, "1.2");
+    retags.setRetagTargetTag(item.target_id, tag);
     await retags.createRetagPlan();
 
     expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
       choices: [
         {
-          service_key: "media/app",
-          target_id: retagItems[0].target_id,
+          service_key: serviceKey,
+          target_id: item.target_id,
           choice: "switch-to-concrete",
-          target_tag: "1.2",
+          target_tag: tag,
         },
       ],
       github_latest_fallback: false,
