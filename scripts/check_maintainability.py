@@ -9,18 +9,21 @@ import re
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 POLICY_PATH = "maintainability-policy.json"
 ENFORCED_CATEGORIES = {"production", "declarative"}
 REGULAR_MODES = {"100644", "100755"}
+BLOB_CHUNK_SIZE = 64 * 1024
 
 
 class Git:
     def __init__(self, repo: Path):
         self.repo = repo
 
-    def run(self, *args: str, data: bytes | None = None) -> bytes:
-        env = dict(
+    @staticmethod
+    def environment() -> dict[str, str]:
+        return dict(
             {
                 key: value
                 for key, value in os.environ.items()
@@ -31,11 +34,12 @@ class Git:
             GIT_TERMINAL_PROMPT="0",
             GIT_OPTIONAL_LOCKS="0",
         )
+
+    def run(self, *args: str) -> bytes:
         result = subprocess.run(
             ["git", "-C", str(self.repo), *args],
-            input=data,
             capture_output=True,
-            env=env,
+            env=self.environment(),
             check=False,
         )
         if result.returncode:
@@ -93,24 +97,65 @@ class Git:
                 if mode in REGULAR_MODES
             }
         )
-        # Batch by object ID, never by a user-controlled revision:path expression.
-        output = self.run(
-            "cat-file", "--batch", data="".join(f"{oid}\n" for oid in oids).encode()
-        )
         counts = {}
-        offset = 0
-        for oid in oids:
-            end = output.index(b"\n", offset)
-            object_id, kind, size = output[offset:end].split()
-            if object_id.decode() != oid or kind != b"blob":
-                raise ValueError("Git did not return the requested blob.")
-            offset = end + 1
-            blob = output[offset : offset + int(size)]
-            counts[oid] = blob.count(b"\n") + int(
-                bool(blob) and not blob.endswith(b"\n")
-            )
-            offset += int(size) + 1
+        if not oids:
+            return counts
+        with subprocess.Popen(
+            ["git", "-C", str(self.repo), "cat-file", "--batch"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=self.environment(),
+        ) as batch:
+            try:
+                # Drain each response before sending another OID to avoid pipe deadlocks.
+                # Requests are object IDs, never candidate-controlled revision:path values.
+                for oid in oids:
+                    batch.stdin.write(f"{oid}\n".encode())
+                    batch.stdin.flush()
+                    counts[oid] = self.blob_line_count(batch.stdout, oid)
+                batch.stdin.close()
+                if batch.wait():
+                    raise ValueError(
+                        "Git cat-file failed; verify local commit objects."
+                    )
+            except BrokenPipeError as exc:
+                raise ValueError(
+                    "Git cat-file failed; verify local commit objects."
+                ) from exc
+            finally:
+                if batch.poll() is None:
+                    batch.kill()  # Popen's context manager closes pipes and reaps the child.
         return counts
+
+    @staticmethod
+    def blob_line_count(output: BinaryIO, oid: str) -> int:
+        # SHA-256 OID + type + 64-bit size fits comfortably within this bounded header.
+        header = output.readline(128)
+        fields = header.split()
+        if (
+            not header.endswith(b"\n")
+            or len(fields) != 3
+            or fields[:2] != [oid.encode(), b"blob"]
+            or not fields[2].isdigit()
+        ):
+            raise ValueError("Git did not return the requested blob and size.")
+        remaining = int(fields[2])
+        lines, final_line = 0, False
+        while remaining:
+            chunk = output.read(min(BLOB_CHUNK_SIZE, remaining))
+            if not chunk:
+                raise ValueError(
+                    "Git returned a truncated blob; verify local commit objects."
+                )
+            remaining -= len(chunk)
+            lines += chunk.count(b"\n")
+            final_line = not chunk.endswith(b"\n")
+        if output.read(1) != b"\n":
+            raise ValueError(
+                "Git returned an invalid blob separator; verify local commit objects."
+            )
+        return lines + int(final_line)
 
 
 def require(condition: bool, message: str) -> None:

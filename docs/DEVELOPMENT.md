@@ -79,6 +79,10 @@ the policy, the checker uses the comparison policy and explicitly reports that
 fallback in `base_policy_source`. It reads objects
 with Git and the Python standard library; it never imports or executes project
 code, reads working source files, follows symlinks, or fetches missing objects.
+Blob counting drains one Git batch response at a time in 64 KiB chunks, including
+binary files and very long lines. It retains counts and tree metadata, not the
+contents of the compared blobs. Missing or truncated objects and failed Git
+processes produce an error rather than a partial passing report.
 
 The policy is **baseline pending**. Enforcement exits with status 2 until the
 predecessor work under [#694](https://github.com/magrhino/wudup/issues/694) is
