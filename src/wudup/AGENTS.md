@@ -25,6 +25,8 @@ Prefer small modules with one clear reason to change:
 | Web run history, verification, logs, and rollback guidance | `web_runs.py`, `web_run_verification.py`, `web_rollback.py` | Keep run reads authenticated and read-only; rollback guidance must fail closed and never pull, retag, rewrite Compose, restart services, or write audit state. |
 | Web onboarding checklist and core update tour | `web_onboarding.py` | Preserve auth/CSRF behavior, dismissed-onboarding short-circuiting, SQLite setting keys, and read-only-mode tour persistence. |
 | Web read-only database helpers | `web_database.py` | Preserve read-only SQLite URI handling, schema validation, and database readiness messages. |
+| WUD client configuration and HTTP transport | `web_wud_transport.py` | Own secret-file loading, header validation, URL normalization, and requests; `web_wud_api.py` retains public configuration exports and the cache/watch orchestration. Preserve timeouts, authentication, and redaction. |
+| WUD container observations | `web_wud_observations.py` | Own payload parsing, target matching, degraded recovery/reconciliation, diagnostics, and persisted row conversion. No mutable cache state; the API/cache owner serializes refresh and publishes results. |
 | Web pending reads, cleanup, removal, and WUD rescans | `web_pending.py`, `web_pending_rescan*.py` | Keep WUD rescan non-file-mutating; preserve source hashes, stale selection checks, WUD locks, audit records, and WUD API degradation handling. |
 | Tracked Compose inventory and tracking-label repair | `web_tracking.py` | Include every discovered Compose service; treat missing WUD metadata as unknown. Keep repair plan-first, label-only, stale-source checked, single-service, and audited. |
 | Web apply jobs, streams, plan apply | `web_jobs.py` | Preserve one-job-at-a-time, stale-plan rejection, WUD locks, audit, and progress events. |
@@ -32,9 +34,15 @@ Prefer small modules with one clear reason to change:
 | Web self-update and container restart | `web_self_update.py` | Preserve plan TTL, image/tag validation, restart validation, audit, and redaction. |
 | Updater CLI facade and runner orchestration | `updater.py` | Preserve `UpdateFromWudRunner` and `run_update_from_wud`; helper APIs belong in their owning modules, not facade re-exports. |
 | Updater dataclasses, typed records, exceptions | `updater_models.py` | Preserve dataclass options, defaults, and custom exception classes. |
-| Compose YAML tag/digest/exclusion rewrites | `compose_rewrite.py` | Preserve fail-closed YAML handling, atomic writes, file mode/owner, and cleanup. |
+| Compose tag/digest/exclusion rewrite operations | `compose_rewrite.py` | Stable entrypoints own update/approval matching, regex policy, and resolved-tag marker semantics. Keep YAML mechanics and persistence in their owners. |
+| Compose round-trip YAML source editing | `compose_source.py` | Own parsing, source spans, label styles, anchor/alias guards, and comment-token containers; preserve exact source handling and fail-closed errors without choosing update policy or writing files. |
+| Compose atomic persistence and backups | `compose_persistence.py` | All writers, backups, and guarded restores share the directory lock. Preserve source-hash checks, file mode/owner, replacement ordering, and temporary-file cleanup. |
 | Registry HTTPS transport and authentication | `registry_http.py`, `digest_verifier.py` | Keep token origins authorized per registry, DNS addresses pinned, redirects disabled, and request size/time bounded; the live probe shares the resolver. Run `tests/test_python_registry_http.py` and digest verifier tests. |
 | Docker tag-stream parsing and WebUI decision planning | `tag_streams.py` | Keep detection strict, manifest-verified, LinuxServer-aware, and free of GET-time registry calls. |
+| Release-note API and context orchestration | `release_notes.py`, `release_note_models.py` | Preserve public imports, shared record defaults, context cache keys, candidate selection, and backfill fallback. Provider, security, and cache owners must not import the facade. |
+| GitHub/LSIO release-note providers | `release_note_providers.py` | Own the shared GitHub client, source discovery, bounded release lookup, breaking detection, and LSIO classification; preserve request/fallback order and upstream mappings. |
+| Release-note security assessment | `release_note_security.py` | Own advisory matching, version-range evidence, severity, scan/fetch limits, and retryable reasons; use the same provider client without adding cache writes. |
+| Release-note cache persistence | `release_note_cache.py` | Own legacy row decoding, digest pruning, upserts, and TTL decisions; preserve SQL/serialization and keep cached reads network-free. |
 
 If the exact owner does not exist yet, create the narrowest reasonable module instead of growing `web.py`, `updater.py`, or a giant test file.
 
