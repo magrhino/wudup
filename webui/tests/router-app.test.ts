@@ -14,6 +14,7 @@ import { createWudRouter } from "../src/router";
 import { useAuthStore } from "../src/stores/auth";
 import { useConnectionStore } from "../src/stores/connection";
 import { useSettingsStore } from "../src/stores/settings";
+import { useRetagsStore } from "../src/stores/retags";
 import { useUpdatesStore } from "../src/stores/updates";
 import { useRunsStore } from "../src/stores/runs";
 import SetupView from "../src/views/SetupView.vue";
@@ -553,13 +554,14 @@ describe("app shell", () => {
 
   it("shows retag navigation and refreshes the retags route", async () => {
     const stores = createAppStores();
-    stores.updates.retagTargets = retagTargetsResponse();
+    const retags = useRetagsStore(stores.pinia);
+    retags.retagTargets = retagTargetsResponse();
     vi.spyOn(stores.connection, "loadStatus").mockResolvedValue();
     vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
     vi.spyOn(stores.settings, "loadCoreUpdateTour").mockResolvedValue();
     vi.spyOn(stores.updates, "loadSelfUpdate").mockResolvedValue();
     const loadRetagTargets = vi
-      .spyOn(stores.updates, "loadRetagTargets")
+      .spyOn(retags, "loadRetagTargets")
       .mockResolvedValue();
 
     const { router, wrapper } = await mountAppAt(stores, "/retags");
