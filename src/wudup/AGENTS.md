@@ -31,6 +31,7 @@ Prefer small modules with one clear reason to change:
 | Web pending reads, cleanup, removal, and WUD rescans | `web_pending.py`, `web_pending_rescan*.py` | Keep WUD rescan non-file-mutating; preserve source hashes, stale selection checks, WUD locks, audit records, and WUD API degradation handling. |
 | Tracked Compose inventory and tracking-label repair | `web_tracking.py` | Include every discovered Compose service; treat missing WUD metadata as unknown. Keep repair plan-first, label-only, stale-source checked, single-service, and audited. |
 | Web apply jobs, streams, plan apply | `web_jobs.py` | Preserve one-job-at-a-time, stale-plan rejection, WUD locks, audit, and progress events. |
+| Retag preview job lifecycle | `web_retag_preview.py` | Own the single preview executor, app-state lock/job dictionary, bounded retention, progress, and terminal responses. Routes in `web_retags.py` supply the current plan builder; preserve per-job result correlation, redaction, and shutdown without moving planning or apply. |
 | Web auto-update scheduler | `web_scheduler.py` | Keep disabled unless mutations are enabled; preserve reservations and timing behavior. |
 | Web self-update and container restart | `web_self_update.py` | Preserve plan TTL, image/tag validation, restart validation, audit, and redaction. |
 | Updater CLI facade and runner orchestration | `updater.py` | Preserve `UpdateFromWudRunner` and `run_update_from_wud`; helper APIs belong in their owning modules, not facade re-exports. |
