@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.61.1](https://github.com/magrhino/wudup/compare/v0.61.0...v0.61.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **release:** clear image security gate ([#718](https://github.com/magrhino/wudup/issues/718)) ([fa4d5e5](https://github.com/magrhino/wudup/commit/fa4d5e580dc882c8c5c714cc2176fabd32f2e90a))
+
 ## [0.61.0](https://github.com/magrhino/wudup/compare/v0.60.2...v0.61.0) (2026-09-22)
 
 
