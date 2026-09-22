@@ -15,6 +15,7 @@ from tests.web_test_helpers import (
     _wud_api_container,
 )
 
+from wudup import web_discord as discord_module
 from wudup import web_release_notifications as notifications_module
 from wudup.db import init_db, insert_pending_update, insert_update_run, open_db
 from wudup.lsio_updates import LSIOTagParts, LSIOUpdateClassification
@@ -508,7 +509,7 @@ def test_digest_reason_priority_uses_deterministic_metadata() -> None:
             semver_diff=semver_diff,
             update_kind=update_kind,
         )
-        return notifications_module._notification_digest_reason(
+        return discord_module._notification_digest_reason(
             target,
             note,
             metadata,
@@ -652,12 +653,12 @@ def test_latest_digest_version_includes_resolved_release_tag_without_metadata() 
         release_tag="v2.0.0",
     )
 
-    assert notifications_module._notification_versions(
+    assert discord_module._notification_versions(
         target,
         note,
         None,
     ) == ("latest", "latest (release v2.0.0)")
-    assert notifications_module._notification_versions(
+    assert discord_module._notification_versions(
         target,
         note,
         SimpleNamespace(local_tag="latest", remote_tag="latest", update_kind="digest"),
@@ -668,7 +669,7 @@ def test_latest_digest_version_includes_resolved_release_tag_without_metadata() 
             "ghcr.io/acme/app:1.0.0 sha256=new"
         ).targets[0]
     )
-    assert notifications_module._notification_versions(
+    assert discord_module._notification_versions(
         versioned_target,
         note,
         None,
@@ -682,7 +683,7 @@ def test_latest_digest_version_includes_resolved_release_tag_without_metadata() 
             ),
         }
     )
-    current_version, target_version = notifications_module._notification_versions(
+    current_version, target_version = discord_module._notification_versions(
         target,
         lsio_note,
         None,
@@ -692,7 +693,7 @@ def test_latest_digest_version_includes_resolved_release_tag_without_metadata() 
         "latest",
         "latest (release v2.0.0)",
     )
-    assert notifications_module._notification_digest_reason(
+    assert discord_module._notification_digest_reason(
         target,
         lsio_note,
         None,
@@ -708,14 +709,14 @@ def test_latest_digest_version_includes_resolved_release_tag_without_metadata() 
 def test_semver_diff_rejects_unreasonably_long_numeric_parts() -> None:
     oversized = "1" * 100
 
-    assert notifications_module._semver_diff(
+    assert discord_module._semver_diff(
         f"{oversized}.0.0",
         f"{oversized}.1.0",
     ) == ""
 
 
 def test_semver_diff_rejects_non_ascii_digits() -> None:
-    assert notifications_module._semver_diff("١.0.0", "٢.0.0") == ""
+    assert discord_module._semver_diff("١.0.0", "٢.0.0") == ""
 
 
 def test_digest_row_selects_compact_release_links() -> None:
@@ -750,7 +751,7 @@ def test_digest_row_selects_compact_release_links() -> None:
         ],
     )
 
-    row = notifications_module._digest_row(item)
+    row = discord_module._digest_row(item)
 
     assert row.startswith("• media/app `1.0.0` → `1.1.0`")
     assert "[release](https://example.test/release)" in row
@@ -783,7 +784,7 @@ def test_digest_links_classifies_supported_links_and_deduplicates() -> None:
         ),
     ]
 
-    assert notifications_module._digest_links(links) == [
+    assert discord_module._digest_links(links) == [
         "[LSIO release](https://example.test/lsio)",
         "[project](https://example.test/project)",
     ]
@@ -1732,7 +1733,7 @@ def test_release_notification_send_reserves_history_before_posting(
         posted.append((webhook_url, payload))
 
     monkeypatch.setattr(
-        notifications_module,
+        discord_module,
         "_post_discord_payload",
         fake_post_discord_payload,
     )
@@ -1765,7 +1766,7 @@ def test_release_notification_duplicate_key_survives_missing_wud_metadata(
         triggers={"docker.local.app": (200, [])},
     )
     monkeypatch.setattr(
-        notifications_module,
+        discord_module,
         "_post_discord_payload",
         lambda _url, _payload: None,
     )
