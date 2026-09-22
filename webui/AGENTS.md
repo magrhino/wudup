@@ -26,6 +26,7 @@ Rules for files under `webui/`. Root `AGENTS.md` controls repo-wide safety, rele
 
 ## Frontend Architecture Rules
 
+- Review file growth against the shared [maintainability policy](../maintainability-policy.json) and [checker guidance](../docs/DEVELOPMENT.md#maintainability-checker-draft); its initial baseline is still pending integration.
 - Keep state ownership explicit: one feature, one owning store.
 - Do not recreate a monolithic WebUI store or duplicate state across stores.
 - Keep components mostly presentational; route backend calls through the typed API client and owning store.

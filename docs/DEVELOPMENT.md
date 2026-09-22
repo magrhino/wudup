@@ -69,6 +69,72 @@ tests/container-build.sh
 The deployment compose example uses the published GHCR image. The build compose
 artifact keeps the repository-local image build path used by smoke tests.
 
+## Maintainability Checker (Draft)
+
+`scripts/check_maintainability.py` compares physical lines in committed Git blobs,
+including a final line without a newline. Its only policy source for enforcement
+is `maintainability-policy.json` in the requested head commit. It reads objects
+with Git and the Python standard library; it never imports or executes project
+code, reads working source files, follows symlinks, or fetches missing objects.
+
+The policy is **baseline pending**. Enforcement exits with status 2 until the
+predecessor work under [#694](https://github.com/magrhino/wudup/issues/694) is
+integrated into main or explicitly deferred and the initial ceilings are reviewed.
+Validated pull requests do not establish that baseline. This draft adds no CI job
+or required status. The earlier local LOC audit script was not available to promote;
+the checker follows [#706](https://github.com/magrhino/wudup/issues/706) and synthetic
+Git repository tests.
+
+For current or historical inventory using the draft policy:
+
+```bash
+python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT --report-only --policy-file maintainability-policy.json
+```
+
+`--policy-file` is available only with `--report-only`. Such a report always says
+`REPORT ONLY / NOT ENFORCED`; its successful command exit is not a passing gate.
+An inventory with identical base/head commits includes unchanged files. JSON output
+reports resolved commits and, for every tracked path, the category, base/head line
+counts, delta, Git rename origin, applicable ceiling, warnings, and violations.
+Deleted files remain visible. Tests, generated outputs, locks, other non-source
+files, symlinks, and submodules are reported separately without size enforcement.
+
+After integration, review the production inventory from post-refactor main, set
+`baseline.status` to `ready`, and record its full commit ID. Every remaining
+oversized production file needs an exact-path entry in `ceilings`. Exceptional
+declarative collections or fixture generators belong in `allowances`, also with an
+explicit ceiling; they remain visible and subject to growth checks. Each record
+has `ceiling`, `reason`, `deferred` (boolean), `follow_up` (linked issue when deferred,
+otherwise null or a link), and `re_review` (the condition for another review).
+Policy changes, including higher ceilings or category changes, require review.
+Never add broad source exclusions to solve a failure.
+Exact production paths and reviewed records take precedence over directory
+categories, so an explicitly retained production owner cannot hide inside tests
+or generated output. Ordinary tests remain report-only.
+
+Git-detected renames retain the old path's ceiling unless the new exact path has a
+reviewed record. A production rename into tests or an excluded category fails:
+retain production classification or review an exact-path declarative allowance.
+Unchanged and shrinking oversized files with recorded ceilings are allowed; new
+or growing files above their applicable ceiling fail. Follow the policy's
+anti-gaming guidance: preserve validation, safeguards, coverage, comments, and type
+precision, and reduce responsibility and navigation burden instead of compressing
+formatting or scattering a cohesive owner among fragments.
+
+The future local/CI enforcement command is identical, using the actual PR base
+and head commit IDs (not a synthetic merge commit):
+
+```bash
+python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT
+```
+
+It exits 0 for a passing enforced comparison, 1 for violations, or 2 for a pending
+baseline, invalid policy, or unavailable Git objects. Before wiring CI or requiring
+its status, validate representative PRs against the reviewed baseline and resolve
+false positives. Future CI must use a trusted checker and review policy changes;
+it must not execute candidate project code. Danger remains advisory, and
+`Danger: large-file-review-complete` cannot bypass this checker.
+
 ## WebUI Development
 
 Install the frontend dependencies before running the Vue/Vite checks:
