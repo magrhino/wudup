@@ -1,4 +1,4 @@
-"""Characterize the transport reached through the stable WUD API facade."""
+"""Characterize the WUD transport used by both cache and metadata adapters."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from contextlib import contextmanager
 
 import pytest
 
-from wudup import web_wud_api
+from wudup import web_wud_api, web_wud_transport
 from wudup.web_models import WudApiClientConfig
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
 @pytest.mark.parametrize("body, expected", [(b"", {}), (b'{"ok": true}', {"ok": True})])
-def test_facade_requests_preserve_headers_timeout_and_response_cleanup(
+def test_transport_requests_preserve_headers_timeout_and_response_cleanup(
     monkeypatch, method, body, expected,
 ):
     calls = []
@@ -38,10 +38,10 @@ def test_facade_requests_preserve_headers_timeout_and_response_cleanup(
     config = WudApiClientConfig(header_items=(("Authorization", "Bearer test-value"),))
     url = "https://wud.example/base/api/containers"
     if method == "GET":
-        result = web_wud_api._request_json(url, config)
+        result = web_wud_transport._request_json(url, config)
         expected_timeout = web_wud_api.WUD_API_TIMEOUT_SECONDS
     else:
-        result = web_wud_api._post_json(url, config, timeout=17.5)
+        result = web_wud_transport._post_json(url, config, timeout=17.5)
         expected_timeout = 17.5
 
     assert result == expected
@@ -58,20 +58,20 @@ def test_facade_requests_preserve_headers_timeout_and_response_cleanup(
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
-def test_facade_requests_propagate_the_original_transport_error(monkeypatch, method):
+def test_transport_requests_propagate_the_original_transport_error(monkeypatch, method):
     error = urllib.error.HTTPError("https://wud.example", 429, "limited", {}, None)
 
     def urlopen(_request, *, timeout):
         raise error
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    request = web_wud_api._request_json if method == "GET" else web_wud_api._post_json
+    request = web_wud_transport._request_json if method == "GET" else web_wud_transport._post_json
     with pytest.raises(urllib.error.HTTPError) as caught:
         request("https://wud.example")
     assert caught.value is error
 
 
-def test_facade_requests_close_response_before_json_error(monkeypatch):
+def test_transport_requests_close_response_before_json_error(monkeypatch):
     closed = []
 
     @contextmanager
@@ -87,5 +87,5 @@ def test_facade_requests_close_response_before_json_error(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     with pytest.raises(json.JSONDecodeError):
-        web_wud_api._request_json("https://wud.example")
+        web_wud_transport._request_json("https://wud.example")
     assert closed == [True]

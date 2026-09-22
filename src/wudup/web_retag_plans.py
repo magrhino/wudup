@@ -43,6 +43,10 @@ class RetagPlanBuild:
     updates: tuple[RetagPlanUpdate, ...]
 
 
+def retag_update_identity(item: RetagPlanUpdate) -> str:
+    return item.target_id
+
+
 def retag_update_service(item: RetagPlanUpdate) -> str:
     return item.update.services[0] if item.update.services else ""
 

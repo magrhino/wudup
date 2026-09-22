@@ -14,7 +14,7 @@ from tests.web_wud_rescan_helpers import (
     rescan_payload,
 )
 
-from wudup import web_wud_api
+from wudup import web_wud_transport
 from wudup.db import open_db
 from wudup.web_models import WebApplyJob
 
@@ -202,7 +202,7 @@ def test_pending_selected_rescan_reports_partial_watch_failure(
             raise OSError("timeout")
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_post_json", post_json)
+    monkeypatch.setattr(web_wud_transport, "_post_json", post_json)
     client = _client(
         tmp_path,
         {
@@ -283,12 +283,12 @@ def test_pending_rescan_rejects_active_apply_job_without_watch(
 ) -> None:
     posts: list[str] = []
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_request_json",
         lambda url, _client_config=None: {"status": "ok"},
     )
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_post_json",
         lambda url, _client_config=None, **_kwargs: posts.append(
             urllib.parse.urlsplit(url).path
@@ -350,7 +350,7 @@ def test_pending_selected_rescan_continues_after_missing_containers_and_audits_p
             raise HTTPError(url=url, code=404, msg="Not Found", hdrs=None, fp=None)
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_post_json", post_json)
+    monkeypatch.setattr(web_wud_transport, "_post_json", post_json)
     client = _client(
         tmp_path,
         {

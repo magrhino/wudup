@@ -29,6 +29,8 @@ from .release_note_models import (
 
 DEFAULT_GITHUB_TIMEOUT_SECONDS = 6.0
 LSIO_RELEASE_SCAN_MAX_PAGES = 10
+GITHUB_HOST = "github.com"
+UPSTREAM_MAP_FILENAME = "upstreams.txt"
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SEMVER_RE = re.compile(
     r"(?<![0-9A-Za-z])v?([0-9]+)(?:\.[0-9]+){1,3}"
@@ -41,10 +43,10 @@ BREAKING_RE = re.compile(
     re.IGNORECASE,
 )
 GHSA_ID_RE = re.compile(
-    r"^GHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}$",
+    r"^GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}$",
     re.IGNORECASE | re.ASCII,
 )
-CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$", re.IGNORECASE | re.ASCII)
+CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE | re.ASCII)
 SECURITY_ADVISORY_FETCH_MAX = 4
 
 
@@ -122,7 +124,7 @@ def detect_breaking(body: str, current_tag: str, release_tag: str) -> tuple[bool
 
 def _github_release_link_tag(url: str) -> str:
     parsed = urllib.parse.urlsplit(url)
-    if parsed.netloc.lower() != "github.com":
+    if parsed.netloc.lower() != GITHUB_HOST:
         return ""
     marker = "/releases/tag/"
     if marker not in parsed.path:
@@ -507,7 +509,7 @@ def _block_header_text(value: str) -> str:
 
 
 def _markdown_bullet(value: str) -> bool:
-    return bool(re.match(r"^([*+-]|•)\s+", value))
+    return bool(re.match(r"^[*+•-]\s+", value))
 
 
 def _load_upstream_map(environ: Mapping[str, str]) -> dict[str, str]:
@@ -537,12 +539,12 @@ def _upstream_map_paths(environ: Mapping[str, str]) -> list[Path]:
             paths.append(Path(value))
     scripts_dir = environ.get("WUD_SCRIPTS_DIR", "/managed-wud")
     if scripts_dir:
-        paths.append(Path(scripts_dir) / "upstreams.txt")
+        paths.append(Path(scripts_dir) / UPSTREAM_MAP_FILENAME)
     app_dir = environ.get("WUD_APP_DIR", "/app")
     if app_dir:
-        paths.append(Path(app_dir) / "wud" / "upstreams.txt")
+        paths.append(Path(app_dir) / "wud" / UPSTREAM_MAP_FILENAME)
     paths.append(Path("/app/wud/upstreams.txt"))
-    paths.append(Path(__file__).resolve().parents[2] / "wud" / "upstreams.txt")
+    paths.append(Path(__file__).resolve().parents[2] / "wud" / UPSTREAM_MAP_FILENAME)
     unique: list[Path] = []
     seen: set[Path] = set()
     for path in paths:
@@ -578,14 +580,14 @@ def github_repo_from_source(source: str) -> str:
 
 def _github_source_repo(source: str) -> str:
     value = source.strip()
-    if not value or "github.com" not in value.lower():
+    if not value or GITHUB_HOST not in value.lower():
         return ""
     if value.startswith("git@github.com:"):
         candidate = value.removeprefix("git@github.com:")
     else:
         parse_value = value if "://" in value else f"//{value}"
         parsed = urllib.parse.urlsplit(parse_value)
-        if parsed.netloc.lower() != "github.com":
+        if parsed.netloc.lower() != GITHUB_HOST:
             return ""
         candidate = parsed.path.lstrip("/")
     candidate = candidate.removesuffix(".git").strip("/")
@@ -610,7 +612,7 @@ def _first_semver(value: str) -> str:
 
 
 def _strip_lsio_suffix(value: str) -> str:
-    return re.sub(r"(?i)[._-]ls[0-9]+(?:[._-][0-9A-Za-z]+)*$", "", value)
+    return re.sub(r"(?i)[._-]ls[0-9]+(?:[._-][0-9a-z]+)*$", "", value)
 
 
 def _composite_upstream_base(value: str) -> str:

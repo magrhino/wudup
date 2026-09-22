@@ -26,6 +26,7 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
+from wudup import web_retag_apply, web_retag_audit
 from wudup import web_retags as web_retags_module
 from wudup.compose import ComposeStack, ServiceImage
 from wudup.db import open_db
@@ -416,7 +417,7 @@ def test_retag_apply_worker_rechecks_runtime_before_mutation(
     headers = _csrf_headers(fixture.client)
     plan = _create_retag_plan(fixture.client, headers)
     before = (fixture.compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
-    original_apply = web_retags_module._apply_retag_updates
+    original_apply = web_retag_apply._apply_retag_updates
 
     def apply_after_runtime_stops(
         *args: object,
@@ -426,7 +427,7 @@ def test_retag_apply_worker_rechecks_runtime_before_mutation(
         return original_apply(*args, **kwargs)
 
     monkeypatch.setattr(
-        web_retags_module,
+        web_retag_apply,
         "_apply_retag_updates",
         apply_after_runtime_stops,
     )
@@ -461,7 +462,7 @@ def test_retag_apply_worker_rechecks_effective_project_before_mutation(
     changed_content = (
         f"name: replacement\n{compose_file.read_text(encoding='utf-8')}"
     )
-    original_apply = web_retags_module._apply_retag_updates
+    original_apply = web_retag_apply._apply_retag_updates
 
     def apply_after_project_changes(
         *args: object,
@@ -471,7 +472,7 @@ def test_retag_apply_worker_rechecks_effective_project_before_mutation(
         return original_apply(*args, **kwargs)
 
     monkeypatch.setattr(
-        web_retags_module,
+        web_retag_apply,
         "_apply_retag_updates",
         apply_after_project_changes,
     )
@@ -506,7 +507,7 @@ def test_retag_apply_start_approval_does_not_bypass_project_revalidation(
     changed_content = (
         f"name: replacement\n{compose_file.read_text(encoding='utf-8')}"
     )
-    original_apply = web_retags_module._apply_retag_updates
+    original_apply = web_retag_apply._apply_retag_updates
 
     def apply_after_project_changes(
         *args: object,
@@ -516,7 +517,7 @@ def test_retag_apply_start_approval_does_not_bypass_project_revalidation(
         return original_apply(*args, **kwargs)
 
     monkeypatch.setattr(
-        web_retags_module,
+        web_retag_apply,
         "_apply_retag_updates",
         apply_after_project_changes,
     )
@@ -673,7 +674,7 @@ def test_retag_apply_marks_job_failed_before_failure_audit_finalization(
     )
     headers = _csrf_headers(fixture.client)
     plan = _create_retag_plan(fixture.client, headers)
-    original_finish = web_retags_module._finish_retag_audit_run
+    original_finish = web_retag_audit._finish_retag_audit_run
 
     def fail_failure_finish(*args: object, **kwargs: object) -> None:
         if kwargs.get("status") == "failure":
@@ -681,7 +682,7 @@ def test_retag_apply_marks_job_failed_before_failure_audit_finalization(
         original_finish(*args, **kwargs)
 
     monkeypatch.setattr(
-        web_retags_module,
+        web_retag_audit,
         "_finish_retag_audit_run",
         fail_failure_finish,
     )
@@ -879,13 +880,13 @@ def test_retag_failure_audit_keeps_ambiguous_known_image_skip_reason_off_failure
         ),
         updates=(update,),
     )
-    run_id = web_retags_module._insert_retag_audit_run(
+    run_id = web_retag_audit._insert_retag_audit_run(
         settings,
         build,
         status="running",
     )
 
-    web_retags_module._finish_retag_audit_run(
+    web_retag_audit._finish_retag_audit_run(
         settings,
         run_id,
         build,

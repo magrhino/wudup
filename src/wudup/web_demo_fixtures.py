@@ -17,6 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from . import web_wud_cache, web_wud_observations
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATED_FIXTURE_PATH = REPO_ROOT / "webui" / "src" / "api" / "demo" / "generatedFixtures.ts"
 DEMO_PYTHON_RUNTIME_DETAIL = "Python 3.x"
@@ -625,20 +627,20 @@ def generate_static_demo_fixtures() -> dict[str, Any]:
 
 @contextlib.contextmanager
 def _preserved_wud_api_snapshot_cache():
-    with web_wud_api._cache_lock:
-        original_cache = dict(web_wud_api._snapshot_cache)
-        original_pending_cache = dict(web_wud_api._pending_observation_cache)
-        original_diagnostics_cache = dict(web_wud_api._configuration_diagnostics_cache)
+    with web_wud_cache._cache_lock:
+        original_cache = dict(web_wud_cache._snapshot_cache)
+        original_pending_cache = dict(web_wud_cache._pending_observation_cache)
+        original_diagnostics_cache = dict(web_wud_cache._configuration_diagnostics_cache)
     try:
         yield
     finally:
-        with web_wud_api._cache_lock:
-            web_wud_api._snapshot_cache.clear()
-            web_wud_api._snapshot_cache.update(original_cache)
-            web_wud_api._pending_observation_cache.clear()
-            web_wud_api._pending_observation_cache.update(original_pending_cache)
-            web_wud_api._configuration_diagnostics_cache.clear()
-            web_wud_api._configuration_diagnostics_cache.update(
+        with web_wud_cache._cache_lock:
+            web_wud_cache._snapshot_cache.clear()
+            web_wud_cache._snapshot_cache.update(original_cache)
+            web_wud_cache._pending_observation_cache.clear()
+            web_wud_cache._pending_observation_cache.update(original_pending_cache)
+            web_wud_cache._configuration_diagnostics_cache.clear()
+            web_wud_cache._configuration_diagnostics_cache.update(
                 original_diagnostics_cache
             )
 
@@ -1158,7 +1160,7 @@ def _seed_wud_api_snapshot(settings: WebSettings) -> None:
             available=True,
             metadata_available=True,
             last_checked_at=DEMO_CREATED_AT,
-            detail=web_wud_api._observation_status_detail(
+            detail=web_wud_observations._observation_status_detail(
                 update_count,
                 0,
                 0,
@@ -1170,9 +1172,9 @@ def _seed_wud_api_snapshot(settings: WebSettings) -> None:
         metadata_checked=True,
         checked_monotonic=time.monotonic(),
     )
-    with web_wud_api._cache_lock:
-        web_wud_api._snapshot_cache[
-            web_wud_api._cache_key(settings, base_url)
+    with web_wud_cache._cache_lock:
+        web_wud_cache._snapshot_cache[
+            web_wud_cache._cache_key(settings, base_url)
         ] = snapshot
 
 
@@ -1254,9 +1256,9 @@ def _seed_wud_api_configuration_diagnostics(settings: WebSettings) -> None:
         diagnostics=diagnostics,
         checked_monotonic=time.monotonic(),
     )
-    with web_wud_api._cache_lock:
-        web_wud_api._configuration_diagnostics_cache[
-            web_wud_api._cache_key(settings, base_url)
+    with web_wud_cache._cache_lock:
+        web_wud_cache._configuration_diagnostics_cache[
+            web_wud_cache._cache_key(settings, base_url)
         ] = snapshot
 
 

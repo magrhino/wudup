@@ -1,10 +1,11 @@
-"""Shared read-only WebUI database helpers."""
+"""Shared WebUI database reads, settings access, and transaction boundary."""
 
 from __future__ import annotations
 
 import logging
 import sqlite3
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
@@ -12,6 +13,7 @@ from urllib.parse import quote
 from .db import (
     SCHEMA_VERSION,
     DatabaseError,
+    utc_timestamp,
 )
 from .db import _user_version as db_user_version
 from .db import _validate_schema as validate_db_schema
@@ -152,3 +154,51 @@ def _validate_readonly_schema(conn: sqlite3.Connection) -> None:
             f"database schema version {version} requires migration to {SCHEMA_VERSION}"
         )
     validate_db_schema(conn)
+
+
+@contextmanager
+def immediate_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+
+
+def web_setting(conn: sqlite3.Connection, key: str) -> str:
+    return web_setting_or_none(conn, key) or ""
+
+
+def web_setting_or_none(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute(
+        """
+        SELECT value
+        FROM web_settings
+        WHERE key = ?
+        LIMIT 1
+        """,
+        (key,),
+    ).fetchone()
+    if row is None:
+        return None
+    return str(row["value"] if isinstance(row, sqlite3.Row) else row[0])
+
+
+def set_web_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO web_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at
+        """,
+        (key, value, utc_timestamp()),
+    )
+
+
+def delete_web_setting(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute("DELETE FROM web_settings WHERE key = ?", (key,))

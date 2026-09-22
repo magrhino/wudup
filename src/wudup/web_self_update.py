@@ -57,13 +57,10 @@ from .updater_digest_pin import digest_pin_update_from_values
 from .updater_models import ComposeTagRewriteError, DigestPinUpdate, TagUpdate
 from .web_auth import (
     WebConfigError,
-    _immediate_transaction,
     _parse_bool,
-    _redact_sensitive_text,
-    _request_actor_type,
-    _safe_exception_detail,
-    _settings,
 )
+from .web_auth import request_actor_type as _request_actor_type
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_metadata import json_object_or_empty
 from .web_models import (
@@ -83,6 +80,9 @@ from .web_models import (
     WebSelfUpdatePlan,
     WebSettings,
 )
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 LOGGER = logging.getLogger(__name__)
 

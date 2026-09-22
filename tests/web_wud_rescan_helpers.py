@@ -7,7 +7,7 @@ from typing import Any
 
 from tests.web_test_helpers import _web_env
 
-from wudup import web_wud_api
+from wudup import web_wud_transport
 from wudup.web import load_web_settings
 
 
@@ -107,8 +107,8 @@ def install_recording_wud_api(
             return post_container(path)
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_request_json", fake_request_json)
-    monkeypatch.setattr(web_wud_api, "_post_json", fake_post_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", fake_request_json)
+    monkeypatch.setattr(web_wud_transport, "_post_json", fake_post_json)
     return calls
 
 

@@ -12,8 +12,9 @@ from typing import TypeVar
 
 from fastapi.testclient import TestClient
 
+from wudup import web_discord as discord_module
 from wudup import web_release_notifications as notifications_module
-from wudup import web_wud_api
+from wudup import web_wud_transport
 from wudup.db import (
     init_db,
     insert_update_run,
@@ -222,7 +223,7 @@ def _capture_discord_posts(
             )
 
     monkeypatch.setattr(
-        notifications_module,
+        discord_module,
         "_post_discord_payload",
         fake_post_discord_payload,
     )
@@ -334,7 +335,7 @@ def _install_wud_api(
         except KeyError as exc:
             raise AssertionError(f"unexpected WUD API URL: {url}") from exc
 
-    monkeypatch.setattr(web_wud_api, "_request_json", fake_request_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", fake_request_json)
 
 
 def _wud_api_response(

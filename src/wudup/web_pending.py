@@ -6,7 +6,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from typing import Any, Protocol
 
@@ -41,6 +41,7 @@ from .db import (
 from .docker_cli import DockerCli
 from .file_ops import OwnerConfig
 from .images import image_tag, repo_key
+from .locks import DirectoryLock
 from .plan_matching import pending_target_key
 from .plans import (
     DryRunPlanCleanup,
@@ -52,12 +53,8 @@ from .plans import (
 )
 from .tag_streams import pending_tag_stream_hint
 from .updater_models import CompletedUpdateSelection
-from .web_auth import (
-    _immediate_transaction,
-    _request_actor_type,
-    _safe_exception_detail,
-    _settings,
-)
+from .web_auth import request_actor_type as _request_actor_type
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_models import (
     PendingCleanupLine,
@@ -84,6 +81,8 @@ from .web_models import (
     WebSettings,
     WudApiStatus,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 from .wud_file import (
     ParsedWudFile,
     parse_wud_file,
@@ -157,44 +156,16 @@ def api_pending_cleanup(
             ) from exc
 
         removed = _validated_cleanup_lines(payload, payload_lines, cleanup)
-        try:
-            with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
-                init_db(conn)
-                with _immediate_transaction(conn):
-                    audit_run_id = _insert_pending_cleanup_audit(
-                        conn,
-                        settings,
-                        request,
-                        removed,
-                    )
-                    try:
-                        remove_lines_before_run(
-                            settings.config.wud_out_file,
-                            parsed,
-                            [item.line_no for item in removed],
-                            lock=wud_lock,
-                            owner=_owner_config(settings),
-                        )
-                    except OSError as exc:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=_safe_exception_detail(
-                                settings,
-                                "could not remove pending lines",
-                                exc,
-                            ),
-                        ) from exc
-        except HTTPException:
-            raise
-        except (OSError, sqlite3.Error, DatabaseError) as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=_safe_exception_detail(
-                    settings,
-                    "could not record cleanup audit",
-                    exc,
-                ),
-            ) from exc
+        audit_run_id = _remove_pending_lines_with_audit(
+            settings,
+            parsed,
+            removed,
+            wud_lock,
+            record_audit=lambda conn: _insert_pending_cleanup_audit(
+                conn, settings, request, removed,
+            ),
+            audit_error="could not record cleanup audit",
+        )
 
         return PendingCleanupResponse(
             status="success",
@@ -273,44 +244,16 @@ def api_pending_removal(
             ) from exc
 
         removed = _validated_removal_lines(payload, payload_lines, plan)
-        try:
-            with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
-                init_db(conn)
-                with _immediate_transaction(conn):
-                    audit_run_id = _insert_pending_removal_audit(
-                        conn,
-                        settings,
-                        request,
-                        removed,
-                    )
-                    try:
-                        remove_lines_before_run(
-                            settings.config.wud_out_file,
-                            parsed,
-                            [item.line_no for item in removed],
-                            lock=wud_lock,
-                            owner=_owner_config(settings),
-                        )
-                    except OSError as exc:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=_safe_exception_detail(
-                                settings,
-                                "could not remove pending lines",
-                                exc,
-                            ),
-                        ) from exc
-        except HTTPException:
-            raise
-        except (OSError, sqlite3.Error, DatabaseError) as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=_safe_exception_detail(
-                    settings,
-                    "could not record removal audit",
-                    exc,
-                ),
-            ) from exc
+        audit_run_id = _remove_pending_lines_with_audit(
+            settings,
+            parsed,
+            removed,
+            wud_lock,
+            record_audit=lambda conn: _insert_pending_removal_audit(
+                conn, settings, request, removed,
+            ),
+            audit_error="could not record removal audit",
+        )
 
         return PendingCleanupResponse(
             status="success",
@@ -328,6 +271,52 @@ def api_pending_removal(
         )
     finally:
         wud_lock.close()
+
+
+def _remove_pending_lines_with_audit(
+    settings: WebSettings,
+    parsed: ParsedWudFile,
+    removed: Sequence[DryRunPlanCleanupItem | PendingRemovalPlanLine],
+    wud_lock: DirectoryLock,
+    *,
+    record_audit: Callable[[sqlite3.Connection], int],
+    audit_error: str,
+) -> int:
+    """Record the audit before rewriting under the caller's existing WUD lock."""
+    try:
+        with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
+            init_db(conn)
+            with _immediate_transaction(conn):
+                audit_run_id = record_audit(conn)
+                try:
+                    remove_lines_before_run(
+                        settings.config.wud_out_file,
+                        parsed,
+                        [item.line_no for item in removed],
+                        lock=wud_lock,
+                        owner=_owner_config(settings),
+                    )
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=_safe_exception_detail(
+                            settings,
+                            "could not remove pending lines",
+                            exc,
+                        ),
+                    ) from exc
+    except HTTPException:
+        raise
+    except (OSError, sqlite3.Error, DatabaseError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=_safe_exception_detail(
+                settings,
+                audit_error,
+                exc,
+            ),
+        ) from exc
+    return audit_run_id
 
 
 def pending_response(

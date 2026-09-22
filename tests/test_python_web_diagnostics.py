@@ -16,7 +16,7 @@ from tests.web_test_helpers import (
     _wud_api_container,
 )
 
-from wudup import web_pending, web_settings, web_wud_api
+from wudup import web_pending, web_settings, web_wud_api, web_wud_cache
 from wudup.db import open_db
 from wudup.web_models import (
     WudApiObservationCounts,
@@ -417,7 +417,7 @@ def test_diagnostics_support_bundle_uses_one_wud_snapshot_generation(
         _wud_api_container(name="second-b", image="registry.example/second-b"),
     ]
     _install_wud_api(monkeypatch, containers=containers)
-    monkeypatch.setattr(web_wud_api.time, "monotonic", lambda: now)
+    monkeypatch.setattr(web_wud_cache.time, "monotonic", lambda: now)
     captured_snapshot = None
     original_pending_response = web_pending.pending_response_with_snapshot
 
