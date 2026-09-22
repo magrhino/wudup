@@ -15,6 +15,7 @@ import { useAuthStore } from "../src/stores/auth";
 import { useConnectionStore } from "../src/stores/connection";
 import { useSettingsStore } from "../src/stores/settings";
 import { useRetagsStore } from "../src/stores/retags";
+import { useSelfUpdateStore } from "../src/stores/selfUpdate";
 import { useUpdatesStore } from "../src/stores/updates";
 import { useRunsStore } from "../src/stores/runs";
 import SetupView from "../src/views/SetupView.vue";
@@ -42,6 +43,7 @@ type AppStores = {
   connection: ReturnType<typeof useConnectionStore>;
   settings: ReturnType<typeof useSettingsStore>;
   updates: ReturnType<typeof useUpdatesStore>;
+  selfUpdate: ReturnType<typeof useSelfUpdateStore>;
   runs: ReturnType<typeof useRunsStore>;
 };
 
@@ -100,6 +102,7 @@ function createAppStores(mutationsEnabled = false): AppStores {
     connection: useConnectionStore(),
     settings: useSettingsStore(),
     updates: useUpdatesStore(),
+    selfUpdate: useSelfUpdateStore(),
     runs: useRunsStore(),
   };
 }
@@ -180,7 +183,7 @@ async function expectNextTheme(
 function primePinnedSelfUpdate(stores: AppStores): void {
   stores.connection.status = statusResponse({ version: "0.24.2" });
   stores.settings.coreUpdateTour = coreUpdateTourResponse();
-  stores.updates.selfUpdate = selfUpdateResponse({
+  stores.selfUpdate.selfUpdate = selfUpdateResponse({
     strategy: "prepare_tag_update",
     current_image: "ghcr.io/magrhino/wudup:v0.24.2",
     target_image: "ghcr.io/magrhino/wudup:v0.25.0",
@@ -386,12 +389,12 @@ describe("app shell", () => {
     const stores = createAppStores(true);
     stores.connection.status = statusResponse({ version: "0.24.2" });
     stores.settings.coreUpdateTour = coreUpdateTourResponse();
-    stores.updates.selfUpdate = selfUpdateResponse({
+    stores.selfUpdate.selfUpdate = selfUpdateResponse({
       release_notes_truncated: true,
     });
     stubAppShellLoads(stores);
     const applySelfUpdate = vi
-      .spyOn(stores.updates, "applySelfUpdate")
+      .spyOn(stores.selfUpdate, "applySelfUpdate")
       .mockResolvedValue(selfUpdateApplyResponse());
 
     const { wrapper } = await mountAppAt(stores);
@@ -433,14 +436,14 @@ describe("app shell", () => {
     primePinnedSelfUpdate(stores);
     stubAppShellLoads(stores);
     const planSelfUpdate = vi
-      .spyOn(stores.updates, "planSelfUpdate")
+      .spyOn(stores.selfUpdate, "planSelfUpdate")
       .mockImplementation(async () => {
         const plan = selfUpdatePlanResponse();
-        stores.updates.selfUpdatePlan = plan;
+        stores.selfUpdate.selfUpdatePlan = plan;
         return plan;
       });
     const applySelfUpdate = vi
-      .spyOn(stores.updates, "applySelfUpdate")
+      .spyOn(stores.selfUpdate, "applySelfUpdate")
       .mockResolvedValue(selfUpdatePrepareResponse());
 
     const { wrapper } = await mountAppAt(stores);
@@ -473,13 +476,13 @@ describe("app shell", () => {
         resolvePlan = resolve;
       },
     );
-    vi.spyOn(stores.updates, "planSelfUpdate").mockImplementation(async () => {
+    vi.spyOn(stores.selfUpdate, "planSelfUpdate").mockImplementation(async () => {
       const plan = await planPromise;
-      stores.updates.selfUpdatePlan = plan;
+      stores.selfUpdate.selfUpdatePlan = plan;
       return plan;
     });
     const applySelfUpdate = vi
-      .spyOn(stores.updates, "applySelfUpdate")
+      .spyOn(stores.selfUpdate, "applySelfUpdate")
       .mockResolvedValue(selfUpdatePrepareResponse());
 
     const { wrapper } = await mountAppAt(stores);
@@ -559,7 +562,7 @@ describe("app shell", () => {
     vi.spyOn(stores.connection, "loadStatus").mockResolvedValue();
     vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
     vi.spyOn(stores.settings, "loadCoreUpdateTour").mockResolvedValue();
-    vi.spyOn(stores.updates, "loadSelfUpdate").mockResolvedValue();
+    vi.spyOn(stores.selfUpdate, "loadSelfUpdate").mockResolvedValue();
     const loadRetagTargets = vi
       .spyOn(retags, "loadRetagTargets")
       .mockResolvedValue();
