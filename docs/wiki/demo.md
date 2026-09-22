@@ -9,6 +9,8 @@ It is not a second deployment target. It must not run FastAPI, SQLite, fake
 Docker, WUD callbacks, Docker Compose, authentication bypasses, or browser
 mutation paths. Static demo data lives in checked-in frontend fixtures and must
 stay sanitized to `demo/...` paths.
+The Containers sample shows Compose services and tracking filters, but does not
+include live WUD container observations or allow tracking-repair previews.
 
 ## Maintenance Rule
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from tests.web_test_helpers import (
@@ -491,18 +492,20 @@ def test_self_update_prepare_endpoint_keeps_backup_when_restore_fails(
     )
     compose_path = compose_dir / "docker-compose.yml"
     compose_before = compose_path.read_text(encoding="utf-8")
-    original_copy2 = self_update_module.shutil.copy2
     backup = compose_path.with_name(".docker-compose.yml.backup.test")
 
     def backup_compose(path: Path) -> Path:
-        original_copy2(path, backup)
+        shutil.copy2(path, backup)
         return backup
 
-    def fail_restore(_backup: Path, _compose_path: Path) -> None:
+    def fail_restore(
+        _backup: Path, _compose_path: Path, *, expected_source_hash: str,
+    ) -> None:
+        assert expected_source_hash
         raise OSError("restore blocked")
 
     monkeypatch.setattr(self_update_module, "_backup_compose", backup_compose)
-    monkeypatch.setattr(self_update_module.shutil, "copy2", fail_restore)
+    monkeypatch.setattr(self_update_module, "restore_compose_backup", fail_restore)
     plan = client.post(
         "/api/v1/self-update/plan",
         headers=_csrf_headers(client),

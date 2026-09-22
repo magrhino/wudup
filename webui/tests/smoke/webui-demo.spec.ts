@@ -233,6 +233,22 @@ test("static demo renders retag review fixtures", async ({ page }) => {
   ).toBeDisabled();
 });
 
+test("container sample explains exact tags without implying a WUD outage", async ({ page }) => {
+  await page.goto(demoRoute("/#/containers"));
+
+  await expect(page.getByText("This sample shows Compose services and tracking filters. WUD observations are not included.")).toBeVisible();
+  await expect(page.getByText("Static demo has no WUD container inventory.")).toHaveCount(0);
+  await expect(page.getByText("WUD status unknown")).toHaveCount(0);
+  await page.getByRole("button", { name: "Inspect media/wudup" }).click();
+  const details = page.getByLabel("Selected container details");
+  await expect(details.getByText("Review tracking")).toBeVisible();
+  await expect(details.getByText("Matches only the tag “latest”", { exact: false })).toBeVisible();
+  await expect(details.getByText("This is already the current filter; there is no label change to preview.")).toBeVisible();
+  await expect(details.getByRole("button", { name: "Preview repair" })).toBeDisabled();
+  await details.getByRole("textbox", { name: "Tag to test against proposed filter" }).fill("latest-trivy");
+  await expect(details.getByText("This tag does not match the proposed filter.")).toBeVisible();
+});
+
 test("static demo mobile layout stays within the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(demoRoute("/#/"));

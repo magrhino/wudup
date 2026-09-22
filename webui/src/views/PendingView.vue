@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { ShieldCheck } from "@lucide/vue";
 import {
   NAlert,
@@ -53,6 +53,7 @@ import { usePendingSearchState } from "./pending/usePendingSearchState";
 import { usePendingSelectionState } from "./pending/usePendingSelectionState";
 
 const updates = useUpdatesStore();
+const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const connection = useConnectionStore();
@@ -122,6 +123,10 @@ const {
   releaseNoteReason,
   releaseNoteStatus,
   riskCues,
+});
+pendingSearchQuery.value = typeof route?.query?.search === "string" ? route.query.search : "";
+watch(() => route?.query?.search, (value) => {
+  pendingSearchQuery.value = typeof value === "string" ? value : "";
 });
 
 let clearPreflightHandler: () => void = () => undefined;

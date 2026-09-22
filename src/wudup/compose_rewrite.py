@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import os
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -73,7 +76,7 @@ def _load_compose_yaml(
     *,
     width: int | None = None,
 ) -> tuple[str, YAML, CommentedMap, CommentedMap]:
-    source = compose_path.read_text(encoding="utf-8")
+    source = compose_path.read_bytes().decode("utf-8")
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
     if width is not None:
@@ -90,6 +93,24 @@ def _load_compose_yaml(
     if not isinstance(services, CommentedMap):
         raise ComposeTagRewriteError("Compose file has no services mapping.")
     return source, yaml, parsed, services
+
+
+def _compose_source_hash(compose_path: Path) -> str:
+    return hashlib.sha256(compose_path.read_bytes()).hexdigest()
+
+
+@contextmanager
+def _compose_write_lock(compose_path: Path) -> Iterator[None]:
+    """Serialize WUDup writers without a lock file that can retain a stale owner."""
+
+    # ponytail: directory locking also serializes other Compose files here;
+    # use a finer-grained lock only if that contention becomes measurable.
+    fd = os.open(compose_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _dump_compose_yaml(yaml: YAML, parsed: CommentedMap) -> str:
@@ -278,10 +299,13 @@ def apply_compose_tag_updates(
     *,
     tag_stream_updates: Sequence[TagStreamUpdate] = (),
     stack_name: str = "",
+    written_hashes: list[str] | None = None,
+    expected_source_hash: str | None = None,
 ) -> tuple[AppliedTagUpdate, ...]:
     if not updates:
         return ()
 
+    source_hash = expected_source_hash or _compose_source_hash(compose_path)
     if tag_stream_updates:
         rendered, applied = render_compose_tag_stream_updates(
             compose_path,
@@ -289,7 +313,10 @@ def apply_compose_tag_updates(
             tag_stream_updates=tag_stream_updates,
             stack_name=stack_name,
         )
-        _atomic_replace_compose(compose_path, rendered, prefix="tag-stream")
+        _atomic_replace_compose(
+            compose_path, rendered, prefix="tag-stream", expected_source_hash=source_hash,
+            written_hashes=written_hashes,
+        )
         return applied
 
     source, _yaml, _parsed, services = _load_compose_yaml(compose_path)
@@ -345,7 +372,10 @@ def apply_compose_tag_updates(
     if any(item.replacements < 1 for item in applied):
         return ()
 
-    _atomic_replace_compose(compose_path, rendered, prefix="tag")
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="tag", expected_source_hash=source_hash,
+        written_hashes=written_hashes,
+    )
     return applied
 
 
@@ -1119,13 +1149,16 @@ def apply_compose_tag_exclusions(
 ) -> tuple[AppliedTagExclusion, ...]:
     """Write WUD exact-tag exclusions into service labels."""
 
+    source_hash = _compose_source_hash(compose_path)
     rendered, applied = render_compose_tag_exclusions(
         compose_path,
         updates,
         existing_exact_tags=existing_exact_tags,
     )
     if applied:
-        _atomic_replace_compose(compose_path, rendered, prefix="exclude")
+        _atomic_replace_compose(
+            compose_path, rendered, prefix="exclude", expected_source_hash=source_hash,
+        )
     return applied
 
 
@@ -1136,9 +1169,12 @@ def apply_compose_digest_pins(
     label_rewrite_approvals: Sequence[DigestPinLabelRewriteApproval] = (),
     tag_stream_updates: Sequence[TagStreamUpdate] = (),
     stack_name: str = "",
+    written_hashes: list[str] | None = None,
+    expected_source_hash: str | None = None,
 ) -> tuple[AppliedDigestPinUpdate, ...]:
     """Write final digest-pinned images plus WUD watch metadata."""
 
+    source_hash = expected_source_hash or _compose_source_hash(compose_path)
     rendered, applied = render_compose_digest_pins(
         compose_path,
         updates,
@@ -1148,7 +1184,10 @@ def apply_compose_digest_pins(
     )
     if updates and not rendered:
         raise ComposeTagRewriteError("Compose digest-pin rewrite produced no output.")
-    _atomic_replace_compose(compose_path, rendered, prefix="digest-pin")
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="digest-pin", expected_source_hash=source_hash,
+        written_hashes=written_hashes,
+    )
     return applied
 
 
@@ -1157,9 +1196,12 @@ def apply_compose_retag_updates(
     updates: Sequence[DigestPinUpdate],
     *,
     stack_name: str = "",
+    written_hashes: list[str] | None = None,
+    expected_source_hash: str | None = None,
 ) -> tuple[AppliedDigestPinUpdate, ...]:
     """Write retagged images plus exact WUD tag tracking metadata."""
 
+    source_hash = expected_source_hash or _compose_source_hash(compose_path)
     rendered, applied = render_compose_retag_updates(
         compose_path,
         updates,
@@ -1167,7 +1209,10 @@ def apply_compose_retag_updates(
     )
     if updates and not rendered:
         raise ComposeTagRewriteError("Compose retag rewrite produced no output.")
-    _atomic_replace_compose(compose_path, rendered, prefix="retag")
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="retag", expected_source_hash=source_hash,
+        written_hashes=written_hashes,
+    )
     return applied
 
 
@@ -1176,9 +1221,12 @@ def apply_compose_digest_unpins(
     updates: Sequence[DigestUnpinUpdate],
     *,
     stack_name: str = "",
+    written_hashes: list[str] | None = None,
+    expected_source_hash: str | None = None,
 ) -> tuple[AppliedDigestUnpinUpdate, ...]:
     """Rewrite digest-pinned images back to tag images plus WUD watch metadata."""
 
+    source_hash = expected_source_hash or _compose_source_hash(compose_path)
     rendered, applied = render_compose_digest_unpins(
         compose_path,
         updates,
@@ -1186,7 +1234,10 @@ def apply_compose_digest_unpins(
     )
     if updates and not rendered:
         raise ComposeTagRewriteError("Compose digest-unpin rewrite produced no output.")
-    _atomic_replace_compose(compose_path, rendered, prefix="digest-unpin")
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="digest-unpin", expected_source_hash=source_hash,
+        written_hashes=written_hashes,
+    )
     return applied
 
 
@@ -1544,7 +1595,11 @@ def service_resolved_tag_marker(
     return _service_resolved_tag_marker(services, service, service_config)
 
 
-def _atomic_replace_compose(compose_path: Path, rendered: str, *, prefix: str) -> None:
+def _atomic_replace_compose(
+    compose_path: Path, rendered: str, *, prefix: str,
+    expected_source_hash: str | None = None,
+    written_hashes: list[str] | None = None,
+) -> None:
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{compose_path.name}.{prefix}.",
         dir=str(compose_path.parent),
@@ -1553,10 +1608,17 @@ def _atomic_replace_compose(compose_path: Path, rendered: str, *, prefix: str) -
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as tmp:
             tmp.write(rendered)
-        st = compose_path.stat()
-        os.chown(tmp_path, st.st_uid, st.st_gid)
-        os.chmod(tmp_path, st.st_mode & 0o7777)
-        os.replace(tmp_path, compose_path)
+        with _compose_write_lock(compose_path):
+            st = compose_path.stat()
+            os.chown(tmp_path, st.st_uid, st.st_gid)
+            os.chmod(tmp_path, st.st_mode & 0o7777)
+            if expected_source_hash is not None and _compose_source_hash(compose_path) != expected_source_hash:
+                if prefix.startswith("tracking-"):
+                    raise ComposeTagRewriteError("Compose file changed before tracking repair; preview it again.")
+                raise ComposeTagRewriteError("Compose file changed before it could be rewritten; retry from a fresh state.")
+            os.replace(tmp_path, compose_path)
+            if written_hashes is not None:
+                written_hashes.append(hashlib.sha256(rendered.encode("utf-8")).hexdigest())
         tmp_path = None
     finally:
         if tmp_path is not None:
@@ -1564,6 +1626,18 @@ def _atomic_replace_compose(compose_path: Path, rendered: str, *, prefix: str) -
                 tmp_path.unlink()
             except FileNotFoundError:
                 pass
+
+
+def restore_compose_backup(
+    backup: Path, compose_path: Path, *, expected_source_hash: str,
+) -> None:
+    """Restore only the Compose version written by this operation."""
+
+    with backup.open("r", encoding="utf-8", newline="") as source:
+        _atomic_replace_compose(
+            compose_path, source.read(), prefix="rollback",
+            expected_source_hash=expected_source_hash,
+        )
 
 
 def _materialize_inherited_service_labels(
@@ -2287,6 +2361,70 @@ def _set_service_label_value(
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
 
 
+def render_compose_tracking_label(
+    compose_path: Path,
+    service: str,
+    expected_image: str,
+    expected_label: str,
+    proposed_regex: str,
+    *,
+    expected_source_hash: str | None = None,
+) -> str:
+    """Preview a single service's WUD tracking-label change without touching its image."""
+
+    source, yaml, parsed, services = _load_compose_yaml(compose_path, width=4096)
+    if expected_source_hash is not None and hashlib.sha256(source.encode()).hexdigest() != expected_source_hash:
+        raise ComposeTagRewriteError("Compose file changed before tracking repair; preview it again.")
+    service_config = _rewrite_service_config(
+        services, service, direct_image_required=True
+    )
+    if service_config.get("image") != expected_image:
+        raise ComposeTagRewriteError(
+            f"Service {service} image changed before tracking repair."
+        )
+    _prepare_service_labels(services, service, service_config)
+    labels = service_config.get("labels")
+    if isinstance(labels, CommentedSeq) and sum(
+        isinstance(entry, str) and entry.partition("=")[0] == WUD_TAG_INCLUDE_LABEL
+        for entry in labels
+    ) > 1:
+        raise ComposeTagRewriteError(
+            f"Service {service} has duplicate WUD tag filters; remove the duplicates before repair."
+        )
+    current = compose_unescape_dollars(
+        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL)
+    )
+    if current != expected_label:
+        raise ComposeTagRewriteError(
+            f"Service {service} tracking label changed before repair."
+        )
+    _set_service_label_value(
+        service_config,
+        WUD_TAG_INCLUDE_LABEL,
+        compose_escape_dollars(proposed_regex),
+    )
+    return _dump_compose_yaml(yaml, parsed)
+
+
+def apply_compose_tracking_label(
+    compose_path: Path,
+    service: str,
+    expected_image: str,
+    expected_label: str,
+    proposed_regex: str,
+    *,
+    expected_source_hash: str | None = None,
+) -> None:
+    rendered = render_compose_tracking_label(
+        compose_path, service, expected_image, expected_label, proposed_regex,
+        expected_source_hash=expected_source_hash,
+    )
+    _atomic_replace_compose(
+        compose_path, rendered, prefix="tracking-repair",
+        expected_source_hash=expected_source_hash,
+    )
+
+
 def _backup_compose(compose_path: Path) -> Path:
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{compose_path.name}.backup.",
@@ -2295,7 +2433,8 @@ def _backup_compose(compose_path: Path) -> Path:
     os.close(fd)
     backup = Path(tmp_name)
     try:
-        shutil.copy2(compose_path, backup)
+        with _compose_write_lock(compose_path):
+            shutil.copy2(compose_path, backup)
     except Exception:
         try:
             backup.unlink()

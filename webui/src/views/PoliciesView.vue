@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { Edit3, Save, Trash2 } from "@lucide/vue";
 import {
   NAlert,
@@ -31,6 +32,7 @@ import { useUpdatesStore } from "../stores/updates";
 import { runInBackground } from "../utils/promises";
 
 const settings = useSettingsStore();
+const route = useRoute();
 const connection = useConnectionStore();
 const updates = useUpdatesStore();
 const auth = useAuthStore();
@@ -41,7 +43,7 @@ const showDeleteConfirm = ref(false);
 const deleteTarget = ref<ServicePolicyRecord | null>(null);
 
 const policyForm = reactive({
-  serviceKey: "",
+  serviceKey: typeof route?.query?.service === "string" ? route.query.service : "",
   updateMode: "" as ServicePolicyUpdateMode,
   autoUpdate: false,
   autoUpdateTime: "",
@@ -127,6 +129,12 @@ function resetPolicyForm(): void {
   policyForm.autoUpdateDays = [];
   policyForm.snoozeDefaultSeconds = null;
 }
+
+watch(() => route?.query?.service, (value) => {
+  showSaveConfirm.value = false;
+  resetPolicyForm();
+  policyForm.serviceKey = typeof value === "string" ? value : "";
+});
 
 function setPolicyServiceKey(value: string | number | null): void {
   policyForm.serviceKey = value === null ? "" : String(value);

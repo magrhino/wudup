@@ -42,6 +42,53 @@ export interface WudContainerMetadata {
   platform_variant: string;
 }
 
+export interface TrackedContainerItem {
+  target_id: string;
+  service_key: string;
+  stack: string;
+  service: string;
+  image: string;
+  current_tag: string;
+  runtime_state: "running" | "not-running" | "unknown";
+  tracking_regex: string;
+  tracking_health: string;
+  tracking_detail: string;
+  suggested_regex: string;
+  wud: WudContainerMetadata | null;
+  wud_match_state: "watching" | "untracked" | "unknown" | "ambiguous";
+  wud_update_available: boolean | null;
+  last_image_recorded_at: string;
+  last_action_at: string;
+  last_action_status: string;
+  last_action_run_id: number | null;
+  retag_available: boolean;
+}
+
+export interface TrackedContainersResponse {
+  status: "ready" | "unavailable";
+  count: number;
+  items: TrackedContainerItem[];
+  wud_status: WudApiStatus | null;
+  warnings: string[];
+}
+
+export interface TrackingRepairPlan {
+  plan_id: string;
+  source_hash: string;
+  rendered_hash: string;
+  target_id: string;
+  service_key: string;
+  stack: string;
+  service: string;
+  image: string;
+  current_regex: string;
+  proposed_regex: string;
+  compose_diff: string;
+  will_recreate: boolean;
+  can_apply: boolean;
+  issues: string[];
+}
+
 export interface WudApiDiagnosticEndpointStatus {
   state: WudApiState;
   available: boolean;

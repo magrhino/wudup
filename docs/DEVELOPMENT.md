@@ -121,8 +121,13 @@ is a contributor development harness, not a public demo contract. It exercises
 the real backend and updater code paths against fake Docker state.
 The wrapper puts the checked-in fake Docker command first on `PATH` and points
 it at `local-dev/fake-docker`, so interactive actions exercise the real WebUI
-backend and updater code paths without using the host Docker daemon. You can
-open `http://127.0.0.1:5173/#/pending`, select stack updates, preview the dry-run
+backend and updater code paths without using the host Docker daemon. The
+wrapper also serves a read-only sample WUD API on `127.0.0.1:7418` so the
+Containers page can match the seeded Compose services to WUD observations.
+Set `WUD_WEB_DEV_WUD_PORT` to use a different local port, or set
+`WUD_API_BASE_URL` to use an external WUD API instead.
+
+You can open `http://127.0.0.1:5173/#/pending`, select stack updates, preview the dry-run
 plan, apply it, and then inspect the new run detail and log records. The seeded
 `jarvis/task-runner` update exercises the update-stream choice between
 `2.34.4-distroless` and `2.34.4`. The policies, snoozes, and tag exclusions
@@ -141,6 +146,7 @@ Useful WebUI development variables:
 | `WUD_TIMEZONE` | IANA timezone name used for WebUI auto-update policy schedules. Defaults to `UTC`. |
 | `WUD_WEB_MUTATIONS_ENABLED` | Set to `true` only when testing browser-initiated plan/apply flows; default is read-only. |
 | `WUD_WEB_DEV_BACKEND_PORT` | Backend port used by `webui/scripts/dev-server.mjs` and the Vite proxy; default `7417`. |
+| `WUD_WEB_DEV_WUD_PORT` | Loopback port for the local read-only sample WUD API; default `7418`. |
 | `WUD_WEB_DEV_FRONTEND_PORT` | Vite frontend port used by the dev-server wrapper; default `5173`. |
 | `VITE_WUD_API_PREFIX` | Optional live API prefix or URL for custom reverse proxies; defaults to `<app base>/api/v1`. A preloaded `window.WUD_API_PREFIX` value overrides it at runtime. |
 | `VITE_WUD_BACKEND_URL` | Backend URL exported by the dev-server wrapper for frontend experiments; the Vite proxy forwards the same-origin API prefix. |
@@ -152,7 +158,7 @@ Useful WebUI development variables:
 | `WUD_WEB_ALLOWED_HOSTS` | Optional extra HTTP `Host` names accepted in addition to loopback, the configured public origin, and the bind host. |
 | `WUD_WEB_TRUSTED_PROXIES` | Proxy IP/CIDR/hostname entries whose forwarded headers are trusted; hostnames resolve once at WebUI startup. |
 | `WUD_WEB_SECURE_COOKIES` | Cookie Secure mode: `auto`, `true`, or `false`; keep `auto` outside local HTTP tests. |
-| `WUD_API_BASE_URL` | Internal WUD API URL for best-effort WebUI metadata discovery; defaults to `http://wud:3000`. Runtime discovery retries automatically on later WebUI requests after transient WUD API outages. |
+| `WUD_API_BASE_URL` | Internal WUD API URL for best-effort WebUI metadata discovery; `make webui-demo` defaults to its loopback sample API, while manual runs default to `http://wud:3000`. Runtime discovery retries after transient outages. |
 | `WUD_API_STARTUP_WAIT_SECONDS` | Seconds to retry the initial WUD API health probe during WebUI startup; defaults to `0`. This startup wait is separate from automatic runtime retries. |
 | `WUD_SECURITY_SCANNING_ENABLED` | Enables the opt-in Trivy candidate advisory prototype for local testing, including installed-digest comparison when WUD metadata has `local_digest`. Refresh jobs require a Trivy executable in the backend process. |
 

@@ -60,6 +60,12 @@ class ComposeExactTagRegexTests(unittest.TestCase):
 
 
 class ComposeBackupTests(ComposeRewriteTestCase):
+    def test_backup_lock_does_not_leave_stale_owner_file(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        _backup_compose(compose_file)
+
+        self.assertFalse(compose_file.with_name(f".{compose_file.name}.wudup.lock").exists())
+
     def test_backup_removes_created_temp_file_when_copy_fails(self) -> None:
         compose_file = self.write_compose("services: {}\n")
 

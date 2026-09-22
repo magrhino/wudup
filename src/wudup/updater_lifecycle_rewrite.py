@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 
 from . import compose_rewrite, updater_logging
@@ -43,6 +42,8 @@ class _LifecycleRewriteMixin:
                 state.compose_tag_updates,
                 tag_stream_updates=state.tag_stream_updates,
                 stack_name=stack.name,
+                written_hashes=state.compose_written_hashes,
+                expected_source_hash=self._expected_compose_hash(state),
             )
         except ComposeTagRewriteError as exc:
             self.log.error(
@@ -129,8 +130,10 @@ class _LifecycleRewriteMixin:
                 label_rewrite_approvals=(
                     self.options.digest_pin_label_rewrite_approvals
                 ),
+                written_hashes=state.compose_written_hashes,
                 tag_stream_updates=state.tag_stream_updates,
                 stack_name=stack.name,
+                expected_source_hash=self._expected_compose_hash(state),
             )
         except ComposeTagRewriteError as exc:
             self.log.error(
@@ -238,6 +241,8 @@ class _LifecycleRewriteMixin:
                 compose_path,
                 state.digest_unpin_updates,
                 stack_name=stack.name,
+                written_hashes=state.compose_written_hashes,
+                expected_source_hash=self._expected_compose_hash(state),
             )
         except ComposeTagRewriteError as exc:
             self.log.error(
@@ -354,6 +359,13 @@ class _LifecycleRewriteMixin:
             return StackStatus("failure", "compose-backup-failed")
         return None
 
+    @staticmethod
+    def _expected_compose_hash(state: _StackUpdateState) -> str:
+        if state.compose_written_hashes:
+            return state.compose_written_hashes[-1]
+        assert state.compose_backup is not None
+        return compose_rewrite._compose_source_hash(state.compose_backup)
+
     def _handle_compose_rewrite_failure(
         self,
         state: _StackUpdateState,
@@ -415,11 +427,16 @@ class _LifecycleRewriteMixin:
         )
         if failure_health is None:
             failure_health = self._capture_health_details(stack, report_services)
-        self.log.warning(f"[{stack.name}] Restoring compose file after failed tag update.")
+        if state.compose_written_hashes:
+            self.log.warning(f"[{stack.name}] Restoring compose file after failed tag update.")
         rollback_result = "rollback-failed-manual-review-required"
         rollback_error: CommandError | None = None
         try:
-            shutil.copy2(compose_backup, stack.directory / stack.file)
+            if state.compose_written_hashes:
+                compose_rewrite.restore_compose_backup(
+                    compose_backup, stack.directory / stack.file,
+                    expected_source_hash=state.compose_written_hashes[-1],
+                )
             self.runner.stack_runtime_states_after.pop(stack.index, None)
             active_services = tuple(state.running_services)
             rollback_ok, rollback_error = self._restore_tag_update_services(
@@ -451,7 +468,8 @@ class _LifecycleRewriteMixin:
                     )
             else:
                 self.log.error(f"[{stack.name}] Rollback failed; manual review required.")
-        except OSError:
+        except (OSError, ComposeTagRewriteError) as exc:
+            self.log.error(f"[{stack.name}] Could not safely restore Compose: {exc}")
             self.log.error(f"[{stack.name}] Rollback failed; manual review required.")
 
         report_error = rollback_error or command_error

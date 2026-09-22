@@ -9,7 +9,7 @@ import sqlite3
 import stat
 from collections import deque
 from collections.abc import Generator, Iterable
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 
 from .db_schema import (
@@ -364,11 +364,12 @@ def insert_update_event(
     new_digest: str = "",
     metadata_json: str = "{}",
     digest_provenance: DigestTagProvenance | None = None,
+    commit: bool = True,
 ) -> int:
-    """Insert one per-service update event and return its row id."""
+    """Insert one per-service event, optionally joining the caller's transaction."""
 
     provenance = digest_provenance_or_empty(digest_provenance)
-    with conn:
+    with (conn if commit else nullcontext()):
         cursor = conn.execute(
             """
             INSERT INTO update_events (

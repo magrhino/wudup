@@ -5,6 +5,9 @@ export type {
   WudApiState,
   WudApiStatus,
   WudContainerMetadata,
+  TrackedContainerItem,
+  TrackedContainersResponse,
+  TrackingRepairPlan,
   WudApiDiagnosticEndpointStatus,
   WudApiAppDiagnostics,
   WudApiLogDiagnostics,
@@ -214,6 +217,8 @@ import type {
   PendingMetadataRefreshResponse,
   UpdateTargetsResponse,
   RetagTargetsResponse,
+  TrackedContainersResponse,
+  TrackingRepairPlan,
   RetagChoiceRequest,
   RetagPlanOptions,
   RetagPlanResponse,
@@ -532,6 +537,24 @@ const pendingApi = {
 
 const updatesApi = {
   updateTargets: () => apiRequest<UpdateTargetsResponse>("/update-targets"),
+  trackedContainers: () => apiRequest<TrackedContainersResponse>("/tracked-containers"),
+  createTrackingRepairPlan: (targetId: string, regex: string, csrfToken: string) =>
+    apiRequest<TrackingRepairPlan>("/tracking-repairs", {
+      method: "POST",
+      headers: { "x-wud-csrf-token": csrfToken },
+      body: JSON.stringify({ target_id: targetId, regex }),
+    }),
+  applyTrackingRepair: (plan: TrackingRepairPlan, csrfToken: string) =>
+    apiRequest<ApplyJobResponse>("/tracking-repairs/apply", {
+      method: "POST",
+      headers: { "x-wud-csrf-token": csrfToken },
+      body: JSON.stringify({
+        target_id: plan.target_id,
+        regex: plan.proposed_regex,
+        plan_id: plan.plan_id,
+        confirmation: "apply-tracking-repair",
+      }),
+    }),
   retagTargets: (options: RetagPlanOptions = {}) =>
     apiRequest<RetagTargetsResponse>(
       options.github_latest_fallback

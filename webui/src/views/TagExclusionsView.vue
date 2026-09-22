@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { Edit3, Save, ShieldOff } from "@lucide/vue";
 import {
   NAlert,
@@ -33,6 +34,7 @@ type TagExclusionTarget = Pick<
 >;
 
 const settings = useSettingsStore();
+const route = useRoute();
 const updates = useUpdatesStore();
 const auth = useAuthStore();
 const {
@@ -50,9 +52,9 @@ const statusTarget = ref<TagExclusionRuleRecord | null>(null);
 const nextStatus = ref<TagExclusionStatus>("disabled");
 
 const exclusionForm = reactive({
-  scope: "image_repo" as TagExclusionScope,
+  scope: (typeof route?.query?.service === "string" ? "service" : "image_repo") as TagExclusionScope,
   imageRepo: "",
-  serviceKey: "",
+  serviceKey: typeof route?.query?.service === "string" ? route.query.service : "",
   tag: "",
   status: "active" as TagExclusionStatus,
 });
@@ -102,6 +104,15 @@ function resetExclusionForm(): void {
   exclusionForm.tag = "";
   exclusionForm.status = "active";
 }
+
+watch(() => route?.query?.service, (value) => {
+  showSaveConfirm.value = false;
+  resetExclusionForm();
+  if (typeof value === "string") {
+    exclusionForm.scope = "service";
+    applyServiceSelection(value);
+  }
+});
 
 function scopeLabel(rule: TagExclusionRuleRecord): string {
   return rule.scope === "service" ? "service" : "image repo";
@@ -189,7 +200,12 @@ async function confirmStatusChange(): Promise<void> {
 }
 
 onMounted(() => {
-  runInBackground(updates.loadUpdateTargets());
+  runInBackground(updates.loadUpdateTargets().then(() => {
+    const service = route?.query?.service;
+    if (typeof service === "string" && exclusionForm.serviceKey === service) {
+      applyServiceSelection(service);
+    }
+  }));
   runInBackground(settings.loadTagExclusions(statusFilter.value));
 });
 

@@ -770,6 +770,63 @@ class RetagTargetsResponse(BaseModel):
     items: list[RetagTargetItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
+
+class TrackedContainerItem(BaseModel):
+    target_id: str
+    service_key: str
+    stack: str
+    service: str
+    image: str
+    current_tag: str
+    runtime_state: RetagRuntimeState
+    tracking_regex: str = ""
+    tracking_health: str
+    tracking_detail: str
+    suggested_regex: str = ""
+    wud: WudContainerMetadata | None = None
+    wud_match_state: Literal["watching", "untracked", "unknown", "ambiguous"] = "unknown"
+    wud_update_available: bool | None = None
+    last_image_recorded_at: str = ""
+    last_action_at: str = ""
+    last_action_status: str = ""
+    last_action_run_id: int | None = None
+    retag_available: bool = False
+
+
+class TrackedContainersResponse(BaseModel):
+    status: RetagTargetsStatus
+    count: int
+    items: list[TrackedContainerItem] = Field(default_factory=list)
+    wud_status: WudApiStatus | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TrackingRepairRequest(BaseModel):
+    target_id: str = Field(min_length=1, max_length=128)
+    regex: str = Field(min_length=3, max_length=256)
+
+
+class TrackingRepairPlan(BaseModel):
+    plan_id: str
+    source_hash: str
+    rendered_hash: str
+    target_id: str
+    service_key: str
+    stack: str
+    service: str
+    image: str
+    current_regex: str
+    proposed_regex: str
+    compose_diff: str
+    will_recreate: bool
+    can_apply: bool
+    issues: list[str] = Field(default_factory=list)
+
+
+class TrackingRepairApplyRequest(TrackingRepairRequest):
+    plan_id: str = Field(min_length=1, max_length=128)
+    confirmation: Literal["apply-tracking-repair"]
+
 class RetagChoiceRequest(BaseModel):
     service_key: str = Field(min_length=1, max_length=512)
     target_id: str | None = Field(default=None, min_length=1, max_length=128)

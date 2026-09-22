@@ -45,6 +45,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, title: "Retags" },
   },
   {
+    path: "/containers",
+    name: "containers",
+    component: () => import("../views/TrackedContainersView.vue"),
+    meta: { requiresAuth: true, title: "Tracked containers" },
+  },
+  {
     path: "/runs",
     name: "runs",
     component: () => import("../views/RunsView.vue"),

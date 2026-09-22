@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest import mock
 
@@ -614,10 +615,11 @@ def test_stream_regex_preserves_leading_v() -> None:
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [
-        ("v1.2.3", r"^v\d+\.\d+\.\d+$"),
+        ("v1.2.3", r"^v\d+(?:\.\d+)+$"),
+        ("v1.36.2", r"^v\d+(?:\.\d+)+$"),
         ("1.2.3.4-ls5", r"^\d+\.\d+\.\d+\.\d+-ls\d+$"),
         ("10.11.12ubu2404-ls44", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
-        ("2026.8.3", r"^\d+\.\d+\.\d+$"),
+        ("2026.8.3", r"^\d+(?:\.\d+)+$"),
         ("1", r"^\d+$"),
         ("2.7-alpine", r"^\d+\.\d+-alpine$"),
         ("2026-07-24-r1", r"^\d+-\d+-\d+-r\d+$"),
@@ -627,3 +629,7 @@ def test_stream_regex_preserves_leading_v() -> None:
 )
 def test_retag_regex_generalizes_numeric_parts(tag: str, expected: str) -> None:
     assert retag_tag_include_regex(tag) == expected
+
+
+def test_retag_regex_covers_bindery_shorter_dotted_release() -> None:
+    assert re.fullmatch(retag_tag_include_regex("v1.36.2"), "v1.37") is not None

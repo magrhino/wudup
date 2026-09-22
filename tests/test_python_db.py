@@ -163,6 +163,35 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["status"], "started")
 
+    def test_v13_upgrade_adds_service_history_index_and_preserves_events(self) -> None:
+        with db_connection(":memory:") as conn:
+            init_db(conn)
+            run_id = insert_update_run(conn, status="success")
+            insert_update_event(
+                conn, run_id=run_id, service_name="bindery",
+                stack_name="bindery", image="repo/bindery:v1", status="success",
+            )
+            conn.execute("DROP INDEX idx_update_events_service_latest")
+            conn.execute("DELETE FROM schema_migrations WHERE version = 14")
+            conn.execute("PRAGMA user_version = 13")
+
+            init_db(conn)
+            init_db(conn)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(update_events)")}
+            event = conn.execute(
+                "SELECT stack_name, service_name FROM update_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            migration_count = conn.execute(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 14"
+            ).fetchone()[0]
+
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertIn("idx_update_events_service_latest", indexes)
+        self.assertEqual(tuple(event), ("bindery", "bindery"))
+        self.assertEqual(migration_count, 1)
+
     def test_init_db_sets_user_version_to_current_schema(self) -> None:
         with db_connection(":memory:") as conn:
             init_db(conn)

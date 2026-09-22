@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 import time
@@ -31,8 +30,10 @@ from .command import CommandError, CommandRunner
 from .compose import ComposeCli
 from .compose_rewrite import (
     _backup_compose,
+    _compose_source_hash,
     apply_compose_digest_pins,
     apply_compose_tag_updates,
+    restore_compose_backup,
 )
 from .config import UpdaterConfig
 from .db import DatabaseError, init_db, open_db, utc_timestamp
@@ -726,11 +727,16 @@ def _prepare_self_update_tag_update(
     )
 
     backup = _backup_compose(compose_path)
+    backup_hash = _compose_source_hash(backup)
     restore_error = ""
     restore_succeeded = True
     applied_digest_pins = ()
+    written_hashes: list[str] = []
     try:
-        applied = apply_compose_tag_updates(compose_path, updates)
+        applied = apply_compose_tag_updates(
+            compose_path, updates, written_hashes=written_hashes,
+            expected_source_hash=backup_hash,
+        )
         if not applied:
             raise RuntimeError("no Compose image lines were rewritten")
         compose = ComposeCli(runner=CommandRunner(env=settings.command_env))
@@ -746,16 +752,21 @@ def _prepare_self_update_tag_update(
             applied_digest_pins = apply_compose_digest_pins(
                 compose_path,
                 digest_pin_updates,
+                written_hashes=written_hashes,
+                expected_source_hash=written_hashes[-1],
             )
             if not applied_digest_pins:
                 raise RuntimeError("no Compose image lines were digest-pinned")
     except Exception as exc:
-        restore_succeeded = False
-        try:
-            shutil.copy2(backup, compose_path)
-            restore_succeeded = True
-        except Exception as restore_exc:  # noqa: BLE001 - preserve the original apply error.
-            restore_error = f"; compose rollback failed: {restore_exc}"
+        if written_hashes:
+            restore_succeeded = False
+            try:
+                restore_compose_backup(
+                    backup, compose_path, expected_source_hash=written_hashes[-1],
+                )
+                restore_succeeded = True
+            except Exception as restore_exc:  # noqa: BLE001 - preserve the original apply error.
+                restore_error = f"; compose rollback failed: {restore_exc}"
         raise RuntimeError(f"{exc}{restore_error}") from exc
     finally:
         if restore_succeeded:

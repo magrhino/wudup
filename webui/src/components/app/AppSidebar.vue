@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 import {
   BellOff,
   Clock3,
+  Container,
   LayoutDashboard,
   ListChecks,
   Repeat2,
@@ -74,6 +75,12 @@ const navItems: NavItem[] = [
     label: "Pending",
     icon: ListChecks,
     activeRouteNames: ["pending"],
+  },
+  {
+    to: "/containers",
+    label: "Containers",
+    icon: Container,
+    activeRouteNames: ["containers"],
   },
   {
     to: "/retags",

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from .digest_provenance import DIGEST_PROVENANCE_SQL_COLUMNS
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 ColumnSchema = tuple[str, str, int, str | None, int]
 SchemaDefinition = dict[str, tuple[ColumnSchema, ...]]
@@ -338,6 +338,7 @@ _EXPECTED_SCHEMAS_BY_VERSION: dict[int, SchemaDefinition] = {
     10: EXPECTED_SCHEMA_V10,
     11: EXPECTED_SCHEMA_V11,
     12: EXPECTED_SCHEMA_V12,
+    13: EXPECTED_SCHEMA,
     SCHEMA_VERSION: EXPECTED_SCHEMA,
 }
 _SCHEMA_IDENTIFIERS = frozenset(EXPECTED_SCHEMA) | frozenset(
@@ -587,6 +588,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_update_events_run_id
                 ON update_events (run_id);
+            CREATE INDEX IF NOT EXISTS idx_update_events_service_latest
+                ON update_events (stack_name, service_name, id DESC);
             CREATE INDEX IF NOT EXISTS idx_snoozes_service_key_until
                 ON snoozes (service_key, snoozed_until);
             CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_service_key
@@ -701,7 +704,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         _validate_schema(conn)
         _backfill_schema_migrations(conn, SCHEMA_VERSION)
         conn.execute(  # nosemgrep: PRAGMA needs a literal internal version.
-            "PRAGMA user_version = 13"
+            "PRAGMA user_version = 14"
         )
 
 
@@ -834,6 +837,7 @@ MIGRATION_NAMES = {
     10: "add security scan findings",
     11: "add release notification history",
     12: "add release note body cache",
+    14: "index recent service events",
 }
 
 
@@ -1274,6 +1278,16 @@ def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
     _record_schema_migration(conn, 13)
 
 
+def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
+    with conn:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_update_events_service_latest "
+            "ON update_events (stack_name, service_name, id DESC)"
+        )
+        conn.execute("PRAGMA user_version = 14")
+    _record_schema_migration(conn, 14)
+
+
 _MIGRATIONS_BY_TARGET_VERSION: dict[int, Migration] = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -1287,4 +1301,5 @@ _MIGRATIONS_BY_TARGET_VERSION: dict[int, Migration] = {
     11: _migrate_v10_to_v11,
     12: _migrate_v11_to_v12,
     13: _migrate_v12_to_v13,
+    14: _migrate_v13_to_v14,
 }

@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PoliciesView from "../src/views/PoliciesView.vue";
@@ -379,6 +380,83 @@ describe("settings mutation views", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("tag targets unavailable");
+  });
+
+  it("resolves an exclusion deep link after targets load and when its service changes", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    let finishLoad: (() => void) | undefined;
+    vi.spyOn(updates, "loadUpdateTargets").mockImplementation(async () => {
+      await new Promise<void>((resolve) => { finishLoad = resolve; });
+      updates.updateTargets = updateTargetsResponse([
+        updateTarget(),
+        updateTarget({ service_key: "media/other", image_repo: "repo/other" }),
+      ]);
+    });
+    vi.spyOn(settings, "loadTagExclusions").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/tag-exclusions", component: TagExclusionsView }],
+    });
+    await router.push("/tag-exclusions?service=media/app");
+    await router.isReady();
+    const wrapper = mountWithApp(TagExclusionsView, { pinia, router });
+
+    expect((wrapper.find('select[placeholder="repo/app"]').element as HTMLSelectElement).value).toBe("");
+    finishLoad?.();
+    await flushPromises();
+    expect((wrapper.find('select[placeholder="repo/app"]').element as HTMLSelectElement).value).toBe("repo/app");
+
+    await router.push("/tag-exclusions?service=media/other");
+    await flushPromises();
+    expect((wrapper.find('select[placeholder="repo/app"]').element as HTMLSelectElement).value).toBe("repo/other");
+  });
+
+  it("follows the policy service deep link on mount and route changes", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.servicePolicies = [];
+    updates.updateTargets = updateTargetsResponse([
+      updateTarget(), updateTarget({ service_key: "media/other" }),
+    ]);
+    vi.spyOn(updates, "loadUpdateTargets").mockResolvedValue();
+    vi.spyOn(settings, "loadServicePolicies").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/policies", component: PoliciesView }],
+    });
+    await router.push("/policies?service=media/app");
+    await router.isReady();
+    const wrapper = mountWithApp(PoliciesView, { pinia, router });
+    await flushPromises();
+    const service = wrapper.find('select[placeholder="stack/service"]');
+    expect((service.element as HTMLSelectElement).value).toBe("media/app");
+
+    await router.push("/policies?service=media/other");
+    await flushPromises();
+    expect((service.element as HTMLSelectElement).value).toBe("media/other");
+  });
+
+  it("follows the snooze service deep link on mount and route changes", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.updateTargets = updateTargetsResponse([
+      updateTarget(), updateTarget({ service_key: "media/other" }),
+    ]);
+    vi.spyOn(updates, "loadUpdateTargets").mockResolvedValue();
+    vi.spyOn(settings, "loadSnoozes").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/snoozes", component: SnoozesView }],
+    });
+    await router.push("/snoozes?service=media/app");
+    await router.isReady();
+    const wrapper = mountWithApp(SnoozesView, { pinia, router });
+    await flushPromises();
+    const service = wrapper.findAll('select[placeholder="stack/service"]')[0];
+    expect((service.element as HTMLSelectElement).value).toBe("media/app");
+
+    await router.push("/snoozes?service=media/other");
+    await flushPromises();
+    expect((service.element as HTMLSelectElement).value).toBe("media/other");
   });
 
   it("renders read-only settings without exposing secret values or edit controls", async () => {
