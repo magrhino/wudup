@@ -12,6 +12,7 @@ from typing import TypeVar
 
 from fastapi.testclient import TestClient
 
+from wudup import web_discord as discord_module
 from wudup import web_release_notifications as notifications_module
 from wudup import web_wud_transport
 from wudup.db import (
@@ -222,7 +223,7 @@ def _capture_discord_posts(
             )
 
     monkeypatch.setattr(
-        notifications_module,
+        discord_module,
         "_post_discord_payload",
         fake_post_discord_payload,
     )
