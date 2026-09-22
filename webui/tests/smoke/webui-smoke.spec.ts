@@ -146,6 +146,23 @@ function updateTargetsResponse() {
   };
 }
 
+function trackedContainersResponse() {
+  return {
+    status: "ready", count: 1, warnings: [], wud_status: wudApiStatus(),
+    items: [{
+      target_id: "target-bazarr", service_key: "media/bazarr", stack: "media", service: "bazarr",
+      image: `ghcr.io/example/${"long-repository-name-".repeat(6)}:v1.6.0-ls357`,
+      current_tag: "v1.6.0-ls357", runtime_state: "running",
+      tracking_regex: String.raw`^v1\.6\.0-ls357$`, tracking_health: "frozen",
+      tracking_detail: "The filter matches only the installed version tag.",
+      suggested_regex: String.raw`^v\d+\.\d+\.\d+-ls\d+$`,
+      wud: null, wud_match_state: "untracked", wud_update_available: null,
+      last_image_recorded_at: "", last_action_at: "", last_action_status: "",
+      last_action_run_id: null, retag_available: true,
+    }],
+  };
+}
+
 function releaseNotesResponse() {
   return {
     source_file: "/out/images.todo",
@@ -450,6 +467,10 @@ async function fulfillApi(
   }
   if (path === "/api/v1/update-targets") {
     await json(route, updateTargetsResponse());
+    return;
+  }
+  if (path === "/api/v1/tracked-containers") {
+    await json(route, trackedContainersResponse());
     return;
   }
   if (path === "/api/v1/release-notes") {
@@ -1132,6 +1153,39 @@ test("logout returns to login and leaves storage empty", async ({ page }) => {
     session: [],
   });
 });
+
+for (const width of [1280, 815, 390]) {
+  test(`tracking examples stay contained and keyboard-accessible at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const state = createState({ authenticated: true });
+    await installApiFixtures(page, state);
+    await page.goto("/#/containers");
+    const inspect = page.getByRole("button", { name: width > 768 ? "Inspect media/bazarr" : "Inspect bazarr", exact: true });
+    await expect(inspect).toBeVisible();
+    const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+    expect(await noOverflow()).toBe(true);
+    await inspect.click();
+    const examples = page.getByRole("table", { name: "Illustrative tag matches" });
+    await expect(examples.getByRole("row").filter({ hasText: "v1.6.1-ls357" })).toContainText("Matches");
+    await expect(examples.getByRole("row").filter({ hasText: "Without the suffix" })).toContainText("Excluded");
+    await expect(page.getByRole("textbox", { name: "Tag to test against proposed filter" })).toHaveAttribute("placeholder", "e.g. v1.6.1-ls357");
+    const detail = page.locator(".tracked-pattern-details");
+    await expect(detail).not.toHaveAttribute("open");
+    await detail.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(detail).toHaveAttribute("open");
+    await expect(detail).toContainText("followed by");
+    await page.keyboard.press("Enter");
+    await expect(detail).not.toHaveAttribute("open");
+    expect(await noOverflow()).toBe(true);
+    await page.locator(".tracked-pattern-guide").screenshot({ path: testInfo.outputPath("tracking-examples.png") });
+    await page.getByRole("textbox", { name: "Proposed WUD tag regex" }).fill(String.raw`^v1\.6\.\d+-ls357$`);
+    await expect(examples.getByRole("row").filter({ hasText: "v2.0.0-ls357" })).toContainText("Excluded");
+    await page.getByRole("textbox", { name: "Proposed WUD tag regex" }).fill(`^${"long-fixed-prefix-".repeat(6)}\\d+$`);
+    expect(await noOverflow()).toBe(true);
+    expect(state.calls.some((call) => call.path === "/api/v1/tracking-repairs/apply")).toBe(false);
+  });
+}
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`release review at ${viewport.width}px`, () => {

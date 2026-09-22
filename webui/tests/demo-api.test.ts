@@ -1,12 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createDemoWebApi } from "../src/api/demo";
 import { generatedFixtures } from "../src/api/demo/generatedFixtures";
+import { DemoApiState } from "../src/api/demo/state";
 
 const READ_ONLY_MESSAGE =
   "The public static demo is read-only. Run WUDup locally to apply changes.";
 
 describe("demo web API", () => {
+  it("keeps Alpine demo suggestions aligned with the major-pinned backend rule", async () => {
+    const api = createDemoWebApi();
+    const targets = await api.retagTargets();
+    const target = targets.items[0]!;
+    const stub = vi.spyOn(DemoApiState.prototype, "retagTargets").mockReturnValue({
+      ...targets, count: 1,
+      items: [{ ...target, current_tag: "2.7-alpine", label_value: "2.7-alpine" }],
+    });
+    try {
+      expect((await api.trackedContainers()).items[0]?.suggested_regex).toBe(String.raw`^2(?:\.\d+)+-alpine$`);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+
   it("serves read-only sanitized fixture state", async () => {
     const api = createDemoWebApi();
 

@@ -100,6 +100,8 @@ def test_inventory_includes_compose_service_without_wud(
         ("16-alpine", r"^16-alpine$", "exact-tag", ""),
         ("v1.36.2", r"^v1\.36\.2$", "frozen", r"^v\d+(?:\.\d+)+$"),
         ("2.33.5-distroless", r"^2\.33\.5-distroless$", "frozen", r"^\d+\.\d+\.\d+-distroless$"),
+        ("2.7-alpine", r"^2\.7-alpine$", "frozen", r"^2(?:\.\d+)+-alpine$"),
+        ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
     ],
 )
 def test_inventory_distinguishes_exact_channels_from_version_releases(
@@ -117,6 +119,21 @@ def test_suggested_regex_rejects_oversized_compose_tag_before_release_match() ->
     tag = "v1." + "1." * 10_000 + "invalid!"
 
     assert web_tracking._suggested_regex(tag, f"repo/app:{tag}") == ""
+
+
+def test_alpine_repair_preview_accepts_major_pinned_suggestion(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(tmp_path, tag="2.7-alpine", regex="2.7-alpine")
+    original = compose_path.read_bytes()
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["suggested_regex"] == r"^2(?:\.\d+)+-alpine$"
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": item["target_id"], "regex": item["suggested_regex"]},
+        headers=_csrf_headers(client),
+    )
+    assert response.status_code == 200
+    assert response.json()["can_apply"] is True
+    assert compose_path.read_bytes() == original
 
 
 @pytest.mark.parametrize(

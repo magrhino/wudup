@@ -621,7 +621,8 @@ def test_stream_regex_preserves_leading_v() -> None:
         ("10.11.12ubu2404-ls44", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
         ("2026.8.3", r"^\d+(?:\.\d+)+$"),
         ("1", r"^\d+$"),
-        ("2.7-alpine", r"^\d+\.\d+-alpine$"),
+        ("2.7-alpine", r"^2(?:\.\d+)+-alpine$"),
+        ("2.7.12-alpine", r"^2(?:\.\d+)+-alpine$"),
         ("2026-07-24-r1", r"^\d+-\d+-\d+-r\d+$"),
         ("v5", r"^v\d+$"),
         ("stable", r"^stable$"),
@@ -633,3 +634,12 @@ def test_retag_regex_generalizes_numeric_parts(tag: str, expected: str) -> None:
 
 def test_retag_regex_covers_bindery_shorter_dotted_release() -> None:
     assert re.fullmatch(retag_tag_include_regex("v1.36.2"), "v1.37") is not None
+
+
+@pytest.mark.parametrize("tag", ["2.7-alpine", "2.7.12-alpine"])
+def test_retag_alpine_channel_keeps_major_and_allows_patch_tags(tag: str) -> None:
+    pattern = retag_tag_include_regex(tag)
+    for candidate in ("2.7-alpine", "2.7.12-alpine", "2.8.0-alpine"):
+        assert re.fullmatch(pattern, candidate) is not None
+    for candidate in ("3.0-alpine", "2.7.12", "2.7.12-alpine-rc1", "2.7.12-alpine3.22"):
+        assert re.fullmatch(pattern, candidate) is None
