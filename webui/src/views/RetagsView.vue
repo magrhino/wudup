@@ -24,6 +24,7 @@ import RetagTargetsMobileList from "../components/retags/RetagTargetsMobileList.
 import RetagTargetsTable from "../components/retags/RetagTargetsTable.vue";
 import { useDataCardsBreakpoint } from "../responsive";
 import { useAuthStore } from "../stores/auth";
+import { useRetagsStore } from "../stores/retags";
 import { useUpdatesStore } from "../stores/updates";
 import {
   canBulkEnableRetagTargetChoice,
@@ -69,6 +70,7 @@ const DUPLICATE_RETAG_CHOICES_PREFIXES = [
 ];
 
 const updates = useUpdatesStore();
+const retags = useRetagsStore();
 const auth = useAuthStore();
 const isMobile = useDataCardsBreakpoint();
 const route = useRoute();
@@ -164,7 +166,7 @@ const {
 } = usePendingApplyJob({
   applyJobPanelRef,
   refreshAfterTerminalJob: async () => {
-    await updates.loadRetagTargets();
+    await retags.loadRetagTargets();
   },
   progressPhases: retagApplyJobProgressPhases,
   updateNoun: "retag",
@@ -173,8 +175,8 @@ const {
     `${updateLabel} finished. Retag targets and run history were refreshed.`,
 });
 
-const rows = computed(() => updates.retagTargets?.items ?? []);
-const totalCount = computed(() => updates.retagTargets?.count ?? rows.value.length);
+const rows = computed(() => retags.retagTargets?.items ?? []);
+const totalCount = computed(() => retags.retagTargets?.count ?? rows.value.length);
 const availableCount = computed(
   () => rows.value.filter((item) => item.retag_available).length,
 );
@@ -212,15 +214,15 @@ const retagTargetTagError = computed(() => {
     if (retagChoice(item) !== "switch-to-concrete") {
       continue;
     }
-    const error = retagTargetTagValidationError(item, updates.retagTargetTags);
+    const error = retagTargetTagValidationError(item, retags.retagTargetTags);
     if (error) {
       return error;
     }
   }
   return "";
 });
-const unavailable = computed(() => updates.retagTargets?.status === "unavailable");
-const loaded = computed(() => updates.retagTargets !== null);
+const unavailable = computed(() => retags.retagTargets?.status === "unavailable");
+const loaded = computed(() => retags.retagTargets !== null);
 const mutationsEnabled = computed(() => auth.session?.mutations_enabled === true);
 const retagMutationDisabled = computed(() => !mutationsEnabled.value);
 const retagChoiceDisabled = computed(
@@ -237,7 +239,7 @@ const retagMutationNotice = computed(() => {
 });
 const previewDisabled = computed(
   () =>
-    updates.loading ||
+    retags.loading ||
     applyJobActive.value ||
     unavailable.value ||
     Boolean(retagTargetTagError.value) ||
@@ -246,13 +248,13 @@ const previewDisabled = computed(
 );
 const applyDisabled = computed(
   () =>
-    updates.loading ||
+    retags.loading ||
     applyJobActive.value ||
     retagMutationDisabled.value ||
     Boolean(retagTargetTagError.value) ||
-    updates.retagPlan?.can_apply !== true,
+    retags.retagPlan?.can_apply !== true,
 );
-const retagPlanStacks = computed(() => updates.retagPlan?.stacks ?? []);
+const retagPlanStacks = computed(() => retags.retagPlan?.stacks ?? []);
 const retagPlanUpdates = computed(() =>
   retagPlanStacks.value.flatMap((stack) =>
     retagPlanStackUpdates(stack).map((update) => ({
@@ -262,7 +264,7 @@ const retagPlanUpdates = computed(() =>
   ),
 );
 const retagPreviewError = computed(
-  () => updates.retagPreviewError || updates.error,
+  () => retags.retagPreviewError || retags.error,
 );
 const retagDuplicateServiceConflicts = computed<RetagDuplicateServiceConflict[]>(
   () => {
@@ -296,7 +298,7 @@ const retagDuplicateServiceConflicts = computed<RetagDuplicateServiceConflict[]>
   },
 );
 const retagConfirmImpactLabel = computed(() => {
-  const plan = updates.retagPlan;
+  const plan = retags.retagPlan;
   if (!plan) {
     return "";
   }
@@ -308,10 +310,10 @@ const retagConfirmImpactLabel = computed(() => {
   return `${pluralize(serviceCount, "service")} in ${retagPlanContextLabel(plan)}`;
 });
 const initialLoading = computed(
-  () => !loaded.value && !updates.error && updates.loading,
+  () => !loaded.value && !retags.error && retags.loading,
 );
 const initialLoadFailed = computed(
-  () => !loaded.value && Boolean(updates.error) && !updates.loading,
+  () => !loaded.value && Boolean(retags.error) && !retags.loading,
 );
 const filteredRows = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
@@ -338,17 +340,17 @@ const filteredRows = computed(() => {
 });
 const runningEligibleRows = computed(() =>
   rows.value.filter((item) =>
-    canBulkEnableRetagTargetChoice(item, updates.retagTargetTags),
+    canBulkEnableRetagTargetChoice(item, retags.retagTargetTags),
   ),
 );
 const filteredRunningEligibleRows = computed(() =>
   filteredRows.value.filter((item) =>
-    canBulkEnableRetagTargetChoice(item, updates.retagTargetTags),
+    canBulkEnableRetagTargetChoice(item, retags.retagTargetTags),
   ),
 );
 const bulkSelectionDisabled = computed(
   () =>
-    updates.loading ||
+    retags.loading ||
     applyJobActive.value ||
     retagChoiceDisabled.value ||
     unavailable.value,
@@ -368,8 +370,8 @@ const keepAllDisabled = computed(
 function retagChoice(item: RetagTargetItem): RetagTargetChoice {
   return selectedRetagChoice(
     item,
-    updates.retagChoices,
-    updates.retagTargetTags,
+    retags.retagChoices,
+    retags.retagTargetTags,
   );
 }
 
@@ -416,11 +418,11 @@ function onRetagChoiceUpdate(
   item: RetagTargetItem,
   choice: RetagTargetChoice,
 ): void {
-  updates.setRetagChoice(retagTargetIdentity(item), choice);
+  retags.setRetagChoice(retagTargetIdentity(item), choice);
 }
 
 function onRetagTargetTagUpdate(item: RetagTargetItem, tag: string): void {
-  updates.setRetagTargetTag(retagTargetIdentity(item), tag);
+  retags.setRetagTargetTag(retagTargetIdentity(item), tag);
 }
 
 function retagAllEligible(): void {
@@ -438,14 +440,14 @@ function retagFilteredEligible(): void {
 }
 
 function addRetagSelection(items: RetagTargetItem[]): void {
-  updates.setRetagChoicesForItems(items, "switch-to-concrete");
+  retags.setRetagChoicesForItems(items, "switch-to-concrete");
 }
 
 function keepAllRetags(): void {
   if (keepAllDisabled.value) {
     return;
   }
-  updates.setRetagChoicesForItems(rows.value, "keep-current");
+  retags.setRetagChoicesForItems(rows.value, "keep-current");
 }
 
 async function previewRetagChanges(): Promise<void> {
@@ -453,21 +455,21 @@ async function previewRetagChanges(): Promise<void> {
     return;
   }
   showRetagPreviewModal.value = true;
-  await updates.createRetagPlan().catch(() => undefined);
+  await retags.createRetagPlan().catch(() => undefined);
 }
 
 async function onGithubLatestFallbackUpdate(enabled: boolean): Promise<void> {
-  if (updates.loading || retagChoiceDisabled.value) {
+  if (retags.loading || retagChoiceDisabled.value) {
     return;
   }
-  await updates.setRetagGithubLatestFallback(enabled).catch(() => undefined);
+  await retags.setRetagGithubLatestFallback(enabled).catch(() => undefined);
 }
 
 async function refreshGithubLatestFallback(): Promise<void> {
-  if (isDemoMode || updates.loading || retagMutationDisabled.value) {
+  if (isDemoMode || retags.loading || retagMutationDisabled.value) {
     return;
   }
-  await updates.refreshRetagGithubLatest().catch(() => undefined);
+  await retags.refreshRetagGithubLatest().catch(() => undefined);
 }
 
 function openRetagApplyConfirm(): void {
@@ -495,9 +497,9 @@ async function confirmRetagApply(): Promise<void> {
   retagApplyError.value = "";
   let job;
   try {
-    job = await updates.applyRetagPlan();
+    job = await retags.applyRetagPlan();
   } catch {
-    retagApplyError.value = retagApplyErrorMessage(updates.error);
+    retagApplyError.value = retagApplyErrorMessage(retags.error);
     return;
   }
   applyJobSnapshot.value = snapshot;
@@ -511,7 +513,7 @@ async function rebuildRetagPreview(): Promise<void> {
   retagApplyError.value = "";
   showRetagConfirmModal.value = false;
   showRetagPreviewModal.value = true;
-  await updates.createRetagPlan().catch(() => undefined);
+  await retags.createRetagPlan().catch(() => undefined);
 }
 
 function retagApplyErrorMessage(error: string): string {
@@ -522,7 +524,7 @@ function retagApplyErrorMessage(error: string): string {
 }
 
 function createRetagApplyJobSnapshot(): ApplyJobPlanSnapshot | null {
-  const plan = updates.retagPlan;
+  const plan = retags.retagPlan;
   if (!plan) {
     return null;
   }
@@ -560,21 +562,21 @@ function createRetagApplyJobSnapshot(): ApplyJobPlanSnapshot | null {
   };
 }
 
-useRouteRefresh(() => updates.loadRetagTargets());
+useRouteRefresh(() => retags.loadRetagTargets());
 
 onMounted(() => {
-  updates.loadRetagTargets().catch(() => undefined);
+  retags.loadRetagTargets().catch(() => undefined);
 });
 </script>
 
 <template>
   <section class="content-stack retag-review">
-    <n-alert v-if="updates.error" type="error" :show-icon="false">
-      {{ updates.error }}
+    <n-alert v-if="retags.error" type="error" :show-icon="false">
+      {{ retags.error }}
     </n-alert>
 
     <n-alert
-      v-for="warning in updates.retagTargets?.warnings ?? []"
+      v-for="warning in retags.retagTargets?.warnings ?? []"
       :key="warning"
       type="warning"
       :show-icon="false"
@@ -617,13 +619,13 @@ onMounted(() => {
 
     <RetagConfirmModal
       v-model:show="showRetagConfirmModal"
-      :plan="updates.retagPlan"
+      :plan="retags.retagPlan"
       :impact-label="retagConfirmImpactLabel"
       :mutation-notice="retagMutationNotice"
       :runtime-warning="selectedRuntimeWarning"
       :apply-error="retagApplyError"
       :apply-disabled="applyDisabled"
-      :loading="updates.loading"
+      :loading="retags.loading"
       :apply-job-active="applyJobActive"
       @confirm="confirmRetagApply"
       @rebuild-preview="rebuildRetagPreview"
@@ -631,15 +633,15 @@ onMounted(() => {
 
     <RetagPlanReviewModal
       :show="showRetagPreviewModal"
-      :plan="updates.retagPlan"
-      :preview-job="updates.retagPreviewJob"
+      :plan="retags.retagPlan"
+      :preview-job="retags.retagPreviewJob"
       :preview-error="retagPreviewError"
       :duplicate-service-conflicts="retagDuplicateServiceConflicts"
       :impact-label="retagConfirmImpactLabel"
       :mutation-notice="retagMutationNotice"
       :runtime-warning="selectedRuntimeWarning"
       :apply-disabled="applyDisabled"
-      :loading="updates.loading"
+      :loading="retags.loading"
       :apply-job-active="applyJobActive"
       @close="showRetagPreviewModal = false"
       @apply="openRetagApplyConfirmFromPreview"
@@ -657,9 +659,9 @@ onMounted(() => {
       :retag-all-disabled="retagAllDisabled"
       :retag-filtered-disabled="retagFilteredDisabled"
       :keep-all-disabled="keepAllDisabled"
-      :loading="updates.loading"
+      :loading="retags.loading"
       :apply-job-active="applyJobActive"
-      :has-retag-plan="updates.retagPlan !== null"
+      :has-retag-plan="retags.retagPlan !== null"
       :mutation-notice="retagMutationNotice"
       :runtime-warning="selectedRuntimeWarning"
       :validation-error="retagTargetTagError"
@@ -698,8 +700,8 @@ onMounted(() => {
           <label class="retag-fallback-toggle" for="github-latest-fallback-switch">
             <n-switch
               id="github-latest-fallback-switch"
-              :value="updates.retagGithubLatestFallback"
-              :disabled="updates.loading || retagChoiceDisabled"
+              :value="retags.retagGithubLatestFallback"
+              :disabled="retags.loading || retagChoiceDisabled"
               aria-label="Use cached GitHub latest fallback"
               @update:value="onGithubLatestFallbackUpdate"
             />
@@ -708,7 +710,7 @@ onMounted(() => {
           <n-button
             size="small"
             secondary
-            :disabled="updates.loading || retagMutationDisabled"
+            :disabled="retags.loading || retagMutationDisabled"
             :title="
               retagMutationDisabled
                 ? retagMutationNotice
@@ -764,7 +766,7 @@ onMounted(() => {
       <span>Resolve the warning above, then refresh this view.</span>
     </output>
 
-    <template v-else-if="updates.retagTargets">
+    <template v-else-if="retags.retagTargets">
       <output
         v-if="!rows.length"
         class="empty-state retag-state"
@@ -788,9 +790,9 @@ onMounted(() => {
       <RetagTargetsTable
         v-else-if="!isMobile"
         :rows="filteredRows"
-        :loading="updates.loading"
-        :choices="updates.retagChoices"
-        :target-tags="updates.retagTargetTags"
+        :loading="retags.loading"
+        :choices="retags.retagChoices"
+        :target-tags="retags.retagTargetTags"
         :mutation-disabled="retagChoiceDisabled"
         :mutation-notice="retagMutationNotice"
         @choice-update="onRetagChoiceUpdate"
@@ -800,8 +802,8 @@ onMounted(() => {
       <RetagTargetsMobileList
         v-else
         :rows="filteredRows"
-        :choices="updates.retagChoices"
-        :target-tags="updates.retagTargetTags"
+        :choices="retags.retagChoices"
+        :target-tags="retags.retagTargetTags"
         :mutation-disabled="retagChoiceDisabled"
         :mutation-notice="retagMutationNotice"
         @choice-update="onRetagChoiceUpdate"

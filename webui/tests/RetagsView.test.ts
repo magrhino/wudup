@@ -6,6 +6,7 @@ import RetagsView from "../src/views/RetagsView.vue";
 import { webApi } from "../src/api/client";
 import { useAuthStore } from "../src/stores/auth";
 import { useUpdatesStore } from "../src/stores/updates";
+import { useRetagsStore } from "../src/stores/retags";
 import {
   applyJobResponse,
   authSession,
@@ -27,7 +28,7 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const retagItems = [
       retagTarget({
         candidate_source: "github-latest",
@@ -49,24 +50,24 @@ describe("RetagsView", () => {
         digest_provenance: null,
       }),
     ];
-    updates.retagTargets = retagTargetsResponse(retagItems, {
+    retags.retagTargets = retagTargetsResponse(retagItems, {
       warnings: ["compose warning"],
     });
     const loadRetagTargets = vi
-      .spyOn(updates, "loadRetagTargets")
+      .spyOn(retags, "loadRetagTargets")
       .mockResolvedValue();
-    const createRetagPlan = vi.spyOn(updates, "createRetagPlan").mockImplementation(
+    const createRetagPlan = vi.spyOn(retags, "createRetagPlan").mockImplementation(
       async () => {
         const plan = retagPlanResponse();
-        updates.retagPlan = plan;
+        retags.retagPlan = plan;
         return plan;
       },
     );
     const setRetagGithubLatestFallback = vi
-      .spyOn(updates, "setRetagGithubLatestFallback")
+      .spyOn(retags, "setRetagGithubLatestFallback")
       .mockResolvedValue();
     const refreshRetagGithubLatest = vi
-      .spyOn(updates, "refreshRetagGithubLatest")
+      .spyOn(retags, "refreshRetagGithubLatest")
       .mockResolvedValue();
 
     const wrapper = mountWithApp(RetagsView, { pinia });
@@ -104,7 +105,7 @@ describe("RetagsView", () => {
     expect(switchControls[0].attributes("disabled")).toBeUndefined();
     expect(switchControls[1].attributes("disabled")).toBeDefined();
     await switchControls[0].setValue();
-    expect(updates.retagChoices[retagItems[0].target_id]).toBe(
+    expect(retags.retagChoices[retagItems[0].target_id]).toBe(
       "switch-to-concrete",
     );
 
@@ -131,31 +132,31 @@ describe("RetagsView", () => {
       const [
         { default: DemoRetagsView },
         { useAuthStore: useDemoAuthStore },
-        { useUpdatesStore: useDemoUpdatesStore },
+        { useRetagsStore: useDemoRetagsStore },
       ] = await Promise.all([
         import("../src/views/RetagsView.vue"),
         import("../src/stores/auth"),
-        import("../src/stores/updates"),
+        import("../src/stores/retags"),
       ]);
       const pinia = createPinia();
       setActivePinia(pinia);
       const auth = useDemoAuthStore();
       auth.session = authSession({ mutations_enabled: false });
-      const updates = useDemoUpdatesStore();
-      updates.retagTargets = retagTargetsResponse();
-      vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+      const retags = useDemoRetagsStore();
+      retags.retagTargets = retagTargetsResponse();
+      vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
       const createRetagPlan = vi
-        .spyOn(updates, "createRetagPlan")
+        .spyOn(retags, "createRetagPlan")
         .mockImplementation(async () => {
           const plan = retagPlanResponse({ can_apply: false });
-          updates.retagPlan = plan;
+          retags.retagPlan = plan;
           return plan;
         });
       const setRetagGithubLatestFallback = vi
-        .spyOn(updates, "setRetagGithubLatestFallback")
+        .spyOn(retags, "setRetagGithubLatestFallback")
         .mockResolvedValue();
       const refreshRetagGithubLatest = vi
-        .spyOn(updates, "refreshRetagGithubLatest")
+        .spyOn(retags, "refreshRetagGithubLatest")
         .mockResolvedValue();
 
       const wrapper = mountWithApp(DemoRetagsView, { pinia });
@@ -204,7 +205,7 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const retagItems = [
       retagTarget(),
       retagTarget({
@@ -227,12 +228,12 @@ describe("RetagsView", () => {
     ];
     const appTarget = retagItems[0];
     const radarrTarget = retagItems[1];
-    updates.retagTargets = retagTargetsResponse(retagItems);
-    updates.setRetagChoice(appTarget.target_id, "switch-to-concrete");
-    updates.setRetagChoice(radarrTarget.target_id, "switch-to-concrete");
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    const setRetagChoice = vi.spyOn(updates, "setRetagChoice");
-    const createRetagPlan = vi.spyOn(updates, "createRetagPlan").mockResolvedValue(
+    retags.retagTargets = retagTargetsResponse(retagItems);
+    retags.setRetagChoice(appTarget.target_id, "switch-to-concrete");
+    retags.setRetagChoice(radarrTarget.target_id, "switch-to-concrete");
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    const setRetagChoice = vi.spyOn(retags, "setRetagChoice");
+    const createRetagPlan = vi.spyOn(retags, "createRetagPlan").mockResolvedValue(
       retagPlanResponse(),
     );
 
@@ -248,8 +249,8 @@ describe("RetagsView", () => {
       radarrTarget.target_id,
       "switch-to-concrete",
     );
-    expect(updates.retagChoices[appTarget.target_id]).toBe("switch-to-concrete");
-    expect(updates.retagChoices[radarrTarget.target_id]).toBe("switch-to-concrete");
+    expect(retags.retagChoices[appTarget.target_id]).toBe("switch-to-concrete");
+    expect(retags.retagChoices[radarrTarget.target_id]).toBe("switch-to-concrete");
     expect(createRetagPlan).not.toHaveBeenCalled();
     expect(wrapper.text()).not.toContain("Review retag preview");
   });
@@ -259,12 +260,12 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse([
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse([
       retagTarget({ runtime_state: "not-running" }),
     ]);
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    const createRetagPlan = vi.spyOn(updates, "createRetagPlan");
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    const createRetagPlan = vi.spyOn(retags, "createRetagPlan");
 
     const wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
@@ -290,7 +291,7 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const retagItems = [
       retagTarget(),
       retagTarget({
@@ -332,16 +333,16 @@ describe("RetagsView", () => {
         digest_provenance: null,
       }),
     ];
-    updates.retagTargets = retagTargetsResponse(retagItems);
-    updates.resetRetagChoices();
-    updates.setRetagChoice(retagItems[2].target_id, "switch-to-concrete");
-    updates.setRetagChoice(retagItems[3].target_id, "switch-to-concrete");
-    updates.retagPlan = retagPlanResponse();
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    const createRetagPlan = vi.spyOn(updates, "createRetagPlan").mockResolvedValue(
+    retags.retagTargets = retagTargetsResponse(retagItems);
+    retags.resetRetagChoices();
+    retags.setRetagChoice(retagItems[2].target_id, "switch-to-concrete");
+    retags.setRetagChoice(retagItems[3].target_id, "switch-to-concrete");
+    retags.retagPlan = retagPlanResponse();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    const createRetagPlan = vi.spyOn(retags, "createRetagPlan").mockResolvedValue(
       retagPlanResponse(),
     );
-    const applyRetagPlan = vi.spyOn(updates, "applyRetagPlan").mockResolvedValue(
+    const applyRetagPlan = vi.spyOn(retags, "applyRetagPlan").mockResolvedValue(
       applyJobResponse({ job_id: "bulk-retag-job" }),
     );
 
@@ -363,8 +364,8 @@ describe("RetagsView", () => {
     await buttonByText("Add running in results")?.trigger("click");
     await flushPromises();
 
-    expect(updates.retagPlan).toBeNull();
-    expect(updates.retagChoices).toMatchObject({
+    expect(retags.retagPlan).toBeNull();
+    expect(retags.retagChoices).toMatchObject({
       [retagItems[0].target_id]: "keep-current",
       [retagItems[1].target_id]: "switch-to-concrete",
       [retagItems[2].target_id]: "switch-to-concrete",
@@ -377,13 +378,13 @@ describe("RetagsView", () => {
     expect(createRetagPlan).not.toHaveBeenCalled();
     expect(applyRetagPlan).not.toHaveBeenCalled();
 
-    updates.retagPlan = retagPlanResponse();
+    retags.retagPlan = retagPlanResponse();
     await wrapper.find('input[aria-label="Search retag targets"]').setValue("");
     await buttonByText("Add running candidates")?.trigger("click");
     await flushPromises();
 
-    expect(updates.retagPlan).toBeNull();
-    expect(updates.retagChoices).toMatchObject({
+    expect(retags.retagPlan).toBeNull();
+    expect(retags.retagChoices).toMatchObject({
       [retagItems[0].target_id]: "switch-to-concrete",
       [retagItems[1].target_id]: "switch-to-concrete",
       [retagItems[2].target_id]: "switch-to-concrete",
@@ -397,7 +398,7 @@ describe("RetagsView", () => {
     await buttonByText("Clear selection")?.trigger("click");
     await flushPromises();
 
-    expect(updates.retagChoices).toMatchObject({
+    expect(retags.retagChoices).toMatchObject({
       [retagItems[0].target_id]: "keep-current",
       [retagItems[1].target_id]: "keep-current",
       [retagItems[2].target_id]: "keep-current",
@@ -416,7 +417,7 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const retagItems = [
       retagTarget({
         service_key: "archive/legacy",
@@ -431,11 +432,11 @@ describe("RetagsView", () => {
         runtime_state: "unknown",
       }),
     ];
-    updates.retagTargets = retagTargetsResponse(retagItems);
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    vi.spyOn(updates, "createRetagPlan").mockImplementation(async () => {
+    retags.retagTargets = retagTargetsResponse(retagItems);
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "createRetagPlan").mockImplementation(async () => {
       const plan = retagPlanResponse({ selected_count: 2, keep_current_count: 0 });
-      updates.retagPlan = plan;
+      retags.retagPlan = plan;
       return plan;
     });
 
@@ -494,13 +495,13 @@ describe("RetagsView", () => {
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-retag");
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse();
-    updates.setRetagChoice(
-      updates.retagTargets.items[0].target_id,
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse();
+    retags.setRetagChoice(
+      retags.retagTargets.items[0].target_id,
       "switch-to-concrete",
     );
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
     vi.spyOn(webApi, "startRetagPreview").mockResolvedValue(
       retagPreviewJobResponse({ status: "running", plan: null }),
     );
@@ -519,7 +520,7 @@ describe("RetagsView", () => {
       expect(wrapper.get(".preflight-modal").text()).toContain(
         "Building a preview",
       );
-      await updates.refreshRetagGithubLatest();
+      await retags.refreshRetagGithubLatest();
       await vi.advanceTimersByTimeAsync(400);
       await flushPromises();
       const preview = wrapper.get(".preflight-modal");
@@ -544,15 +545,15 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse();
-    updates.setRetagChoice(
-      updates.retagTargets.items[0].target_id,
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse();
+    retags.setRetagChoice(
+      retags.retagTargets.items[0].target_id,
       "switch-to-concrete",
     );
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    vi.spyOn(updates, "createRetagPlan").mockImplementation(async () => {
-      updates.error = "retag preview is already running";
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "createRetagPlan").mockImplementation(async () => {
+      retags.error = "retag preview is already running";
       throw new Error("retag preview is already running");
     });
 
@@ -596,8 +597,8 @@ describe("RetagsView", () => {
       setActivePinia(pinia);
       const auth = useAuthStore();
       auth.session = authSession({ mutations_enabled: true });
-      const updates = useUpdatesStore();
-      updates.retagTargets = retagTargetsResponse([
+      const retags = useRetagsStore();
+      retags.retagTargets = retagTargetsResponse([
         retagTarget(),
         retagTarget({
           image: "repo/app:latest-staging",
@@ -605,13 +606,13 @@ describe("RetagsView", () => {
           project_directory: "/docker/media-staging",
         }),
       ]);
-      for (const item of updates.retagTargets.items) {
-        updates.setRetagChoice(item.target_id, "switch-to-concrete");
+      for (const item of retags.retagTargets.items) {
+        retags.setRetagChoice(item.target_id, "switch-to-concrete");
       }
-      vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-      vi.spyOn(updates, "createRetagPlan").mockImplementation(async () => {
-        updates.error = previewError;
-        throw new Error(updates.error);
+      vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+      vi.spyOn(retags, "createRetagPlan").mockImplementation(async () => {
+        retags.error = previewError;
+        throw new Error(retags.error);
       });
 
       const wrapper = mountWithApp(RetagsView, { pinia });
@@ -642,7 +643,7 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const retagItems = [
       retagTarget({
         service_key: "media/radarr",
@@ -660,9 +661,9 @@ describe("RetagsView", () => {
         digest_provenance: null,
       }),
     ];
-    updates.retagTargets = retagTargetsResponse(retagItems);
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    const createRetagPlan = vi.spyOn(updates, "createRetagPlan").mockResolvedValue(
+    retags.retagTargets = retagTargetsResponse(retagItems);
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    const createRetagPlan = vi.spyOn(retags, "createRetagPlan").mockResolvedValue(
       retagPlanResponse(),
     );
 
@@ -676,10 +677,10 @@ describe("RetagsView", () => {
     await targetInput.setValue("5.22.4");
     await flushPromises();
 
-    expect(updates.retagChoices[retagItems[0].target_id]).toBe(
+    expect(retags.retagChoices[retagItems[0].target_id]).toBe(
       "switch-to-concrete",
     );
-    expect(updates.retagChoiceRequests()).toEqual([
+    expect(retags.retagChoiceRequests()).toEqual([
       {
         service_key: "media/radarr",
         target_id: retagItems[0].target_id,
@@ -711,16 +712,16 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: false });
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse();
-    updates.retagPlan = retagPlanResponse();
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse();
+    retags.retagPlan = retagPlanResponse();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
     const setRetagGithubLatestFallback = vi.spyOn(
-      updates,
+      retags,
       "setRetagGithubLatestFallback",
     );
-    const setRetagChoicesForItems = vi.spyOn(updates, "setRetagChoicesForItems");
-    const applyRetagPlan = vi.spyOn(updates, "applyRetagPlan").mockResolvedValue(
+    const setRetagChoicesForItems = vi.spyOn(retags, "setRetagChoicesForItems");
+    const applyRetagPlan = vi.spyOn(retags, "applyRetagPlan").mockResolvedValue(
       applyJobResponse({ job_id: "blocked-retag-job" }),
     );
 
@@ -773,10 +774,10 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse();
-    updates.retagPlan = retagPlanResponse();
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse();
+    retags.retagPlan = retagPlanResponse();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
     const eventSource: EventSource = {
       addEventListener: vi.fn(),
       close: vi.fn(),
@@ -795,14 +796,14 @@ describe("RetagsView", () => {
     const openJobStream = vi
       .spyOn(webApi, "openJobStream")
       .mockReturnValue(eventSource);
-    const applyRetagPlan = vi.spyOn(updates, "applyRetagPlan").mockImplementation(
+    const applyRetagPlan = vi.spyOn(retags, "applyRetagPlan").mockImplementation(
       async () => {
         const job = applyJobResponse({
           job_id: "retag-job",
           selected_line_numbers: [],
           status: "queued",
         });
-        updates.setApplyJob(job);
+        useUpdatesStore().setApplyJob(job);
         return job;
       },
     );
@@ -855,19 +856,19 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse();
-    updates.retagPlan = retagPlanResponse();
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
-    vi.spyOn(updates, "applyRetagPlan").mockImplementation(async () => {
-      updates.error = "409: retag plan is stale";
-      throw new Error(updates.error);
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse();
+    retags.retagPlan = retagPlanResponse();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "applyRetagPlan").mockImplementation(async () => {
+      retags.error = "409: retag plan is stale";
+      throw new Error(retags.error);
     });
     const createRetagPlan = vi
-      .spyOn(updates, "createRetagPlan")
+      .spyOn(retags, "createRetagPlan")
       .mockImplementation(async () => {
         const plan = retagPlanResponse({ plan_id: "rebuilt-retag-plan" });
-        updates.retagPlan = plan;
+        retags.retagPlan = plan;
         return plan;
       });
 
@@ -908,11 +909,11 @@ describe("RetagsView", () => {
     setActivePinia(pinia);
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const basePlan = retagPlanResponse();
     const baseStack = basePlan.stacks[0];
     const baseUpdate = baseStack.digest_pin_updates[0];
-    updates.retagTargets = retagTargetsResponse([
+    retags.retagTargets = retagTargetsResponse([
       retagTarget({ target_id: "target-a", service_key: "media/app" }),
       retagTarget({
         target_id: "target-b",
@@ -922,7 +923,7 @@ describe("RetagsView", () => {
         project_directory: "/docker/media-staging",
       }),
     ]);
-    updates.retagPlan = retagPlanResponse({
+    retags.retagPlan = retagPlanResponse({
       selected_count: 2,
       stacks: [
         {
@@ -945,7 +946,7 @@ describe("RetagsView", () => {
         },
       ],
     });
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
     vi.spyOn(webApi, "openJobStream").mockReturnValue({
       addEventListener: vi.fn(),
       close: vi.fn(),
@@ -961,13 +962,13 @@ describe("RetagsView", () => {
       dispatchEvent: vi.fn(),
       removeEventListener: vi.fn(),
     });
-    vi.spyOn(updates, "applyRetagPlan").mockImplementation(async () => {
+    vi.spyOn(retags, "applyRetagPlan").mockImplementation(async () => {
       const job = applyJobResponse({
         job_id: "retag-duplicate-job",
         selected_line_numbers: [],
         status: "queued",
       });
-      updates.setApplyJob(job);
+      useUpdatesStore().setApplyJob(job);
       return job;
     });
 
@@ -999,8 +1000,8 @@ describe("RetagsView", () => {
   it("filters retag targets by search text and review status", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse([
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse([
       retagTarget(),
       retagTarget({
         service_key: "data/postgres",
@@ -1018,7 +1019,7 @@ describe("RetagsView", () => {
         digest_provenance: null,
       }),
     ]);
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
 
     const wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
@@ -1048,8 +1049,8 @@ describe("RetagsView", () => {
   it("shows every Compose service by default and sorts and filters runtime state", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
-    const updates = useUpdatesStore();
-    updates.retagTargets = retagTargetsResponse([
+    const retags = useRetagsStore();
+    retags.retagTargets = retagTargetsResponse([
       retagTarget({
         service_key: "aardvark/unknown",
         stack: "aardvark",
@@ -1081,7 +1082,7 @@ describe("RetagsView", () => {
         service: "running-ready",
       }),
     ]);
-    vi.spyOn(updates, "loadRetagTargets").mockResolvedValue();
+    vi.spyOn(retags, "loadRetagTargets").mockResolvedValue();
 
     const wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
@@ -1126,33 +1127,33 @@ describe("RetagsView", () => {
   it("renders empty, unavailable, loading, and error states", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
-    const updates = useUpdatesStore();
+    const retags = useRetagsStore();
     const loadRetagTargets = vi
-      .spyOn(updates, "loadRetagTargets")
+      .spyOn(retags, "loadRetagTargets")
       .mockResolvedValue();
 
-    updates.loading = true;
+    retags.loading = true;
     let wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
     expect(wrapper.text()).toContain("Loading retag targets");
     expect(loadRetagTargets).toHaveBeenCalledTimes(1);
 
-    updates.loading = false;
-    updates.error = "retag targets unavailable";
+    retags.loading = false;
+    retags.error = "retag targets unavailable";
     wrapper.unmount();
     wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
     expect(wrapper.text()).toContain("retag targets unavailable");
     expect(wrapper.text()).toContain("The backend could not load retag review state.");
 
-    updates.error = "";
-    updates.retagTargets = retagTargetsResponse([]);
+    retags.error = "";
+    retags.retagTargets = retagTargetsResponse([]);
     wrapper.unmount();
     wrapper = mountWithApp(RetagsView, { pinia });
     await flushPromises();
     expect(wrapper.text()).toContain("No Compose services found");
 
-    updates.retagTargets = retagTargetsResponse([], {
+    retags.retagTargets = retagTargetsResponse([], {
       status: "unavailable",
       warnings: ["compose discovery failed"],
     });
