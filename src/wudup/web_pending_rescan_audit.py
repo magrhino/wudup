@@ -10,7 +10,8 @@ from typing import Any
 from fastapi import Request
 
 from .db import DatabaseError, init_db, open_db, utc_timestamp
-from .web_auth import _immediate_transaction, _request_actor_type
+from .web_auth import request_actor_type as _request_actor_type
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_models import (
     PendingRescanResponse,

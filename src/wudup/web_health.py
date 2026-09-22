@@ -37,14 +37,8 @@ from .doctor import (
 )
 from .web_auth import (
     WebConfigError,
-    _effective_origin,
-    _host_from_origin,
     _parse_public_origin,
-    _raw_client_is_loopback,
-    _redact_sensitive_text,
     _secure_cookie,
-    _settings,
-    _trusted_forwarded_origin,
 )
 from .web_database import database_ready
 from .web_models import (
@@ -59,6 +53,12 @@ from .web_models import (
     WudApiRegistryDiagnostics,
     WudApiWatcherDiagnostics,
 )
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_request_context import effective_origin as _effective_origin
+from .web_request_context import host_from_origin as _host_from_origin
+from .web_request_context import raw_client_is_loopback as _raw_client_is_loopback
+from .web_request_context import request_settings as _settings
+from .web_request_context import trusted_forwarded_origin as _trusted_forwarded_origin
 
 READINESS_DOCKER_ENDPOINT_CODES = frozenset({"docker-endpoint", "docker-socket"})
 READINESS_REQUIRED_CODES = frozenset(

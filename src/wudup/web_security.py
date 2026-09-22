@@ -37,12 +37,6 @@ from .security_subjects import (
     resolve_current_security_subject,
     resolve_security_subject,
 )
-from .web_auth import (
-    _redact_sensitive_text,
-    _redact_unknown_absolute_paths,
-    _safe_exception_detail,
-    _settings,
-)
 from .web_database import (
     ReadOnlyDatabaseMissing,
 )
@@ -61,6 +55,12 @@ from .web_models import (
     SecurityScanSubject,
     WebSettings,
 )
+from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import (
+    redact_unknown_absolute_paths as _redact_unknown_absolute_paths,
+)
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 WUD_SECURITY_SCANNING_ENABLED_ENV = "WUD_SECURITY_SCANNING_ENABLED"
 WUD_SECURITY_SCANNER_EXECUTABLE_ENV = "WUD_SECURITY_SCANNER_EXECUTABLE"

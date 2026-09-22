@@ -17,7 +17,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from .db import utc_timestamp
-from .web_auth import _safe_exception_detail
 from .web_models import (
     ApplyJobProgressEvent,
     RetagPlanRequest,
@@ -25,6 +24,7 @@ from .web_models import (
     RetagPreviewJobResponse,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_retag_plans import RetagPlanBuild
 
 RetagPlanBuilder = Callable[[WebSettings, RetagPlanRequest], RetagPlanBuild]

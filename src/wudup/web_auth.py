@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import re
 import secrets
 import socket
 import sqlite3
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -25,6 +22,21 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .db import DatabaseError, init_db, open_db, utc_timestamp
+from .web_database import (
+    delete_web_setting as _delete_web_setting,
+)
+from .web_database import (
+    immediate_transaction as _immediate_transaction,
+)
+from .web_database import (
+    set_web_setting as _set_web_setting,
+)
+from .web_database import (
+    web_setting as _web_setting,
+)
+from .web_database import (
+    web_setting_or_none as _web_setting_or_none,  # noqa: F401 - staged compatibility import
+)
 from .web_metadata import json_object as _json_object
 from .web_models import (
     PASSWORD_MIN_LENGTH,
@@ -37,6 +49,58 @@ from .web_models import (
     SetupClaimRequest,
     SetupStatusResponse,
     WebSettings,
+)
+from .web_redaction import (
+    SENSITIVE_ENV_KEYS,  # noqa: F401 - staged compatibility import
+    SENSITIVE_FIELD_KEY_PARTS,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    redact_sensitive_text as _redact_sensitive_text,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    redact_unknown_absolute_paths as _redact_unknown_absolute_paths,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    safe_exception_detail as _safe_exception_detail,
+)
+from .web_redaction import (
+    sanitize_support_bundle_text as _sanitize_support_bundle_text,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    sanitize_support_bundle_value as _sanitize_support_bundle_value,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    sanitize_support_bundle_value_with_secrets as _sanitize_support_bundle_value_with_secrets,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    sensitive_mapping_key as _sensitive_mapping_key,  # noqa: F401 - staged compatibility import
+)
+from .web_redaction import (
+    strip_validation_inputs as _strip_validation_inputs,
+)
+from .web_request_context import (
+    effective_origin as _effective_origin,
+)
+from .web_request_context import (
+    host_from_origin as _host_from_origin,
+)
+from .web_request_context import (
+    normalize_host as _normalize_host,
+)
+from .web_request_context import (
+    normalize_origin as _normalize_origin,
+)
+from .web_request_context import (
+    raw_client_is_loopback as _raw_client_is_loopback,  # noqa: F401 - staged compatibility import
+)
+from .web_request_context import (
+    request_client_address as _request_client_address,
+)
+from .web_request_context import (
+    request_settings as _settings,
+)
+from .web_request_context import (
+    trusted_forwarded_origin as _trusted_forwarded_origin,  # noqa: F401 - staged compatibility import
 )
 
 SESSION_MAX_AGE_SECONDS = 86_400
@@ -58,31 +122,6 @@ RESET_ADMIN_CLAIM_HASH_KEY = "reset_admin_claim_hash"
 RESET_ADMIN_CLAIM_EXPIRES_KEY = "reset_admin_claim_expires_at"
 RESET_ADMIN_CLAIM_USER_ID_KEY = "reset_admin_claim_user_id"
 DEFAULT_ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-SENSITIVE_ENV_KEYS = (
-    "WUD_WEB_TOKEN",
-    "WUD_API_AUTH_BEARER_TOKEN",
-    "WUD_API_AUTH_BEARER_TOKEN_FILE",
-    "WUD_API_AUTH_BASIC_PASSWORD",
-    "WUD_API_AUTH_BASIC_PASSWORD_FILE",
-    "GITHUB_TOKEN",
-    "DISCORD_WEBHOOK",
-    "DISCORD_RELEASES_WEBHOOK",
-    "ADMIN_WEBHOOK",
-)
-SENSITIVE_FIELD_KEY_PARTS = frozenset(
-    {
-        "auth",
-        "authorization",
-        "credential",
-        "header",
-        "key",
-        "pass",
-        "password",
-        "secret",
-        "token",
-        "webhook",
-    }
-)
 PASSWORD_HASHER = PasswordHasher()
 
 
@@ -308,10 +347,6 @@ def api_auth_session(
     )
 
 
-def _settings(request: Request) -> WebSettings:
-    return request.app.state.web_settings
-
-
 def _auth_session_response(
     settings: WebSettings,
     *,
@@ -337,166 +372,6 @@ async def _validation_exception_handler(
         status_code=422,
         content={"detail": jsonable_encoder(_strip_validation_inputs(exc.errors()))},
     )
-
-
-def _strip_validation_inputs(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _strip_validation_inputs(item)
-            for key, item in value.items()
-            if key != "input"
-        }
-    if isinstance(value, list):
-        return [_strip_validation_inputs(item) for item in value]
-    return value
-
-
-def _redact_sensitive_text(
-    settings: WebSettings,
-    value: str,
-    extra_secrets: Sequence[str] = (),
-) -> str:
-    redacted = value
-    for secret in _sensitive_redaction_values(settings, extra_secrets):
-        redacted = redacted.replace(secret, "<redacted>")
-    return redacted
-
-
-def _sensitive_mapping_key(key: str) -> bool:
-    normalized = key.lower().replace("-", "").replace("_", "")
-    return any(part in normalized for part in SENSITIVE_FIELD_KEY_PARTS)
-
-
-def _sanitize_support_bundle_value(settings: WebSettings, value: Any) -> Any:
-    return _sanitize_support_bundle_value_with_secrets(settings, value, ())
-
-
-def _sanitize_support_bundle_value_with_secrets(
-    settings: WebSettings,
-    value: Any,
-    extra_secrets: Sequence[str],
-) -> Any:
-    if isinstance(value, dict):
-        return {
-            str(key): _sanitize_support_bundle_value_with_secrets(
-                settings,
-                item,
-                extra_secrets,
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [
-            _sanitize_support_bundle_value_with_secrets(settings, item, extra_secrets)
-            for item in value
-        ]
-    if isinstance(value, str):
-        return _sanitize_support_bundle_text(settings, value, extra_secrets)
-    return value
-
-
-def _sanitize_support_bundle_text(
-    settings: WebSettings,
-    value: str,
-    extra_secrets: Sequence[str] = (),
-) -> str:
-    replacements = _support_bundle_path_replacements(settings)
-    redacted = _redact_sensitive_text(settings, value, extra_secrets=extra_secrets)
-    for source, target in replacements:
-        redacted = redacted.replace(source, target)
-    return _redact_unknown_absolute_paths(redacted)
-
-
-def _support_bundle_path_replacements(settings: WebSettings) -> list[tuple[str, str]]:
-    config = settings.config
-    exact_paths: list[tuple[Path, str]] = [
-        (config.wud_out_file, "<WUD_OUT_FILE>"),
-        (config.log_dir, "<WUD_LOG_DIR>"),
-        (config.db_path, "<WUD_DB_PATH>"),
-    ]
-    root_paths: list[tuple[Path, str]] = [(config.docker_base, "<DOCKER_BASE>")]
-    if settings.host_docker_base is not None:
-        root_paths.append((settings.host_docker_base, "<HOST_DOCKER_BASE>"))
-
-    replacements: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for path, label in (*exact_paths, *root_paths):
-        text = str(path)
-        if text and text not in seen:
-            seen.add(text)
-            replacements.append((text, label))
-
-    for root, label in root_paths:
-        root_text = str(root).rstrip("/")
-        if not root_text or root_text in seen:
-            continue
-        seen.add(root_text)
-        replacements.append((root_text, label))
-
-    return sorted(replacements, key=lambda item: len(item[0]), reverse=True)
-
-
-def _redact_unknown_absolute_paths(value: str) -> str:
-    absolute_path_pattern = (
-        r"(?<![:/<>\w-])/(?:[^\s\"'`,;)\]}]+)"
-        r"|(?<![\w<])(?:[A-Za-z]:[\\/][^\s\"'`,;)\]}]+"
-        r"|\\\\[^\s\"'`,;)\]}]+)"
-    )
-    return re.sub(
-        absolute_path_pattern,
-        "[REDACTED_PATH]",
-        value,
-    )
-
-
-def _sensitive_redaction_values(
-    settings: WebSettings,
-    extra_secrets: Sequence[str],
-) -> list[str]:
-    values: list[str] = []
-    env = settings.command_env or {}
-    values.extend(extra_secrets)
-    values.append(settings.auth_token)
-    values.extend(settings.wud_api_client.secret_values)
-    values.extend(env.get(key, "") for key in SENSITIVE_ENV_KEYS)
-
-    expanded: list[str] = []
-    for value in values:
-        if value:
-            expanded.append(value)
-            expanded.extend(_secret_url_fragments(value))
-
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in sorted(expanded, key=len, reverse=True):
-        if len(value) < 4 or value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
-
-
-def _secret_url_fragments(value: str) -> list[str]:
-    parsed = urlsplit(value)
-    if not parsed.scheme or not parsed.netloc:
-        return []
-    fragments: list[str] = []
-    path = parsed.path.strip("/")
-    if len(path) >= 8:
-        fragments.append(path)
-    fragments.extend(segment for segment in path.split("/") if len(segment) >= 8)
-    if parsed.query and len(parsed.query) >= 8:
-        fragments.append(parsed.query)
-    return fragments
-
-
-def _safe_exception_detail(
-    settings: WebSettings,
-    message: str,
-    exc: BaseException,
-) -> str:
-    detail = _redact_sensitive_text(settings, str(exc))
-    return f"{message}: {_redact_unknown_absolute_paths(detail)}"
 
 
 def _prepare_web_auth_state(settings: WebSettings) -> str:
@@ -752,18 +627,6 @@ def _redeem_admin_recovery_claim(
                 exc,
             ),
         ) from exc
-
-
-@contextmanager
-def _immediate_transaction(conn: sqlite3.Connection) -> Iterator[None]:
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        yield
-    except Exception:
-        conn.rollback()
-        raise
-    else:
-        conn.commit()
 
 
 def _verify_web_user(
@@ -1159,42 +1022,6 @@ def _web_user_count(conn: sqlite3.Connection) -> int:
     return int(row[0])
 
 
-def _web_setting(conn: sqlite3.Connection, key: str) -> str:
-    return _web_setting_or_none(conn, key) or ""
-
-
-def _web_setting_or_none(conn: sqlite3.Connection, key: str) -> str | None:
-    row = conn.execute(
-        """
-        SELECT value
-        FROM web_settings
-        WHERE key = ?
-        LIMIT 1
-        """,
-        (key,),
-    ).fetchone()
-    if row is None:
-        return None
-    return str(row["value"] if isinstance(row, sqlite3.Row) else row[0])
-
-
-def _set_web_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
-    conn.execute(
-        """
-        INSERT INTO web_settings (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at
-        """,
-        (key, value, utc_timestamp()),
-    )
-
-
-def _delete_web_setting(conn: sqlite3.Connection, key: str) -> None:
-    conn.execute("DELETE FROM web_settings WHERE key = ?", (key,))
-
-
 def _delete_admin_recovery_claim(conn: sqlite3.Connection) -> None:
     _delete_web_setting(conn, RESET_ADMIN_CLAIM_HASH_KEY)
     _delete_web_setting(conn, RESET_ADMIN_CLAIM_EXPIRES_KEY)
@@ -1282,7 +1109,7 @@ def _bearer_token_valid(settings: WebSettings, authorization: str | None) -> boo
     )
 
 
-def _request_actor_type(settings: WebSettings, request: Request) -> str:
+def request_actor_type(settings: WebSettings, request: Request) -> str:
     if settings.dev_no_auth:
         return "dev"
     authorization = request.headers.get("authorization")
@@ -1410,132 +1237,6 @@ def _secure_cookie(settings: WebSettings, request: Request) -> bool:
     if settings.secure_cookies == "false":
         return False
     return _effective_origin(request, settings).startswith("https://")
-
-
-def _effective_origin(request: Request, settings: WebSettings) -> str:
-    if settings.public_origin:
-        return settings.public_origin
-    forwarded = _trusted_forwarded_origin(request, settings)
-    if forwarded:
-        return forwarded
-    host = request.headers.get("host", "")
-    return _normalize_origin(f"{request.url.scheme}://{host}")
-
-
-def _trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
-    if not _client_is_trusted_proxy(request, settings):
-        return ""
-    forwarded_origin = _origin_from_forwarded_header(
-        request.headers.get("forwarded", "")
-    )
-    if forwarded_origin:
-        return forwarded_origin
-    proto = _last_forwarded_header_value(
-        request.headers.get("x-forwarded-proto", "")
-    )
-    host = _last_forwarded_header_value(
-        request.headers.get("x-forwarded-host", "")
-    )
-    if proto and host:
-        return _normalize_origin(f"{proto}://{host}")
-    return ""
-
-
-def _request_client_address(request: Request, settings: WebSettings) -> str:
-    forwarded = _trusted_forwarded_client_address(request, settings)
-    if forwarded:
-        return forwarded
-    if request.client is None:
-        return ""
-    return request.client.host
-
-
-def _trusted_forwarded_client_address(
-    request: Request,
-    settings: WebSettings,
-) -> str:
-    if not _client_is_trusted_proxy(request, settings):
-        return ""
-    forwarded = _client_address_from_forwarded_header(
-        request.headers.get("forwarded", "")
-    )
-    if forwarded:
-        return forwarded
-    forwarded_for = _last_forwarded_header_value(
-        request.headers.get("x-forwarded-for", "")
-    )
-    return _normalize_forwarded_client_address(forwarded_for)
-
-
-def _last_forwarded_header_value(value: str) -> str:
-    for item in reversed(value.split(",")):
-        stripped = item.strip()
-        if stripped:
-            return stripped
-    return ""
-
-
-def _client_address_from_forwarded_header(value: str) -> str:
-    if not value:
-        return ""
-    hop = _last_forwarded_header_value(value)
-    for segment in hop.split(";"):
-        key, separator, raw = segment.strip().partition("=")
-        if separator and key.lower() == "for":
-            return _normalize_forwarded_client_address(raw)
-    return ""
-
-
-def _normalize_forwarded_client_address(value: str) -> str:
-    raw = value.strip().strip('"')
-    if not raw or raw.lower() == "unknown":
-        return ""
-    if raw.startswith("["):
-        host, separator, _port = raw[1:].partition("]")
-        return host if separator else raw
-    host, separator, port = raw.rpartition(":")
-    if separator and port.isdigit():
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            return raw
-        return host
-    return raw
-
-
-def _origin_from_forwarded_header(value: str) -> str:
-    if not value:
-        return ""
-    hop = _last_forwarded_header_value(value)
-    parts: dict[str, str] = {}
-    for segment in hop.split(";"):
-        key, separator, raw = segment.strip().partition("=")
-        if separator:
-            parts[key.lower()] = raw.strip().strip('"')
-    proto = parts.get("proto", "")
-    host = parts.get("host", "")
-    if proto and host:
-        return _normalize_origin(f"{proto}://{host}")
-    return ""
-
-
-def _client_is_trusted_proxy(request: Request, settings: WebSettings) -> bool:
-    if request.client is None:
-        return False
-    try:
-        address = ipaddress.ip_address(request.client.host)
-    except ValueError:
-        return False
-    return any(address in network for network in settings.trusted_proxies)
-
-
-def _raw_client_is_loopback(request: Request) -> bool:
-    if request.client is None:
-        return False
-    try:
-        return ipaddress.ip_address(request.client.host).is_loopback
-    except ValueError:
-        return False
 
 
 def _forbidden(detail: str) -> JSONResponse:
@@ -1729,36 +1430,7 @@ def _parse_secure_cookie_mode(value: str) -> str:
     return normalized
 
 
-def _normalize_origin(value: str) -> str:
-    raw = value.strip().rstrip("/")
-    if not raw:
-        return ""
-    parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return ""
-    if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
-        return ""
-    host = parsed.hostname
-    if not host:
-        return ""
-    netloc = parsed.netloc.lower()
-    return f"{parsed.scheme.lower()}://{netloc}"
 
 
-def _host_from_origin(origin: str) -> str:
-    parsed = urlsplit(origin)
-    return _normalize_host(parsed.hostname or "")
-
-
-def _normalize_host(value: str) -> str:
-    raw = value.strip().lower().rstrip(".")
-    if not raw:
-        return ""
-    if raw.startswith("["):
-        end = raw.find("]")
-        return raw[1:end] if end != -1 else ""
-    if raw.count(":") == 1:
-        host, _, port = raw.partition(":")
-        if port.isdigit():
-            return host
-    return raw
+# Actor classification validates credentials, so its policy remains in auth.
+_request_actor_type = request_actor_type

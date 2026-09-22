@@ -14,12 +14,10 @@ from .db import DatabaseError, init_db, open_db, utc_timestamp
 from .doctor import DoctorResult as DoctorDataResult
 from .web_auth import (
     DEFAULT_ALLOWED_HOSTS,
-    _safe_exception_detail,
-    _set_web_setting,
-    _settings,
-    _web_setting,
 )
 from .web_database import ReadOnlyDatabaseMissing, connect_readonly_db
+from .web_database import set_web_setting as _set_web_setting
+from .web_database import web_setting as _web_setting
 from .web_health import doctor_response, web_doctor_result
 from .web_models import (
     DEFAULT_CORE_UPDATE_TOUR_STEP,
@@ -36,6 +34,8 @@ from .web_models import (
     OnboardingDocLink,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 ONBOARDING_DISMISSED_AT_KEY = "onboarding_checklist_dismissed_at"
 CORE_UPDATE_TOUR_KEY = "onboarding_core_update_tour"

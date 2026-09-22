@@ -30,7 +30,6 @@ from .updater_lifecycle_health import (
     _cid_is_ok,
 )
 from .updater_models import UpdaterProgressEvent
-from .web_auth import _safe_exception_detail
 from .web_models import (
     ApplyJobResponse,
     RetagApplyRequest,
@@ -38,6 +37,7 @@ from .web_models import (
     WebApplyJob,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_retag_plans import (
     RetagPlanBuild as _RetagPlanBuild,
 )

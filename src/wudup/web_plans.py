@@ -35,7 +35,6 @@ from .updater_models import (
     TagStreamLabelRewriteApproval,
     UpdateSelection,
 )
-from .web_auth import _safe_exception_detail, _settings
 from .web_models import (
     ApplyJobResponse,
     ApplyPlanRequest,
@@ -43,6 +42,8 @@ from .web_models import (
     PlanResponse,
     WebSettings,
 )
+from .web_redaction import safe_exception_detail as _safe_exception_detail
+from .web_request_context import request_settings as _settings
 
 EffectiveConfigLoader = Callable[[WebSettings], UpdaterConfig]
 _effective_config_loader: EffectiveConfigLoader | None = None

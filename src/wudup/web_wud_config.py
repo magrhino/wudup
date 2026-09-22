@@ -7,7 +7,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .web_auth import _sensitive_mapping_key
 from .web_models import (
     WebSettings,
     WudApiAppDiagnostics,
@@ -19,6 +18,7 @@ from .web_models import (
     WudApiStoreDiagnostics,
     WudApiWatcherDiagnostics,
 )
+from .web_redaction import sensitive_mapping_key as _sensitive_mapping_key
 
 APP_CONFIGURATION_LABEL = "app configuration"
 LOG_CONFIGURATION_LABEL = "log configuration"

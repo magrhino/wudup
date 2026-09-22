@@ -30,7 +30,7 @@ from .plans import (
     build_dry_run_plan_from_pending_source,
     resolve_pending_groups,
 )
-from .web_auth import _immediate_transaction
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_metadata import json_object_or_empty
 from .web_models import (
