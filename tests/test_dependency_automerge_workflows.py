@@ -120,6 +120,14 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         self.assertEqual(rule["addLabels"], ["automerge"])
         self.assertNotIn("automerge", rule)
 
+    def test_renovate_holds_trivy_versions_but_allows_digest_updates(self) -> None:
+        config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
+        rule = config["packageRules"][1]
+
+        self.assertEqual(rule["matchDepNames"], ["aquasec/trivy"])
+        self.assertEqual(rule["matchUpdateTypes"], ["major", "minor", "patch"])
+        self.assertFalse(rule["enabled"])
+
     def test_dependency_review_checks_all_scopes_and_missing_licenses(self) -> None:
         workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
         options = self._step(

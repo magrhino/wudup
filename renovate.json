@@ -17,6 +17,12 @@
       "description": "Mark non-major Docker updates for merge automation",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "addLabels": ["automerge"]
+    },
+    {
+      "description": "Hold Trivy version updates while its patched source build is pinned to v0.74.0",
+      "matchDepNames": ["aquasec/trivy"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
     }
   ],
   "pinDigests": true
