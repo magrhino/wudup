@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   webApi,
+  type PendingResponse,
+  type PendingRescanResponse,
   type SecurityScanJobResponse,
   type SecurityScanInfo,
   type SecurityScansResponse,
@@ -96,6 +98,60 @@ function expectReleaseChangelogFetches(fetchMock: ReturnType<typeof vi.fn>): voi
     "https://api.github.com/repos/t-mart/mousehole/releases/tags/v0.5.0",
   );
   expect(fetchMock.mock.calls[1][0]).toBe(TEST_CHANGELOG_URL);
+}
+
+function mockStaleMetadataReload(
+  refreshed: PendingResponse,
+  sourceHash: PendingResponse["source_hash"],
+) {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/pending/metadata") {
+      return Promise.resolve(
+        jsonResponse({
+          status: "stale",
+          requires_pending_reload: true,
+          source_hash: sourceHash,
+          source: refreshed.source,
+          wud_api: refreshed.wud_api,
+          items: [],
+        }),
+      );
+    }
+    if (url === "/api/v1/pending") {
+      return Promise.resolve(jsonResponse(refreshed));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function mockPendingRescanFetch(overrides: Partial<PendingRescanResponse> = {}) {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/pending/rescan") {
+      return Promise.resolve(jsonResponse(pendingRescanResponse(overrides)));
+    }
+    if (url === "/api/v1/pending") {
+      return Promise.resolve(jsonResponse(pendingResponse()));
+    }
+    if (
+      url === "/api/v1/release-notes" ||
+      url === "/api/v1/release-notes/refresh"
+    ) {
+      return Promise.resolve(jsonResponse(releaseNotesResponse()));
+    }
+    if (url === "/api/v1/security-scans") {
+      return Promise.resolve(jsonResponse(securityScansResponse([])));
+    }
+    if (url === "/api/v1/runs") {
+      return Promise.resolve(jsonResponse([]));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function completeSecurityScanInfo(
@@ -656,26 +712,7 @@ describe("updates store", () => {
       },
       wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: sourceHash,
-            source: refreshed.source,
-            wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, sourceHash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -738,26 +775,7 @@ describe("updates store", () => {
       selected,
       { ...unrelated, source_id: "docker.local.worker-new" },
     ]);
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: current.source_hash,
-            source: refreshed.source,
-            wud_api: refreshed.wud_api,
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, current.source_hash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -784,26 +802,7 @@ describe("updates store", () => {
       ...pendingResponse(),
       source_hash: "changed-source-hash",
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: refreshed.source_hash,
-            source: refreshed.source,
-            wud_api: refreshed.wud_api,
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, refreshed.source_hash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -1011,29 +1010,7 @@ describe("updates store", () => {
   });
 
   it("rescans pending updates and refreshes dependent state", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(jsonResponse(pendingRescanResponse()));
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockPendingRescanFetch();
     const auth = useAuthStore();
     const ensureCsrf = vi
       .spyOn(auth, "ensureCsrf")
@@ -1085,29 +1062,7 @@ describe("updates store", () => {
   });
 
   it("rescans all pending updates without selected lines", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(jsonResponse(pendingRescanResponse()));
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockPendingRescanFetch();
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-rescan-all");
     useConnectionStore();
@@ -1159,42 +1114,16 @@ describe("updates store", () => {
   });
 
   it("stores blocked pending rescan responses and refreshes dependent state", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(
-          jsonResponse(
-            pendingRescanResponse({
-              status: "blocked",
-              scope: "selected",
-              requested_count: 1,
-              watched_count: 0,
-              wud_api: wudApiStatus({
-                state: "auth_required",
-                metadata_available: false,
-              }),
-            }),
-          ),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
+    const fetchMock = mockPendingRescanFetch({
+      status: "blocked",
+      scope: "selected",
+      requested_count: 1,
+      watched_count: 0,
+      wud_api: wudApiStatus({
+        state: "auth_required",
+        metadata_available: false,
+      }),
     });
-    vi.stubGlobal("fetch", fetchMock);
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-rescan-blocked");
     useConnectionStore();
