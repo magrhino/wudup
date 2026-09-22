@@ -33,6 +33,18 @@ function demoSuggestedTrackingRegex(tag: string): string {
   return `^${tag.replace(/\d+/g, "\\d+").replaceAll(".", "\\.")}$`;
 }
 
+function demoTrackingHealth(regex: string, exact: string, suggested: string) {
+  if (!regex) return "no-filter";
+  if (regex === exact) return suggested ? "frozen" : "exact-tag";
+  return regex === suggested ? "version-pattern" : "custom";
+}
+
+function demoTrackingDetail(health: string, regex: string): string {
+  if (health === "exact-tag") return "The filter matches this tag only. Same-tag image changes require WUD digest watching.";
+  if (health === "frozen") return "The filter matches only the installed version tag.";
+  return regex ? "Demo tracking filter; inspect which tags it matches." : "No WUD tag filter is set.";
+}
+
 export function createDemoWebApi(): WebApi {
   const state = new DemoApiState();
 
@@ -82,11 +94,7 @@ export function createDemoWebApi(): WebApi {
           const trackingRegex = item.label_value.replaceAll("$$", "$");
           const suggestedRegex = demoSuggestedTrackingRegex(item.current_tag);
           const exactTagRegex = `^${item.current_tag.replaceAll(".", "\\.")}$`;
-          const trackingHealth = !trackingRegex
-            ? "no-filter"
-            : trackingRegex === exactTagRegex
-              ? (suggestedRegex ? "frozen" : "exact-tag")
-              : trackingRegex === suggestedRegex ? "version-pattern" : "custom";
+          const trackingHealth = demoTrackingHealth(trackingRegex, exactTagRegex, suggestedRegex);
           return {
             target_id: item.target_id || item.service_key,
             service_key: item.service_key,
@@ -97,11 +105,7 @@ export function createDemoWebApi(): WebApi {
             runtime_state: item.runtime_state,
             tracking_regex: trackingRegex,
             tracking_health: trackingHealth,
-            tracking_detail: trackingHealth === "exact-tag"
-              ? "The filter matches this tag only. Same-tag image changes require WUD digest watching."
-              : trackingHealth === "frozen" ? "The filter matches only the installed version tag."
-                : trackingRegex ? "Demo tracking filter; inspect which tags it matches."
-                  : "No WUD tag filter is set.",
+            tracking_detail: demoTrackingDetail(trackingHealth, trackingRegex),
             suggested_regex: suggestedRegex === trackingRegex ? "" : suggestedRegex,
             wud: null,
             wud_match_state: "unknown" as const,

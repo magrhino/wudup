@@ -9,40 +9,50 @@ export interface TrackingPatternGuide {
   matches: (tag: string) => boolean | null;
 }
 
-export function explainTrackingPattern(pattern: string): TrackingPatternGuide | null {
-  if (pattern.length > 256 || !pattern.startsWith("^") || !pattern.endsWith("$")) {
-    return null;
-  }
+interface PatternScan {
+  parts: string[];
+  literal: string;
+  hasNumber: boolean;
+  unseparatedNumber: boolean;
+}
 
-  const body = pattern.slice(1, -1);
-  const parts: string[] = [];
-  let literal = "";
+function consumePatternToken(scan: PatternScan, token: string): boolean {
+  if (token === "\\d+" || token === dotNumberParts) {
+    if (token === "\\d+" && scan.unseparatedNumber) return false;
+    if (scan.literal) scan.parts.push("“" + scan.literal + "”");
+    scan.literal = "";
+    scan.parts.push(token === dotNumberParts ? "one or more dots, each followed by digits" : "one or more digits");
+    scan.hasNumber = true;
+    scan.unseparatedNumber = true;
+  } else {
+    scan.literal += token === "\\." ? "." : token;
+    if (token === "\\." || !/^\d$/.test(token)) scan.unseparatedNumber = false;
+  }
+  return true;
+}
+
+function patternParts(body: string): { parts: string[]; hasNumber: boolean } | null {
+  const scan: PatternScan = { parts: [], literal: "", hasNumber: false, unseparatedNumber: false };
   let offset = 0;
-  let hasNumber = false;
-  let unseparatedNumber = false;
-  const flushLiteral = () => {
-    if (literal) parts.push("“" + literal + "”");
-    literal = "";
-  };
 
   while (offset < body.length) {
     tokenPattern.lastIndex = offset;
     const token = tokenPattern.exec(body)?.[0];
-    if (!token) return null;
-    if (token === "\\d+" || token === dotNumberParts) {
-      if (token === "\\d+" && unseparatedNumber) return null;
-      flushLiteral();
-      parts.push(token === dotNumberParts ? "one or more dots, each followed by digits" : "one or more digits");
-      hasNumber = true;
-      unseparatedNumber = true;
-    } else {
-      literal += token === "\\." ? "." : token;
-      if (token === "\\." || !/^\d$/.test(token)) unseparatedNumber = false;
-    }
+    if (!token || !consumePatternToken(scan, token)) return null;
     offset = tokenPattern.lastIndex;
   }
-  if (!hasNumber && !literal) return null;
-  flushLiteral();
+  if (!scan.hasNumber && !scan.literal) return null;
+  if (scan.literal) scan.parts.push("“" + scan.literal + "”");
+  return { parts: scan.parts, hasNumber: scan.hasNumber };
+}
+
+export function explainTrackingPattern(pattern: string): TrackingPatternGuide | null {
+  if (pattern.length > 256 || !pattern.startsWith("^") || !pattern.endsWith("$")) {
+    return null;
+  }
+  const parsed = patternParts(pattern.slice(1, -1));
+  if (!parsed) return null;
+  const { parts, hasNumber } = parsed;
 
   const expression = new RegExp(pattern);
   const majorNote = pattern === "^v\\d+(?:\\.\\d+)+$" ||

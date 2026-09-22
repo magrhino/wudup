@@ -8,7 +8,7 @@ import re
 import secrets
 import sqlite3
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from contextlib import closing
 from pathlib import Path
 from threading import Condition
@@ -33,7 +33,7 @@ from .compose_rewrite import (
 )
 from .db import init_db, insert_update_event, insert_update_run, open_db, utc_timestamp
 from .docker_cli import DockerCli
-from .images import image_tag
+from .images import image_tag, tag_value_valid
 from .tag_streams import retag_tag_include_regex
 from .updater_models import ComposeTagRewriteError, UpdaterProgressEvent
 from .web_auth import _safe_exception_detail, _settings
@@ -53,9 +53,7 @@ from .web_models import (
 # A deliberately small JS/Python-common subset. It prevents catastrophic regexes,
 # lookarounds, backreferences, and syntax that WUD might interpret differently.
 _REGEX_TOKEN = re.compile(r"(?:[A-Za-z0-9_-]|\\\.|\\d\+|\(\?:\\\.\\d\+\)\+)")
-_RELEASE_SHAPED_TAG = re.compile(
-    r"v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?", re.ASCII
-)
+_RELEASE_PREFIX = re.compile(r"v?\d+\.\d+", re.ASCII)
 
 
 def api_tracked_containers(request: Request) -> TrackedContainersResponse:
@@ -74,17 +72,7 @@ def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
         )
     stacks = stacks_or_response
     records = web_retags._retag_target_records_for_stacks(settings, stacks)
-    wud_by_key: dict[tuple[str, str], list[web_wud_api.WudApiContainer]] = {}
-    unkeyed_wud = False
-    for container in snapshot.inventory_containers:
-        key = (
-            container.labels.get("com.docker.compose.project", ""),
-            container.labels.get("com.docker.compose.service", ""),
-        )
-        if all(key):
-            wud_by_key.setdefault(key, []).append(container)
-        else:
-            unkeyed_wud = True
+    wud_by_key, unkeyed_wud = _wud_containers_by_key(snapshot.inventory_containers)
     discovered_services = [
         (stack, service)
         for stack in stacks
@@ -97,80 +85,10 @@ def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
     service_key_counts = Counter(
         f"{stack.name}/{service}" for stack, service in discovered_services
     )
-    items: list[TrackedContainerItem] = []
-    for record in records:
-        item = record.item
-        tag = image_tag(item.image)
-        regex = compose_unescape_dollars(item.label_value)
-        suggested = _suggested_regex(tag, item.image)
-        if "@sha256:" in item.image:
-            health, detail = "digest-pinned", "Digest-pinned image; review tracking manually."
-            suggested = ""
-        elif not regex:
-            health, detail = "no-filter", "No WUD tag filter is set."
-        elif regex == exact_tags_regex((tag,)):
-            if suggested:
-                health, detail = "frozen", "The filter matches only the installed version tag."
-            else:
-                health, detail = (
-                    "exact-tag",
-                    "The filter matches this tag only. Same-tag image changes require WUD digest watching.",
-                )
-        elif regex == suggested:
-            health, detail = "version-pattern", "The filter follows this version family."
-        else:
-            health, detail = "custom", "Custom tracking filter; verify its future matches."
-        compose_identity = (record.stack.project_name, item.service)
-        candidates = wud_by_key.get(compose_identity, [])
-        matches = [
-            container for container in candidates
-            if _confirmed_wud_match(container, record.stack, item.service, item.image)
-        ]
-        if not snapshot.status.metadata_available:
-            detail += " WUD metadata is unavailable."
-        elif len(matches) > 1:
-            detail += " Multiple WUD containers match this Compose service."
-        elif candidates and not matches:
-            detail += " A same-named WUD container could not be verified against this Compose file and image."
-        elif not matches and not (
-            unkeyed_wud or snapshot.degraded_container_count
-        ):
-            detail += " This service is not in WUD's current inventory."
-        wud_match_state = (
-            "unknown" if not snapshot.status.metadata_available
-            else "ambiguous" if len(matches) > 1
-            else "watching" if len(matches) == 1
-            else "unknown" if candidates or unkeyed_wud or snapshot.degraded_container_count
-            else "untracked"
-        )
-        known_at, action_at, action_status, action_run_id = timestamps.get(
-            item.service_key, ("", "", "", None)
-        )
-        items.append(
-            TrackedContainerItem(
-                target_id=item.target_id,
-                service_key=item.service_key,
-                stack=item.stack,
-                service=item.service,
-                image=item.image,
-                current_tag=tag,
-                runtime_state=item.runtime_state,
-                tracking_regex=regex,
-                tracking_health=health,
-                tracking_detail=detail,
-                suggested_regex=suggested if suggested != regex else "",
-                wud=matches[0].response() if len(matches) == 1 else None,
-                wud_match_state=wud_match_state,
-                wud_update_available=(
-                    matches[0].update_available if len(matches) == 1 else None
-                ),
-                last_image_recorded_at=known_at if not record.service_key_ambiguous else "",
-                last_action_at=action_at if not record.service_key_ambiguous else "",
-                last_action_status=action_status if not record.service_key_ambiguous else "",
-                last_action_run_id=action_run_id if not record.service_key_ambiguous else None,
-                retag_available=item.retag_available,
-            )
-        )
+    items = [
+        _tracked_record_item(record, snapshot, wud_by_key, unkeyed_wud, timestamps)
+        for record in records
+    ]
     represented = {
         (record.stack.directory, record.stack.file, record.item.service)
         for record in records
@@ -184,34 +102,7 @@ def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
         for service in stack.service_names:
             if (stack.directory, stack.file, service) in represented:
                 continue
-            key = f"{stack.name}/{service}"
-            known_at, action_at, action_status, action_run_id = timestamps.get(
-                key, ("", "", "", None)
-            )
-            ambiguous = service_key_counts[key] > 1
-            items.append(TrackedContainerItem(
-                target_id=web_retags._retag_target_id_from_values(
-                    stack.directory, stack.file, stack.project_directory,
-                    stack.name, service,
-                ),
-                service_key=key,
-                stack=stack.name,
-                service=service,
-                image="",
-                current_tag="",
-                runtime_state="unknown",
-                tracking_health="no-image" if stack.inspection_complete else "image-unresolved",
-                tracking_detail=(
-                    "Compose image and tracking label could not be resolved; review this service manually."
-                    if not stack.inspection_complete else
-                    "This Compose service has no image; automatic tracking repair is unavailable."
-                ),
-                wud_match_state="unknown",
-                last_image_recorded_at="" if ambiguous else known_at,
-                last_action_at="" if ambiguous else action_at,
-                last_action_status="" if ambiguous else action_status,
-                last_action_run_id=None if ambiguous else action_run_id,
-            ))
+            items.append(_unresolved_service_item(stack, service, service_key_counts, timestamps))
     items.sort(key=lambda item: (item.stack, item.service, item.target_id))
     return TrackedContainersResponse(
         status="ready",
@@ -219,6 +110,119 @@ def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
         items=items,
         wud_status=snapshot.status,
         warnings=warnings,
+    )
+
+
+def _wud_containers_by_key(
+    containers: Collection[web_wud_api.WudApiContainer],
+) -> tuple[dict[tuple[str, str], list[web_wud_api.WudApiContainer]], bool]:
+    by_key: dict[tuple[str, str], list[web_wud_api.WudApiContainer]] = {}
+    unkeyed = False
+    for container in containers:
+        key = (
+            container.labels.get("com.docker.compose.project", ""),
+            container.labels.get("com.docker.compose.service", ""),
+        )
+        if all(key):
+            by_key.setdefault(key, []).append(container)
+        else:
+            unkeyed = True
+    return by_key, unkeyed
+
+
+def _tracking_health(image: str, tag: str, regex: str, suggested: str) -> tuple[str, str, str]:
+    if "@sha256:" in image:
+        return "digest-pinned", "Digest-pinned image; review tracking manually.", ""
+    if not regex:
+        return "no-filter", "No WUD tag filter is set.", suggested
+    if regex == exact_tags_regex((tag,)):
+        if suggested:
+            return "frozen", "The filter matches only the installed version tag.", suggested
+        return "exact-tag", "The filter matches this tag only. Same-tag image changes require WUD digest watching.", suggested
+    if regex == suggested:
+        return "version-pattern", "The filter follows this version family.", suggested
+    return "custom", "Custom tracking filter; verify its future matches.", suggested
+
+
+def _wud_match_detail(
+    snapshot: web_wud_api.WudApiSnapshot,
+    candidates: Collection[web_wud_api.WudApiContainer],
+    matches: Collection[web_wud_api.WudApiContainer],
+    unkeyed: bool,
+) -> tuple[str, str]:
+    if not snapshot.status.metadata_available:
+        return "unknown", " WUD metadata is unavailable."
+    if len(matches) > 1:
+        return "ambiguous", " Multiple WUD containers match this Compose service."
+    if len(matches) == 1:
+        return "watching", ""
+    if candidates:
+        return "unknown", " A same-named WUD container could not be verified against this Compose file and image."
+    if unkeyed or snapshot.degraded_container_count:
+        return "unknown", ""
+    return "untracked", " This service is not in WUD's current inventory."
+
+
+def _tracked_record_item(
+    record: web_retags._RetagTargetRecord,
+    snapshot: web_wud_api.WudApiSnapshot,
+    wud_by_key: Mapping[tuple[str, str], list[web_wud_api.WudApiContainer]],
+    unkeyed_wud: bool,
+    timestamps: Mapping[str, tuple[str, str, str, int | None]],
+) -> TrackedContainerItem:
+    item = record.item
+    tag = image_tag(item.image)
+    regex = compose_unescape_dollars(item.label_value)
+    health, detail, suggested = _tracking_health(item.image, tag, regex, _suggested_regex(tag, item.image))
+    candidates = wud_by_key.get((record.stack.project_name, item.service), [])
+    matches = [
+        container for container in candidates
+        if _confirmed_wud_match(container, record.stack, item.service, item.image)
+    ]
+    match_state, match_detail = _wud_match_detail(snapshot, candidates, matches, unkeyed_wud)
+    known_at, action_at, action_status, action_run_id = timestamps.get(
+        item.service_key, ("", "", "", None)
+    )
+    if record.service_key_ambiguous:
+        known_at, action_at, action_status, action_run_id = "", "", "", None
+    match = matches[0] if len(matches) == 1 else None
+    return TrackedContainerItem(
+        target_id=item.target_id, service_key=item.service_key, stack=item.stack,
+        service=item.service, image=item.image, current_tag=tag,
+        runtime_state=item.runtime_state, tracking_regex=regex,
+        tracking_health=health, tracking_detail=detail + match_detail,
+        suggested_regex=suggested if suggested != regex else "",
+        wud=match.response() if match else None, wud_match_state=match_state,
+        wud_update_available=match.update_available if match else None,
+        last_image_recorded_at=known_at, last_action_at=action_at,
+        last_action_status=action_status, last_action_run_id=action_run_id,
+        retag_available=item.retag_available,
+    )
+
+
+def _unresolved_service_item(
+    stack: ComposeStack, service: str, service_key_counts: Mapping[str, int],
+    timestamps: Mapping[str, tuple[str, str, str, int | None]],
+) -> TrackedContainerItem:
+    key = f"{stack.name}/{service}"
+    known_at, action_at, action_status, action_run_id = timestamps.get(key, ("", "", "", None))
+    if service_key_counts[key] > 1:
+        known_at, action_at, action_status, action_run_id = "", "", "", None
+    return TrackedContainerItem(
+        target_id=web_retags._retag_target_id_from_values(
+            stack.directory, stack.file, stack.project_directory, stack.name, service,
+        ),
+        service_key=key, stack=stack.name, service=service, image="", current_tag="",
+        runtime_state="unknown",
+        tracking_health="no-image" if stack.inspection_complete else "image-unresolved",
+        tracking_detail=(
+            "This Compose service has no image; automatic tracking repair is unavailable."
+            if stack.inspection_complete else
+            "Compose image and tracking label could not be resolved; review this service manually."
+        ),
+        wud_match_state="unknown", last_image_recorded_at=known_at,
+        last_action_at=action_at, last_action_status=action_status,
+        last_action_run_id=action_run_id,
     )
 
 
@@ -282,7 +286,7 @@ def _history_timestamps(
 
 
 def _suggested_regex(tag: str, image: str) -> str:
-    if "@sha256:" in image or _RELEASE_SHAPED_TAG.fullmatch(tag) is None:
+    if "@sha256:" in image or not tag_value_valid(tag) or not _release_shaped_tag(tag):
         return ""
     try:
         return retag_tag_include_regex(tag)
@@ -290,10 +294,28 @@ def _suggested_regex(tag: str, image: str) -> str:
         return ""
 
 
+def _release_shaped_tag(tag: str) -> bool:
+    prefix = _RELEASE_PREFIX.match(tag)
+    if prefix is None:
+        return False
+    suffix = tag[prefix.end():]
+    return not suffix or (len(suffix) > 1 and suffix[0] in "-_." and suffix[1].isalnum())
+
+
 def _validated_regex(regex: str, tag: str) -> None:
     if not regex.startswith("^") or not regex.endswith("$"):
         raise HTTPException(status_code=422, detail="Tracking regex must be anchored with ^ and $.")
-    body = regex[1:-1]
+    has_numeric_wildcard = _has_numeric_wildcard(regex[1:-1])
+    if (not has_numeric_wildcard and regex != exact_tags_regex((tag,))) or re.fullmatch(
+        regex, tag, flags=re.ASCII
+    ) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Tracking regex must match the installed tag and either include a numeric wildcard or match that tag exactly.",
+        )
+
+
+def _has_numeric_wildcard(body: str) -> bool:
     offset = 0
     has_numeric_wildcard = False
     unseparated_wildcard = False
@@ -319,13 +341,7 @@ def _validated_regex(regex: str, tag: str) -> None:
         elif token == r"\." or not token.isdigit():
             unseparated_wildcard = False
         offset = match.end()
-    if (not has_numeric_wildcard and regex != exact_tags_regex((tag,))) or re.fullmatch(
-        regex, tag, flags=re.ASCII
-    ) is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Tracking regex must match the installed tag and either include a numeric wildcard or match that tag exactly.",
-        )
+    return has_numeric_wildcard
 
 
 def _matching_runtime_image_id(
@@ -450,6 +466,70 @@ def api_apply_tracking_repair(
         return web_jobs._apply_job_response(job)
 
 
+def _revalidate_tracking_repair(
+    settings: WebSettings, payload: TrackingRepairApplyRequest,
+) -> tuple[TrackingRepairPlan, web_retags._RetagTargetRecord, str, CommandRunner, ComposeCli]:
+    plan, record = build_tracking_repair_plan(settings, payload)
+    if not secrets.compare_digest(plan.plan_id, payload.plan_id) or not plan.can_apply:
+        raise RuntimeError("Tracking repair plan changed; preview it again.")
+    stack = record.stack
+    item = record.item
+    expected_image_id = _matching_runtime_image_id(settings, stack, item.service, item.image)
+    if not expected_image_id:
+        raise RuntimeError("Running image changed before tracking repair; reconcile the image and preview again.")
+    runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
+    compose = ComposeCli(runner=runner)
+    if compose.try_config_project_name(
+        stack.directory, stack.file, project_directory=stack.project_directory
+    ) != stack.project_name:
+        raise RuntimeError("Compose project changed before tracking repair.")
+    running = web_retags._running_retag_compose_service_keys(settings)
+    if running is None or web_retags._retag_compose_service_key(stack, item.service) not in running:
+        raise RuntimeError("Selected service is no longer confirmed running.")
+    return plan, record, expected_image_id, runner, compose
+
+
+def _verify_recreated_service(
+    compose: ComposeCli, runner: CommandRunner, record: web_retags._RetagTargetRecord,
+    expected_image_id: str, rendered_hash: str,
+) -> None:
+    stack = record.stack
+    item = record.item
+    _require_approved_compose_source(stack.directory / stack.file, rendered_hash)
+    container_ids = compose.ps_quiet(
+        stack.directory, stack.file, [item.service], project_directory=stack.project_directory,
+    )
+    if len(container_ids) != 1:
+        raise RuntimeError("Service did not restart after tracking repair.")
+    if DockerCli(runner=runner).try_container_image_id(container_ids[0]) != expected_image_id:
+        raise RuntimeError("Service restarted with a different image; inspect it before retrying tracking repair.")
+
+
+def _rollback_tracking_repair(
+    settings: WebSettings, record: web_retags._RetagTargetRecord,
+    plan: TrackingRepairPlan, backup: Path, recreate_started: bool,
+    expected_image_id: str,
+) -> str:
+    try:
+        _atomic_replace_compose(
+            record.stack.directory / record.stack.file,
+            backup.read_bytes().decode("utf-8"),
+            prefix="tracking-rollback", expected_source_hash=plan.rendered_hash,
+        )
+        if recreate_started:
+            restore_runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
+            if DockerCli(runner=restore_runner).image_id(record.item.image) != expected_image_id:
+                raise RuntimeError("Local image changed; automatic recreation would use a different image")
+            ComposeCli(runner=restore_runner).up(
+                record.stack.directory, record.stack.file, [record.item.service],
+                force_recreate=True, no_deps=True, remove_orphans=False,
+                project_directory=record.stack.project_directory,
+            )
+    except Exception as exc:  # noqa: BLE001 - preserve backup for manual recovery.
+        return _safe_exception_detail(settings, "rollback failed", exc)
+    return ""
+
+
 def _run_tracking_repair(
     settings: WebSettings,
     payload: TrackingRepairApplyRequest,
@@ -475,26 +555,11 @@ def _run_tracking_repair(
             UpdaterProgressEvent(phase="preflight", status="running", message="Revalidating Compose and runtime state."),
         )
         lock = web_jobs._acquire_apply_wud_lock(settings)
-        plan, record = build_tracking_repair_plan(settings, payload)
-        if not secrets.compare_digest(plan.plan_id, payload.plan_id) or not plan.can_apply:
-            raise RuntimeError("Tracking repair plan changed; preview it again.")
+        plan, record, expected_image_id, runner, compose = _revalidate_tracking_repair(
+            settings, payload
+        )
         stack = record.stack
         item = record.item
-        expected_image_id = _matching_runtime_image_id(
-            settings, stack, item.service, item.image
-        )
-        if not expected_image_id:
-            raise RuntimeError("Running image changed before tracking repair; reconcile the image and preview again.")
-        runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
-        compose = ComposeCli(runner=runner)
-        project_name = compose.try_config_project_name(
-            stack.directory, stack.file, project_directory=stack.project_directory
-        )
-        if project_name != stack.project_name:
-            raise RuntimeError("Compose project changed before tracking repair.")
-        running = web_retags._running_retag_compose_service_keys(settings)
-        if running is None or web_retags._retag_compose_service_key(stack, item.service) not in running:
-            raise RuntimeError("Selected service is no longer confirmed running.")
         web_jobs._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="preflight", status="success", message="Selected service and plan revalidated."),
@@ -536,15 +601,7 @@ def _run_tracking_repair(
             wait=True, wait_timeout=web_retags._effective_config(settings).max_wait,
             project_directory=stack.project_directory,
         )
-        _require_approved_compose_source(path, plan.rendered_hash)
-        container_ids = compose.ps_quiet(
-            stack.directory, stack.file, [item.service],
-            project_directory=stack.project_directory,
-        )
-        if len(container_ids) != 1:
-            raise RuntimeError("Service did not restart after tracking repair.")
-        if DockerCli(runner=runner).try_container_image_id(container_ids[0]) != expected_image_id:
-            raise RuntimeError("Service restarted with a different image; inspect it before retrying tracking repair.")
+        _verify_recreated_service(compose, runner, record, expected_image_id, plan.rendered_hash)
         web_jobs._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="success", message="Selected service is running after recreation."),
@@ -559,26 +616,14 @@ def _run_tracking_repair(
             finished_at=utc_timestamp(),
         )
     except Exception as exc:  # noqa: BLE001 - job reports and audits every failure.
-        rollback_error = ""
-        if changed and backup is not None and record is not None and plan is not None:
-            try:
-                restore_path = record.stack.directory / record.stack.file
-                _atomic_replace_compose(
-                    restore_path, backup.read_bytes().decode("utf-8"),
-                    prefix="tracking-rollback", expected_source_hash=plan.rendered_hash,
-                )
-                if recreate_started:
-                    restore_runner = CommandRunner(env=settings.command_env) if settings.command_env is not None else CommandRunner()
-                    if DockerCli(runner=restore_runner).image_id(record.item.image) != expected_image_id:
-                        raise RuntimeError("Local image changed; automatic recreation would use a different image")
-                    ComposeCli(runner=restore_runner).up(
-                        record.stack.directory, record.stack.file, [record.item.service],
-                        force_recreate=True, no_deps=True, remove_orphans=False,
-                        project_directory=record.stack.project_directory,
-                    )
-            except Exception as restore_exc:  # noqa: BLE001 - include rollback failure.
-                rollback_error = _safe_exception_detail(settings, "rollback failed", restore_exc)
-                retain_backup = True
+        rollback_error = (
+            _rollback_tracking_repair(
+                settings, record, plan, backup, recreate_started, expected_image_id,
+            )
+            if changed and backup is not None and record is not None and plan is not None
+            else ""
+        )
+        retain_backup = bool(rollback_error)
         error = _safe_exception_detail(settings, "tracking repair failed", exc)
         if rollback_error:
             error += f"; {rollback_error}. Compose backup was preserved for manual recovery"

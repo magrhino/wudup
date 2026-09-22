@@ -104,6 +104,21 @@ def test_inventory_distinguishes_exact_channels_from_version_releases(
     assert item["suggested_regex"] == suggested
 
 
+def test_suggested_regex_rejects_oversized_compose_tag_before_release_match() -> None:
+    tag = "v1." + "1." * 10_000 + "invalid!"
+
+    assert web_tracking._suggested_regex(tag, f"repo/app:{tag}") == ""
+
+
+@pytest.mark.parametrize(
+    ("tag", "release_shaped"),
+    [("v1.2", True), ("1.2.3", True), ("v1.2.3rc", True),
+     ("v1.2.3..foo", True), ("v1.2._foo", False), ("latest", False)],
+)
+def test_release_shape_keeps_dotted_suffix_rules(tag: str, release_shaped: bool) -> None:
+    assert web_tracking._release_shaped_tag(tag) is release_shaped
+
+
 def test_repair_previews_exact_mutable_tag_without_a_numeric_wildcard(tmp_path: Path) -> None:
     client, _fake_root, compose_path = _tracking_fixture(tmp_path, tag="latest", regex="")
     original = compose_path.read_text(encoding="utf-8")

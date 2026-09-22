@@ -1897,18 +1897,10 @@ def _reconcile_container_observations(
                 unresolved_containers.append(container)
             continue
 
-        if observation.update_available:
-            _append_pending_observation(
-                container,
-                containers,
-                pending_observations,
-                observed_at=observed_at,
-            )
-            continue
-
-        update_kind = _object(cast(Mapping[str, object], raw).get("updateKind"))
-        if _hidden_update_kind_has_delta(update_kind):
-            hidden_update_candidates.append(container)
+        _record_healthy_observation(
+            raw, observation, containers, pending_observations,
+            hidden_update_candidates, observed_at,
+        )
 
     return (
         tuple(containers),
@@ -1923,6 +1915,25 @@ def _reconcile_container_observations(
         tuple(observation_diagnostics),
         pending_observations,
     )
+
+
+def _record_healthy_observation(
+    raw: object,
+    observation: _WudContainerObservation,
+    containers: list[WudApiContainer],
+    pending_observations: dict[WudContainerIdentity, _PendingObservation],
+    hidden_update_candidates: list[WudApiContainer],
+    observed_at: str,
+) -> None:
+    container = observation.container
+    if observation.update_available:
+        _append_pending_observation(
+            container, containers, pending_observations, observed_at=observed_at,
+        )
+        return
+    update_kind = _object(cast(Mapping[str, object], raw).get("updateKind"))
+    if _hidden_update_kind_has_delta(update_kind):
+        hidden_update_candidates.append(container)
 
 
 def _parse_container_observation(

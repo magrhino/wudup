@@ -24,6 +24,7 @@ const stackSelection = {
 const mobileNavLabels = [
   "Dashboard",
   "Pending",
+  "Containers",
   "Retags",
   "History",
   "Policies",
