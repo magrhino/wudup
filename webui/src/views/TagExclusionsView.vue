@@ -110,7 +110,7 @@ watch(() => route?.query?.service, (value) => {
   resetExclusionForm();
   if (typeof value === "string") {
     exclusionForm.scope = "service";
-    exclusionForm.serviceKey = value;
+    applyServiceSelection(value);
   }
 });
 
@@ -200,7 +200,12 @@ async function confirmStatusChange(): Promise<void> {
 }
 
 onMounted(() => {
-  runInBackground(updates.loadUpdateTargets());
+  runInBackground(updates.loadUpdateTargets().then(() => {
+    const service = route?.query?.service;
+    if (typeof service === "string" && exclusionForm.serviceKey === service) {
+      applyServiceSelection(service);
+    }
+  }));
   runInBackground(settings.loadTagExclusions(statusFilter.value));
 });
 
