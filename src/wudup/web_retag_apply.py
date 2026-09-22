@@ -247,126 +247,153 @@ def _apply_retag_updates(
     successful_updates: list[_RetagPlanUpdate] = []
     for stack in _ordered_retag_stacks(build.updates):
         stack_updates = [item for item in build.updates if item.stack.index == stack.index]
-        services = tuple(
-            sorted(
-                {
-                    service
-                    for item in stack_updates
-                    for service in item.update.services
-                }
-            )
+        _apply_retag_stack(
+            settings,
+            compose,
+            docker,
+            config,
+            stack,
+            stack_updates,
+            jobs,
+            apply_condition,
+            job_id,
+            successful_updates,
         )
-        backup: Path | None = None
-        written_hashes: list[str] = []
-        try:
-            _revalidate_retag_runtime_before_apply(settings, compose, stack_updates)
-            _progress(
-                jobs,
-                apply_condition,
-                job_id,
-                "compose-retag",
-                "running",
-                f"[{stack.name}] Writing selected retag to Compose.",
-                stack=stack.name,
-                services=services,
-            )
-            compose_path = stack.directory / stack.file
-            backup = _backup_compose(compose_path)
-            backup_hash = _compose_source_hash(backup)
-            applier = (
-                apply_compose_digest_pins
-                if stack_updates[0].digest_pin
-                else apply_compose_retag_updates
-            )
-            applied = applier(
-                compose_path,
-                tuple(item.update for item in stack_updates),
-                stack_name=stack.name,
-                written_hashes=written_hashes,
-                expected_source_hash=backup_hash,
-            )
-            if not applied:
-                raise RuntimeError("no Compose image lines were retagged")
-            _progress(
-                jobs,
-                apply_condition,
-                job_id,
-                "compose-retag",
-                "success",
-                f"[{stack.name}] Selected retag was written to Compose.",
-                stack=stack.name,
-                services=services,
-            )
-
-            _progress(
-                jobs,
-                apply_condition,
-                job_id,
-                "pull",
-                "running",
-                f"[{stack.name}] Pulling retagged service image(s).",
-                stack=stack.name,
-                services=services,
-            )
-            compose.pull(
-                stack.directory,
-                stack.file,
-                services,
-                project_directory=stack.project_directory,
-            )
-            _progress(
-                jobs,
-                apply_condition,
-                job_id,
-                "pull",
-                "success",
-                f"[{stack.name}] Retagged service image(s) pulled.",
-                stack=stack.name,
-                services=services,
-            )
-
-            _recreate_retag_services(
-                compose,
-                docker,
-                config,
-                stack,
-                services,
-                jobs,
-                apply_condition,
-                job_id,
-            )
-            web_retag_audit._record_successful_retag_known_images(settings, stack_updates)
-            if backup is not None:
-                _delete_path(backup)
-                backup = None
-            successful_updates.extend(stack_updates)
-        except Exception as exc:
-            if backup is not None:
-                if written_hashes:
-                    try:
-                        _restore_retag_compose(
-                            compose,
-                            docker,
-                            config,
-                            stack,
-                            services,
-                            backup,
-                            jobs,
-                            apply_condition,
-                            job_id,
-                            original_error=str(exc),
-                            expected_source_hash=written_hashes[-1],
-                        )
-                    except Exception as restore_exc:
-                        raise _RetagApplyFailed(
-                            str(restore_exc),
-                            successful_updates,
-                        ) from restore_exc
-                else:
-                    _delete_path(backup)
-                backup = None
-            raise _RetagApplyFailed(str(exc), successful_updates) from exc
     return tuple(successful_updates)
+
+
+def _apply_retag_stack(
+    settings: WebSettings,
+    compose: ComposeCli,
+    docker: DockerCli,
+    config: UpdaterConfig,
+    stack: ComposeStack,
+    stack_updates: list[_RetagPlanUpdate],
+    jobs: dict[str, WebApplyJob],
+    apply_condition: Condition,
+    job_id: str,
+    successful_updates: list[_RetagPlanUpdate],
+) -> None:
+    """Apply one stack, recording success only after persistence and cleanup."""
+    services = tuple(
+        sorted(
+            {
+                service
+                for item in stack_updates
+                for service in item.update.services
+            }
+        )
+    )
+    backup: Path | None = None
+    written_hashes: list[str] = []
+    try:
+        _revalidate_retag_runtime_before_apply(settings, compose, stack_updates)
+        _progress(
+            jobs,
+            apply_condition,
+            job_id,
+            "compose-retag",
+            "running",
+            f"[{stack.name}] Writing selected retag to Compose.",
+            stack=stack.name,
+            services=services,
+        )
+        compose_path = stack.directory / stack.file
+        backup = _backup_compose(compose_path)
+        backup_hash = _compose_source_hash(backup)
+        applier = (
+            apply_compose_digest_pins
+            if stack_updates[0].digest_pin
+            else apply_compose_retag_updates
+        )
+        applied = applier(
+            compose_path,
+            tuple(item.update for item in stack_updates),
+            stack_name=stack.name,
+            written_hashes=written_hashes,
+            expected_source_hash=backup_hash,
+        )
+        if not applied:
+            raise RuntimeError("no Compose image lines were retagged")
+        _progress(
+            jobs,
+            apply_condition,
+            job_id,
+            "compose-retag",
+            "success",
+            f"[{stack.name}] Selected retag was written to Compose.",
+            stack=stack.name,
+            services=services,
+        )
+
+        _progress(
+            jobs,
+            apply_condition,
+            job_id,
+            "pull",
+            "running",
+            f"[{stack.name}] Pulling retagged service image(s).",
+            stack=stack.name,
+            services=services,
+        )
+        compose.pull(
+            stack.directory,
+            stack.file,
+            services,
+            project_directory=stack.project_directory,
+        )
+        _progress(
+            jobs,
+            apply_condition,
+            job_id,
+            "pull",
+            "success",
+            f"[{stack.name}] Retagged service image(s) pulled.",
+            stack=stack.name,
+            services=services,
+        )
+
+        _recreate_retag_services(
+            compose,
+            docker,
+            config,
+            stack,
+            services,
+            jobs,
+            apply_condition,
+            job_id,
+        )
+        web_retag_audit._record_successful_retag_known_images(settings, stack_updates)
+        if backup is not None:
+            _delete_path(backup)
+            backup = None
+        successful_updates.extend(stack_updates)
+    except Exception as exc:
+        if backup is not None:
+            if written_hashes:
+                try:
+                    _restore_retag_compose(
+                        compose,
+                        docker,
+                        config,
+                        stack,
+                        services,
+                        backup,
+                        jobs,
+                        apply_condition,
+                        job_id,
+                        original_error=str(exc),
+                        expected_source_hash=written_hashes[-1],
+                    )
+                except Exception as restore_exc:
+                    raise _RetagApplyFailed(
+                        str(restore_exc),
+                        successful_updates,
+                    ) from restore_exc
+            else:
+                _delete_path(backup)
+            backup = None
+        raise _RetagApplyFailed(str(exc), successful_updates) from exc
 
 
 def _revalidate_retag_runtime_before_apply(
