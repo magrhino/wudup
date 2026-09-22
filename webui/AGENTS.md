@@ -16,7 +16,8 @@ Rules for files under `webui/`. Root `AGENTS.md` controls repo-wide safety, rele
 |---|---|---|---|
 | `src/api/client.ts` | Typed backend API client and response mapping. | Matching backend route/model plus consuming store. | Duplicating fetch logic in components or stores. |
 | `src/stores/connection.ts` | Status, doctor, restart, diagnostics. | API client and consuming view. | Mixing pending-update or settings state here. |
-| `src/stores/updates.ts` | Pending updates, release notes, self-update, apply jobs. | API client, job/release-note views, focused tests. | Sharing mutation state through localStorage. |
+| `src/stores/updates.ts` | Pending updates, release notes, apply jobs. | API client, job/release-note views, focused tests. | Sharing mutation state through localStorage. |
+| `src/stores/selfUpdate.ts` | Self-update status, plans, pull/prepare submission, messages and refresh. | Typed self-update API, app-shell panel, focused store/router tests. | Coupling self-update lifecycle or loading to pending updates; backend safety decisions stay backend-owned. |
 | `src/stores/retags.ts` | Retag targets, choices, preview polling, and the saved GitHub fallback preference. | Retag API, `RetagsView.vue`, focused retag store/view tests. | Duplicating shared apply jobs: use updates store actions to clear/register jobs; updates must not import retags. |
 | `src/stores/tracking.ts`, `src/views/TrackedContainersView.vue` | Compose service inventory, WUD tracking evidence, and plan-first tracking repair. | Typed tracking API and focused view/backend tests. | Treating unavailable WUD inventory as confirmed untracked or enabling demo repair mutations. |
 | `src/stores/runs.ts` | Run history and logs. | API client and run/log views. | Duplicating run state in other stores. |

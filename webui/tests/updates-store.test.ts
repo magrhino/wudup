@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   webApi,
+  type PendingResponse,
+  type PendingRescanResponse,
   type SecurityScanJobResponse,
   type SecurityScanInfo,
   type SecurityScansResponse,
@@ -36,10 +38,6 @@ import {
   releaseNotesResponse,
   securityScanInfo as baseSecurityScanInfo,
   planResponse,
-  selfUpdateApplyResponse,
-  selfUpdatePlanResponse,
-  selfUpdatePrepareResponse,
-  selfUpdateResponse,
   updateTargetsResponse,
 } from "./helpers/fixtures";
 
@@ -100,6 +98,60 @@ function expectReleaseChangelogFetches(fetchMock: ReturnType<typeof vi.fn>): voi
     "https://api.github.com/repos/t-mart/mousehole/releases/tags/v0.5.0",
   );
   expect(fetchMock.mock.calls[1][0]).toBe(TEST_CHANGELOG_URL);
+}
+
+function mockStaleMetadataReload(
+  refreshed: PendingResponse,
+  sourceHash: PendingResponse["source_hash"],
+) {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/pending/metadata") {
+      return Promise.resolve(
+        jsonResponse({
+          status: "stale",
+          requires_pending_reload: true,
+          source_hash: sourceHash,
+          source: refreshed.source,
+          wud_api: refreshed.wud_api,
+          items: [],
+        }),
+      );
+    }
+    if (url === "/api/v1/pending") {
+      return Promise.resolve(jsonResponse(refreshed));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function mockPendingRescanFetch(overrides: Partial<PendingRescanResponse> = {}) {
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/pending/rescan") {
+      return Promise.resolve(jsonResponse(pendingRescanResponse(overrides)));
+    }
+    if (url === "/api/v1/pending") {
+      return Promise.resolve(jsonResponse(pendingResponse()));
+    }
+    if (
+      url === "/api/v1/release-notes" ||
+      url === "/api/v1/release-notes/refresh"
+    ) {
+      return Promise.resolve(jsonResponse(releaseNotesResponse()));
+    }
+    if (url === "/api/v1/security-scans") {
+      return Promise.resolve(jsonResponse(securityScansResponse([])));
+    }
+    if (url === "/api/v1/runs") {
+      return Promise.resolve(jsonResponse([]));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function completeSecurityScanInfo(
@@ -660,26 +712,7 @@ describe("updates store", () => {
       },
       wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: sourceHash,
-            source: refreshed.source,
-            wud_api: wudApiStatus({ last_checked_at: "2026-01-02T00:01:00+00:00" }),
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, sourceHash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -742,26 +775,7 @@ describe("updates store", () => {
       selected,
       { ...unrelated, source_id: "docker.local.worker-new" },
     ]);
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: current.source_hash,
-            source: refreshed.source,
-            wud_api: refreshed.wud_api,
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, current.source_hash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -788,26 +802,7 @@ describe("updates store", () => {
       ...pendingResponse(),
       source_hash: "changed-source-hash",
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/metadata") {
-        return Promise.resolve(
-          jsonResponse({
-            status: "stale",
-            requires_pending_reload: true,
-            source_hash: refreshed.source_hash,
-            source: refreshed.source,
-            wud_api: refreshed.wud_api,
-            items: [],
-          }),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(refreshed));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockStaleMetadataReload(refreshed, refreshed.source_hash);
     useConnectionStore();
     useSettingsStore();
     const auth = useAuthStore();
@@ -1015,29 +1010,7 @@ describe("updates store", () => {
   });
 
   it("rescans pending updates and refreshes dependent state", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(jsonResponse(pendingRescanResponse()));
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockPendingRescanFetch();
     const auth = useAuthStore();
     const ensureCsrf = vi
       .spyOn(auth, "ensureCsrf")
@@ -1089,29 +1062,7 @@ describe("updates store", () => {
   });
 
   it("rescans all pending updates without selected lines", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(jsonResponse(pendingRescanResponse()));
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockPendingRescanFetch();
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-rescan-all");
     useConnectionStore();
@@ -1163,42 +1114,16 @@ describe("updates store", () => {
   });
 
   it("stores blocked pending rescan responses and refreshes dependent state", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/v1/pending/rescan") {
-        return Promise.resolve(
-          jsonResponse(
-            pendingRescanResponse({
-              status: "blocked",
-              scope: "selected",
-              requested_count: 1,
-              watched_count: 0,
-              wud_api: wudApiStatus({
-                state: "auth_required",
-                metadata_available: false,
-              }),
-            }),
-          ),
-        );
-      }
-      if (url === "/api/v1/pending") {
-        return Promise.resolve(jsonResponse(pendingResponse()));
-      }
-      if (
-        url === "/api/v1/release-notes" ||
-        url === "/api/v1/release-notes/refresh"
-      ) {
-        return Promise.resolve(jsonResponse(releaseNotesResponse()));
-      }
-      if (url === "/api/v1/security-scans") {
-        return Promise.resolve(jsonResponse(securityScansResponse([])));
-      }
-      if (url === "/api/v1/runs") {
-        return Promise.resolve(jsonResponse([]));
-      }
-      return Promise.resolve(jsonResponse({}));
+    const fetchMock = mockPendingRescanFetch({
+      status: "blocked",
+      scope: "selected",
+      requested_count: 1,
+      watched_count: 0,
+      wud_api: wudApiStatus({
+        state: "auth_required",
+        metadata_available: false,
+      }),
     });
-    vi.stubGlobal("fetch", fetchMock);
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-rescan-blocked");
     useConnectionStore();
@@ -1321,148 +1246,6 @@ describe("updates store", () => {
         "x-wud-csrf-token",
       ),
     ).toBe("csrf-notes");
-  });
-
-  it("loads self-update status for the shell banner", async () => {
-    const fetchMock = mockFetch(selfUpdateResponse());
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-
-    await updates.loadSelfUpdate();
-
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/self-update");
-    expect(updates.selfUpdate?.latest_tag).toBe("v0.25.0");
-  });
-
-  it("loads self-update tag prepare plan", async () => {
-    const fetchMock = mockFetch(selfUpdatePlanResponse());
-    const auth = useAuthStore();
-    const ensureCsrf = vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-plan");
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-
-    const response = await updates.planSelfUpdate();
-
-    expect(ensureCsrf).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/self-update/plan");
-    expect(updates.selfUpdatePlan?.plan.plan_id).toBe("self-update-plan-test");
-    expect(response.external_recreate_required).toBe(true);
-    expect(
-      ((fetchMock.mock.calls[0][1] as RequestInit).headers as Headers).get(
-        "x-wud-csrf-token",
-      ),
-    ).toBe("csrf-plan");
-  });
-
-  it("passes csrf from auth store to self-update apply", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(selfUpdateApplyResponse()))
-      .mockResolvedValueOnce(jsonResponse(selfUpdateResponse()));
-    vi.stubGlobal("fetch", fetchMock);
-    const auth = useAuthStore();
-    const ensureCsrf = vi
-      .spyOn(auth, "ensureCsrf")
-      .mockResolvedValue("csrf-self-update");
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-    updates.selfUpdate = selfUpdateResponse();
-
-    const response = await updates.applySelfUpdate();
-
-    expect(ensureCsrf).toHaveBeenCalledTimes(1);
-    expect(response.container).toBe("wudup");
-    expect(updates.selfUpdateMessage).toBe(
-      "Image prepared, but the running container still uses the previous image. Recreate the WUDup container to run the new version.",
-    );
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/self-update");
-    expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
-      confirmation: "pull_image",
-      current_tag: "v0.24.2",
-      latest_tag: "v0.25.0",
-      target_image: "ghcr.io/magrhino/wudup:latest",
-      restart_container: "wudup",
-    });
-    expect(
-      ((fetchMock.mock.calls[0][1] as RequestInit).headers as Headers).get(
-        "x-wud-csrf-token",
-      ),
-    ).toBe("csrf-self-update");
-  });
-
-  it("prepares pinned self-update tags from cached plan", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(selfUpdatePrepareResponse()))
-      .mockResolvedValueOnce(jsonResponse(selfUpdateResponse({ strategy: "prepare_tag_update" })));
-    vi.stubGlobal("fetch", fetchMock);
-    const auth = useAuthStore();
-    const ensureCsrf = vi
-      .spyOn(auth, "ensureCsrf")
-      .mockResolvedValue("csrf-self-update");
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-    updates.selfUpdate = selfUpdateResponse({
-      strategy: "prepare_tag_update",
-      current_image: "ghcr.io/magrhino/wudup:v0.24.2",
-      target_image: "ghcr.io/magrhino/wudup:v0.25.0",
-      external_recreate_required: true,
-    });
-    updates.selfUpdatePlan = selfUpdatePlanResponse();
-
-    const response = await updates.applySelfUpdate();
-
-    expect(ensureCsrf).toHaveBeenCalledTimes(1);
-    expect(response.status).toBe("tag_prepared");
-    expect(updates.selfUpdateMessage).toBe(
-      "Tag updated and image pulled. Recreate the WUDup container from outside the WebUI to run the new version. Tagged deployments are recommended for predictable updates.",
-    );
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/self-update/prepare");
-    expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
-      confirmation: "prepare_tag_update",
-      plan_id: "self-update-plan-test",
-      current_tag: "v0.24.2",
-      latest_tag: "v0.25.0",
-      target_image: "ghcr.io/magrhino/wudup:v0.25.0",
-      restart_container: "wudup",
-    });
-  });
-
-  it("requires a loaded self-update tag prepare plan before applying", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const auth = useAuthStore();
-    const ensureCsrf = vi
-      .spyOn(auth, "ensureCsrf")
-      .mockResolvedValue("csrf-self-update");
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-    updates.selfUpdate = selfUpdateResponse({
-      strategy: "prepare_tag_update",
-      current_image: "ghcr.io/magrhino/wudup:v0.24.2",
-      target_image: "ghcr.io/magrhino/wudup:v0.25.0",
-      external_recreate_required: true,
-    });
-
-    await expect(updates.applySelfUpdate()).rejects.toThrow(
-      "Self-update tag update preview must be loaded before applying",
-    );
-
-    expect(ensureCsrf).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(updates.selfUpdateError).toBe(
-      "Self-update tag update preview must be loaded before applying",
-    );
   });
 
   it("remembers active apply jobs and clears terminal jobs", async () => {

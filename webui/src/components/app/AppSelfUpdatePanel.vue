@@ -2,30 +2,30 @@
 import { computed, onMounted, ref } from "vue";
 import { NAlert } from "naive-ui";
 
-import { useUpdatesStore } from "../../stores/updates";
+import { useSelfUpdateStore } from "../../stores/selfUpdate";
 import { runInBackground } from "../../utils/promises";
 import AppSelfUpdateBanner from "./AppSelfUpdateBanner.vue";
 import AppSelfUpdateDialog from "./AppSelfUpdateDialog.vue";
 
-const updates = useUpdatesStore();
+const selfUpdate = useSelfUpdateStore();
 
 const RELEASES_URL = "https://github.com/magrhino/wudup/releases";
 const selfUpdateDialogVisible = ref(false);
 
 const selfUpdateVisible = computed(
-  () => updates.selfUpdate?.status === "available",
+  () => selfUpdate.selfUpdate?.status === "available",
 );
 const selfUpdateButtonDisabled = computed(
-  () => updates.loading || !(updates.selfUpdate?.can_update ?? false),
+  () => selfUpdate.loading || !(selfUpdate.selfUpdate?.can_update ?? false),
 );
 const selfUpdateStrategy = computed(
-  () => updates.selfUpdate?.strategy ?? "pull_image",
+  () => selfUpdate.selfUpdate?.strategy ?? "pull_image",
 );
 const selfUpdateConfirmDisabled = computed(
   () =>
     selfUpdateButtonDisabled.value ||
     (selfUpdateStrategy.value === "prepare_tag_update" &&
-      updates.selfUpdatePlan === null),
+      selfUpdate.selfUpdatePlan === null),
 );
 const selfUpdateActionLabel = computed(() =>
   selfUpdateStrategy.value === "prepare_tag_update"
@@ -41,10 +41,10 @@ const selfUpdateActionTitle = computed(() => {
     : "Review release notes and pull image";
 });
 const selfUpdateDisabledReason = computed(
-  () => updates.selfUpdate?.disabled_reason ?? "",
+  () => selfUpdate.selfUpdate?.disabled_reason ?? "",
 );
 const selfUpdateFacts = computed(() => {
-  const update = updates.selfUpdate;
+  const update = selfUpdate.selfUpdate;
   if (!update) {
     return "";
   }
@@ -53,16 +53,16 @@ const selfUpdateFacts = computed(() => {
   return `${image} -> ${container}`;
 });
 const selfUpdateReleaseCapTitle = computed(() => {
-  const cap = updates.selfUpdate?.release_notes_cap ?? 10;
+  const cap = selfUpdate.selfUpdate?.release_notes_cap ?? 10;
   return `Showing the newest ${cap} matching releases between the running version and latest version. Open GitHub releases for older notes.`;
 });
 const selfUpdateReleasesUrl = computed(() => {
-  const latest = updates.selfUpdate?.latest_tag;
+  const latest = selfUpdate.selfUpdate?.latest_tag;
   return latest
     ? `${RELEASES_URL}/tag/${latest}`
     : RELEASES_URL;
 });
-const selfUpdatePlanStack = computed(() => updates.selfUpdatePlan?.plan.stacks[0]);
+const selfUpdatePlanStack = computed(() => selfUpdate.selfUpdatePlan?.plan.stacks[0]);
 const selfUpdatePlanTagUpdates = computed(
   () => selfUpdatePlanStack.value?.tag_updates ?? [],
 );
@@ -70,21 +70,21 @@ const selfUpdatePlanTagUpdates = computed(
 async function openSelfUpdateDialog(): Promise<void> {
   selfUpdateDialogVisible.value = true;
   if (
-    updates.selfUpdate?.strategy === "prepare_tag_update" &&
-    updates.selfUpdatePlan === null
+    selfUpdate.selfUpdate?.strategy === "prepare_tag_update" &&
+    selfUpdate.selfUpdatePlan === null
   ) {
-    await updates.planSelfUpdate().catch(() => undefined);
+    await selfUpdate.planSelfUpdate().catch(() => undefined);
   }
 }
 
 async function confirmSelfUpdate(): Promise<void> {
-  await updates.applySelfUpdate();
+  await selfUpdate.applySelfUpdate();
   selfUpdateDialogVisible.value = false;
 }
 
 onMounted(() => {
-  if (updates.selfUpdate === null) {
-    runInBackground(updates.loadSelfUpdate());
+  if (selfUpdate.selfUpdate === null) {
+    runInBackground(selfUpdate.loadSelfUpdate());
   }
 });
 </script>
@@ -92,8 +92,8 @@ onMounted(() => {
 <template>
   <AppSelfUpdateBanner
     v-if="selfUpdateVisible"
-    :current-tag="updates.selfUpdate?.current_tag"
-    :latest-tag="updates.selfUpdate?.latest_tag"
+    :current-tag="selfUpdate.selfUpdate?.current_tag"
+    :latest-tag="selfUpdate.selfUpdate?.latest_tag"
     :facts="selfUpdateFacts"
     :disabled-reason="selfUpdateDisabledReason"
     :button-disabled="selfUpdateButtonDisabled"
@@ -103,27 +103,27 @@ onMounted(() => {
   />
 
   <n-alert
-    v-if="updates.selfUpdateMessage"
+    v-if="selfUpdate.selfUpdateMessage"
     class="self-update-message"
     type="success"
   >
-    {{ updates.selfUpdateMessage }}
+    {{ selfUpdate.selfUpdateMessage }}
   </n-alert>
   <n-alert
-    v-if="updates.selfUpdateError"
+    v-if="selfUpdate.selfUpdateError"
     class="self-update-message"
     type="error"
   >
-    {{ updates.selfUpdateError }}
+    {{ selfUpdate.selfUpdateError }}
   </n-alert>
 
   <AppSelfUpdateDialog
     v-model:show="selfUpdateDialogVisible"
     :strategy="selfUpdateStrategy"
     :action-label="selfUpdateActionLabel"
-    :loading="updates.loading"
+    :loading="selfUpdate.loading"
     :confirm-disabled="selfUpdateConfirmDisabled"
-    :self-update="updates.selfUpdate"
+    :self-update="selfUpdate.selfUpdate"
     :plan-stack="selfUpdatePlanStack"
     :tag-updates="selfUpdatePlanTagUpdates"
     :release-cap-title="selfUpdateReleaseCapTitle"
