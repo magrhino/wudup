@@ -121,7 +121,8 @@ def test_physical_lf_count_including_nonfinal_newline(repo, content, count):
     head = repo.commit()
     code, report = repo.check()
     assert code == 0
-    assert report["base"] == repo.base and report["head"] == head
+    assert report["base"] == repo.base
+    assert report["head"] == head
     assert row(report, "source.py") == {
         "path": "source.py",
         "base_path": None,
@@ -229,7 +230,8 @@ def test_production_category_moves_cannot_silently_bypass(repo, target, category
     code, report = repo.check()
     assert code == 1
     source = row(report, target)
-    assert source["category"] == category and source["base_category"] == "production"
+    assert source["category"] == category
+    assert source["base_category"] == "production"
     assert "non-enforced category" in source["failures"][0]
 
 
@@ -270,8 +272,10 @@ def test_explicit_non_enforced_categories_stay_visible(repo, path, category):
     code, report = repo.check()
     assert code == 0
     source = row(report, path)
-    assert source["category"] == category and source["head_lines"] == 1000
-    assert source["ceiling"] is None and source["failures"] == []
+    assert source["category"] == category
+    assert source["head_lines"] == 1000
+    assert source["ceiling"] is None
+    assert source["failures"] == []
 
 
 @pytest.mark.parametrize(
@@ -302,7 +306,8 @@ def test_worktree_policy_edits_and_untracked_source_are_ignored(repo):
     repo.lines("untracked.py", 1000)
     repo.write(POLICY_PATH, b"not JSON")
     code, report = repo.check()
-    assert code == 0 and report["head"] == head
+    assert code == 0
+    assert report["head"] == head
     assert report["policy_source"] == f"{head}:{POLICY_PATH}"
     assert row(report, "source.py")["head_lines"] == 800
     assert not any(item["path"] == "untracked.py" for item in report["files"])
@@ -313,7 +318,8 @@ def test_committed_source_is_never_executed_and_odd_paths_are_literal(repo):
     repo.write(path, b"raise RuntimeError('never execute')\n")
     repo.commit()
     code, report = repo.check()
-    assert code == 0 and row(report, path)["head_lines"] == 1
+    assert code == 0
+    assert row(report, path)["head_lines"] == 1
     assert not (repo.path / "marker").exists()
 
 
@@ -333,9 +339,11 @@ def test_pending_baseline_blocks_enforcement_and_report_only_never_claims_pass(r
     repo.save_policy()
     repo.commit()
     code, report = repo.check()
-    assert code == 2 and report["result"] == "BLOCKED"
+    assert code == 2
+    assert report["result"] == "BLOCKED"
     code, report = repo.check("--report-only")
-    assert code == 0 and report["result"] == "REPORT ONLY / NOT ENFORCED"
+    assert code == 0
+    assert report["result"] == "REPORT ONLY / NOT ENFORCED"
     assert "Baseline pending" in report["blocked"][0]
 
 
@@ -343,7 +351,8 @@ def test_external_policy_is_only_allowed_for_explicit_report_only(repo):
     external = repo.path / "external-policy.json"
     external.write_text(json.dumps(repo.policy))
     code, report = repo.check("--policy-file", str(external))
-    assert code == 2 and "requires --report-only" in report["error"]
+    assert code == 2
+    assert "requires --report-only" in report["error"]
     historical = repo.policy["baseline"]["commit"]
     code, report = repo.check(
         "--report-only",
@@ -352,7 +361,8 @@ def test_external_policy_is_only_allowed_for_explicit_report_only(repo):
         base=historical,
         head=historical,
     )
-    assert code == 0 and report["result"] == "REPORT ONLY / NOT ENFORCED"
+    assert code == 0
+    assert report["result"] == "REPORT ONLY / NOT ENFORCED"
     assert report["policy_source"] == "report-only external policy"
 
 
@@ -360,7 +370,8 @@ def test_missing_committed_policy_is_an_error(repo):
     (repo.path / POLICY_PATH).unlink()
     repo.commit()
     code, report = repo.check()
-    assert code == 2 and "committed head" in report["error"]
+    assert code == 2
+    assert "committed head" in report["error"]
 
 
 @pytest.mark.parametrize(
@@ -381,7 +392,8 @@ def test_malformed_exception_metadata_fails_closed(repo, change):
     repo.save_policy()
     repo.commit()
     code, report = repo.check()
-    assert code == 2 and "Invalid policy" in report["error"]
+    assert code == 2
+    assert "Invalid policy" in report["error"]
 
 
 @pytest.mark.parametrize(
@@ -419,7 +431,8 @@ def test_git_repository_environment_cannot_redirect_explicit_repo(repo, monkeypa
     repo.commit()
     monkeypatch.setenv("GIT_DIR", str(repo.path / "missing-git-dir"))
     code, report = repo.check()
-    assert code == 0 and row(report, "source.py")["head_lines"] == 1
+    assert code == 0
+    assert row(report, "source.py")["head_lines"] == 1
 
 
 def test_diff_drivers_are_never_executed(repo):
@@ -433,7 +446,8 @@ def test_diff_drivers_are_never_executed(repo):
     repo.lines("moved.py", 11)
     repo.commit()
     code, report = repo.check()
-    assert code == 0 and row(report, "moved.py")["status"] == "renamed"
+    assert code == 0
+    assert row(report, "moved.py")["status"] == "renamed"
     assert not (repo.path / "driver-ran").exists()
 
 
@@ -450,7 +464,8 @@ def test_thresholds_come_from_the_policy(repo):
     repo.lines("source.py", 9)
     repo.commit()
     code, report = repo.check()
-    assert code == 1 and row(report, "source.py")["ceiling"] == 8
+    assert code == 1
+    assert row(report, "source.py")["ceiling"] == 8
 
 
 def test_non_deferred_record_may_have_no_followup(repo):
@@ -469,12 +484,14 @@ def test_baseline_must_be_ancestor_of_requested_base(repo):
     repo.save_policy()
     repo.commit()
     code, report = repo.check()
-    assert code == 2 and "merge-base failed" in report["error"]
+    assert code == 2
+    assert "merge-base failed" in report["error"]
 
 
 def test_option_like_ref_does_not_become_git_option(repo):
     code, report = repo.check(head="--help")
-    assert code == 2 and "rev-parse failed" in report["error"]
+    assert code == 2
+    assert "rev-parse failed" in report["error"]
 
 
 def test_draft_policy_has_no_initial_ceilings_or_integration_baseline():

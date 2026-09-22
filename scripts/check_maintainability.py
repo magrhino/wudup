@@ -118,11 +118,10 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(f"Invalid policy: {message}")
 
 
-def keys(value: object, expected: set[str], label: str) -> None:
-    require(
-        isinstance(value, dict) and set(value) == expected,
-        f"{label} fields must be {sorted(expected)}",
-    )
+def keys(value: object, expected: set[str], label: str) -> dict:
+    if isinstance(value, dict) and set(value) == expected:
+        return value
+    raise ValueError(f"Invalid policy: {label} fields must be {sorted(expected)}")
 
 
 def nonempty(value: object) -> bool:
@@ -145,8 +144,91 @@ def issue_link(value: object) -> bool:
     )
 
 
+def validate_baseline(value: object) -> None:
+    baseline = keys(value, {"status", "commit", "reason", "follow_up"}, "baseline")
+    require(
+        baseline["status"] in {"pending", "ready"},
+        "baseline status must be pending or ready",
+    )
+    require(
+        nonempty(baseline["reason"]) and issue_link(baseline["follow_up"]),
+        "baseline needs a reason and linked follow-up",
+    )
+    if baseline["status"] == "ready":
+        require(
+            isinstance(baseline["commit"], str)
+            and bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", baseline["commit"])),
+            "ready baseline needs a full commit ID",
+        )
+    else:
+        require(baseline["commit"] is None, "pending baseline must not claim a commit")
+
+
+def validate_thresholds(value: object) -> None:
+    thresholds = keys(value, {"warn", "block"}, "thresholds")
+    warn, block = thresholds["warn"], thresholds["block"]
+    require(
+        type(warn) is int and type(block) is int and 0 < warn < block,
+        "thresholds must be positive integers with warn < block",
+    )
+
+
+def validate_category_paths(
+    definition_value: object, category: str, field: str
+) -> None:
+    definition = keys(
+        definition_value,
+        {field, "extensions"} if category == "production" else {field},
+        category,
+    )
+    values = definition[field]
+    require(isinstance(values, list), f"{category}.{field} must be a list")
+    for value in values:
+        candidate = value
+        if isinstance(value, str) and field == "prefixes" and value.endswith("/"):
+            candidate = value[:-1]
+        require(
+            exact_path(candidate) and (field != "prefixes" or value.endswith("/")),
+            f"invalid {category}.{field} entry",
+        )
+
+
+def validate_exception(value: object, section: str) -> None:
+    record = keys(
+        value,
+        {"ceiling", "reason", "deferred", "follow_up", "re_review"},
+        section,
+    )
+    require(
+        type(record["ceiling"]) is int and record["ceiling"] > 0,
+        "ceiling must be a positive integer",
+    )
+    require(
+        nonempty(record["reason"]) and nonempty(record["re_review"]),
+        "exceptions need a reason and re-review condition",
+    )
+    require(type(record["deferred"]) is bool, "deferred must be boolean")
+    require(
+        issue_link(record["follow_up"])
+        if record["deferred"]
+        else record["follow_up"] is None or issue_link(record["follow_up"]),
+        "deferred extraction needs a linked follow-up",
+    )
+
+
+def validate_exceptions(value: object, section: str) -> None:
+    if isinstance(value, dict):
+        for path, record in value.items():
+            require(
+                exact_path(path), f"{section} needs exact repository-relative paths"
+            )
+            validate_exception(record, section)
+        return
+    raise ValueError(f"Invalid policy: {section} must be an exact-path mapping")
+
+
 def validate_policy(policy: object) -> dict:
-    keys(
+    policy = keys(
         policy,
         {
             "version",
@@ -166,55 +248,15 @@ def validate_policy(policy: object) -> dict:
     require(
         type(policy["version"]) is int and policy["version"] == 1, "version must be 1"
     )
-    baseline = policy["baseline"]
-    keys(baseline, {"status", "commit", "reason", "follow_up"}, "baseline")
-    require(
-        baseline["status"] in {"pending", "ready"},
-        "baseline status must be pending or ready",
-    )
-    require(
-        nonempty(baseline["reason"]) and issue_link(baseline["follow_up"]),
-        "baseline needs a reason and linked follow-up",
-    )
-    if baseline["status"] == "ready":
-        require(
-            isinstance(baseline["commit"], str)
-            and bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", baseline["commit"])),
-            "ready baseline needs a full commit ID",
-        )
-    else:
-        require(baseline["commit"] is None, "pending baseline must not claim a commit")
-    keys(policy["thresholds"], {"warn", "block"}, "thresholds")
-    warn, block = policy["thresholds"]["warn"], policy["thresholds"]["block"]
-    require(
-        type(warn) is int and type(block) is int and 0 < warn < block,
-        "thresholds must be positive integers with warn < block",
-    )
+    validate_baseline(policy["baseline"])
+    validate_thresholds(policy["thresholds"])
     for category, field in (
         ("tests", "prefixes"),
         ("generated", "prefixes"),
         ("locks", "paths"),
         ("production", "paths"),
     ):
-        keys(
-            policy[category],
-            {field, "extensions"} if category == "production" else {field},
-            category,
-        )
-        values = policy[category][field]
-        require(isinstance(values, list), f"{category}.{field} must be a list")
-        for value in values:
-            candidate = (
-                value[:-1]
-                if isinstance(value, str)
-                and field == "prefixes"
-                and value.endswith("/")
-                else value
-            )
-            require(
-                exact_path(candidate) and (field != "prefixes" or value.endswith("/")),
-                f"invalid {category}.{field} entry",
-            )
+        validate_category_paths(policy[category], category, field)
     extensions = policy["production"]["extensions"]
     require(
         isinstance(extensions, list)
@@ -226,34 +268,7 @@ def validate_policy(policy: object) -> dict:
         "production extensions must be suffixes",
     )
     for section in ("ceilings", "allowances"):
-        require(
-            isinstance(policy[section], dict),
-            f"{section} must be an exact-path mapping",
-        )
-        for path, record in policy[section].items():
-            require(
-                exact_path(path), f"{section} needs exact repository-relative paths"
-            )
-            keys(
-                record,
-                {"ceiling", "reason", "deferred", "follow_up", "re_review"},
-                section,
-            )
-            require(
-                type(record["ceiling"]) is int and record["ceiling"] > 0,
-                "ceiling must be a positive integer",
-            )
-            require(
-                nonempty(record["reason"]) and nonempty(record["re_review"]),
-                "exceptions need a reason and re-review condition",
-            )
-            require(type(record["deferred"]) is bool, "deferred must be boolean")
-            require(
-                issue_link(record["follow_up"])
-                if record["deferred"]
-                else record["follow_up"] is None or issue_link(record["follow_up"]),
-                "deferred extraction needs a linked follow-up",
-            )
+        validate_exceptions(policy[section], section)
     require(
         not (policy["ceilings"].keys() & policy["allowances"].keys()),
         "a path cannot have both a ceiling and an allowance",
@@ -286,15 +301,9 @@ def category(path: str, mode: str, policy: dict) -> str:
     return "other"
 
 
-def file_report(
-    path: str, old: str | None, before: dict, after: dict, counts: dict, policy: dict
-) -> dict:
-    old_entry, new_entry = before.get(old), after.get(path)
-    base_lines = counts.get(old_entry[1], 0) if old_entry else 0
-    head_lines = counts.get(new_entry[1], 0) if new_entry else 0
-    base_category = category(old, old_entry[0], policy) if old_entry else None
-    head_category = category(path, new_entry[0], policy) if new_entry else None
-    current_category = head_category or base_category
+def applicable_ceiling(
+    path: str, old: str | None, current_category: str, policy: dict
+) -> tuple[str | None, dict | None, int | None]:
     record_path = next(
         (
             name
@@ -306,53 +315,76 @@ def file_report(
     record = policy["ceilings"].get(record_path) or policy["allowances"].get(
         record_path
     )
-    ceiling = (
-        record["ceiling"]
-        if record
-        else policy["thresholds"]["block"]
-        if current_category in ENFORCED_CATEGORIES
-        else None
-    )
+    ceiling = None
+    if record:
+        ceiling = record["ceiling"]
+    elif current_category in ENFORCED_CATEGORIES:
+        ceiling = policy["thresholds"]["block"]
+    return record_path, record, ceiling
+
+
+def file_findings(row: dict, record: dict | None, policy: dict) -> tuple[list, list]:
     failures, warnings = [], []
+    if row["status"] == "deleted":
+        return failures, warnings
+    base_category, head_category = row["base_category"], row["category"]
+    base_lines, head_lines = row["base_lines"], row["head_lines"]
     if (
-        new_entry
-        and base_category in ENFORCED_CATEGORIES
+        base_category in ENFORCED_CATEGORIES
         and head_category not in ENFORCED_CATEGORIES
     ):
         failures.append(
             "Production moved to a non-enforced category; preserve its production classification or request an exact-path declarative allowance."
         )
-    if new_entry and head_category in ENFORCED_CATEGORIES:
-        is_new_production = base_category not in ENFORCED_CATEGORIES
-        if (
-            not is_new_production
-            and base_lines > policy["thresholds"]["block"]
-            and head_lines > policy["thresholds"]["block"]
-            and not record
-        ):
-            failures.append(
-                "Existing oversized production file has no reviewed ceiling; complete the approved baseline."
-            )
-        if head_lines > ceiling and (is_new_production or head_lines > base_lines):
-            failures.append(
-                "New or growing production file exceeds its applicable ceiling."
-            )
-        if head_category == "production" and head_lines > policy["thresholds"]["warn"]:
-            warnings.append(
-                "Production size needs a responsibility and navigation review."
-            )
+    if head_category not in ENFORCED_CATEGORIES:
+        return failures, warnings
+    is_new_production = base_category not in ENFORCED_CATEGORIES
+    if (
+        not is_new_production
+        and base_lines > policy["thresholds"]["block"]
+        and head_lines > policy["thresholds"]["block"]
+        and not record
+    ):
+        failures.append(
+            "Existing oversized production file has no reviewed ceiling; complete the approved baseline."
+        )
+    if head_lines > row["ceiling"] and (is_new_production or head_lines > base_lines):
+        failures.append(
+            "New or growing production file exceeds its applicable ceiling."
+        )
+    if head_category == "production" and head_lines > policy["thresholds"]["warn"]:
+        warnings.append("Production size needs a responsibility and navigation review.")
+    return failures, warnings
+
+
+def file_status(
+    path: str, old: str | None, old_entry: tuple | None, new_entry: tuple | None
+) -> str:
     if not new_entry:
-        status = "deleted"
-    elif not old_entry:
-        status = "added"
-    elif path != old:
-        status = "renamed"
-    else:
-        status = "unchanged" if old_entry == new_entry else "modified"
-    return {
+        return "deleted"
+    if not old_entry:
+        return "added"
+    if path != old:
+        return "renamed"
+    return "unchanged" if old_entry == new_entry else "modified"
+
+
+def file_report(
+    path: str, old: str | None, before: dict, after: dict, counts: dict, policy: dict
+) -> dict:
+    old_entry, new_entry = before.get(old), after.get(path)
+    base_lines = counts.get(old_entry[1], 0) if old_entry else 0
+    head_lines = counts.get(new_entry[1], 0) if new_entry else 0
+    base_category = category(old, old_entry[0], policy) if old_entry else None
+    head_category = category(path, new_entry[0], policy) if new_entry else None
+    current_category = head_category or base_category
+    record_path, record, ceiling = applicable_ceiling(
+        path, old, current_category, policy
+    )
+    row = {
         "path": path,
         "base_path": old,
-        "status": status,
+        "status": file_status(path, old, old_entry, new_entry),
         "base_lines": base_lines,
         "head_lines": head_lines,
         "delta": head_lines - base_lines,
@@ -360,9 +392,9 @@ def file_report(
         "base_category": base_category,
         "ceiling": ceiling,
         "ceiling_path": record_path,
-        "failures": failures,
-        "warnings": warnings,
     }
+    row["failures"], row["warnings"] = file_findings(row, record, policy)
+    return row
 
 
 def read_policy(git: Git, head_tree: dict, policy_file: Path | None) -> dict:
@@ -379,6 +411,18 @@ def read_policy(git: Git, head_tree: dict, policy_file: Path | None) -> dict:
         return validate_policy(json.loads(content))
     except (TypeError, KeyError, UnicodeError) as exc:
         raise ValueError("Invalid policy structure or encoding.") from exc
+
+
+def comparison_result(
+    report_only: bool, blocked: list, failed: bool
+) -> tuple[str, int]:
+    if report_only:
+        return "REPORT ONLY / NOT ENFORCED", 0
+    if blocked:
+        return "BLOCKED", 2
+    if failed:
+        return "FAIL", 1
+    return "PASS", 0
 
 
 def run(args: argparse.Namespace) -> tuple[dict, int]:
@@ -416,15 +460,7 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
         baseline = git.commit(policy["baseline"]["commit"])
         git.run("merge-base", "--is-ancestor", baseline, base)
     failed = any(row["failures"] for row in rows)
-    result = (
-        "REPORT ONLY / NOT ENFORCED"
-        if args.report_only
-        else "BLOCKED"
-        if blocked
-        else "FAIL"
-        if failed
-        else "PASS"
-    )
+    result, code = comparison_result(args.report_only, blocked, failed)
     report = {
         "result": result,
         "base": base,
@@ -439,7 +475,7 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
         "remediation": policy["remediation"],
         "anti_gaming": policy["anti_gaming"],
     }
-    return report, 0 if args.report_only else 2 if blocked else 1 if failed else 0
+    return report, code
 
 
 def main() -> int:
