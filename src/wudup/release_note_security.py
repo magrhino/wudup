@@ -159,6 +159,24 @@ def assess_release_security(
             ),
             links,
         )
+    reason_code, reason = _unverified_security_reason(advisories, advisory_ids, severity)
+    return (
+        ReleaseSecurityAssessment(
+            outcome="needs_review",
+            severity=severity,
+            reason_code=reason_code,
+            reason=reason,
+            advisory_ids=advisory_ids,
+        ),
+        links,
+    )
+
+
+def _unverified_security_reason(
+    advisories: list[_FetchedAdvisory],
+    advisory_ids: list[str],
+    severity: ReleaseSecuritySeverity,
+) -> tuple[str, str]:
     if not advisories:
         if advisory_ids:
             reason_code = "advisory_unresolved"
@@ -184,16 +202,7 @@ def assess_release_security(
             f"{severity.title()} advisory found; the running and target versions "
             "could not be matched to structured affected-version evidence."
         )
-    return (
-        ReleaseSecurityAssessment(
-            outcome="needs_review",
-            severity=severity,
-            reason_code=reason_code,
-            reason=reason,
-            advisory_ids=advisory_ids,
-        ),
-        links,
-    )
+    return reason_code, reason
 
 
 def security_assessment_from_mapping(value: object) -> ReleaseSecurityAssessment:
@@ -334,15 +343,23 @@ def _advisory_verifies_exposure(
             context,
         ):
             continue
-        vulnerable_range = str(vulnerability.get("vulnerable_version_range") or "")
-        if not _version_in_range(current, vulnerable_range):
-            continue
-        if _version_in_range(target, vulnerable_range):
-            continue
-        patched_versions = _patched_versions(vulnerability)
-        if patched_versions and any(target >= patched for patched in patched_versions):
+        if _vulnerability_verifies_fix(vulnerability, current, target):
             return True
     return False
+
+
+def _vulnerability_verifies_fix(
+    vulnerability: Mapping[str, Any],
+    current: tuple[int, int, int],
+    target: tuple[int, int, int],
+) -> bool:
+    vulnerable_range = str(vulnerability.get("vulnerable_version_range") or "")
+    if not _version_in_range(current, vulnerable_range):
+        return False
+    if _version_in_range(target, vulnerable_range):
+        return False
+    patched_versions = _patched_versions(vulnerability)
+    return bool(patched_versions) and any(target >= patched for patched in patched_versions)
 
 
 def _security_versions(

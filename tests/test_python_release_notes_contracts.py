@@ -5,6 +5,7 @@ import urllib.error
 from unittest import mock
 
 from wudup.db import init_db, open_db
+from wudup.release_note_providers import CVE_ID_RE, GHSA_ID_RE, _strip_lsio_suffix
 from wudup.release_notes import (
     GitHubClient,
     ReleaseNoteLink,
@@ -14,6 +15,19 @@ from wudup.release_notes import (
     release_note_contexts,
 )
 from wudup.wud_file import parse_wud_text
+
+
+class ProviderPatternContractTests(unittest.TestCase):
+    def test_advisory_identifiers_remain_ascii_and_case_insensitive(self) -> None:
+        self.assertIsNotNone(GHSA_ID_RE.fullmatch("ghsa-Ab12-cD34-Ef56"))
+        self.assertIsNone(GHSA_ID_RE.fullmatch("GHSA-ıaaa-bbbb-cccc"))
+        self.assertIsNotNone(CVE_ID_RE.fullmatch("cve-2026-12345"))
+        self.assertIsNone(CVE_ID_RE.fullmatch("CVE-２０２６-１２３４５"))
+
+    def test_lsio_suffix_keeps_ascii_digits_and_unicode_ignore_case_letters(self) -> None:
+        self.assertEqual(_strip_lsio_suffix("v1.2.3-LS42-aB1"), "v1.2.3")
+        self.assertEqual(_strip_lsio_suffix("v1.2.3-ls42-K"), "v1.2.3")
+        self.assertEqual(_strip_lsio_suffix("v1.2.3-ls４２"), "v1.2.3-ls４２")
 
 
 class GitHubTransportContractTests(unittest.TestCase):
@@ -41,15 +55,16 @@ class GitHubTransportContractTests(unittest.TestCase):
             with self.subTest(code=code):
                 error = urllib.error.HTTPError(url, code, "example failure", {}, None)
                 self.addCleanup(error.close)
+                client = GitHubClient(timeout=2.5)
                 with mock.patch("urllib.request.urlopen", side_effect=error) as open_url:
                     if code == 404:
                         self.assertEqual(
-                            GitHubClient(timeout=2.5).get_json(url),
+                            client.get_json(url),
                             {"message": "Not Found"},
                         )
                     else:
                         with self.assertRaises(urllib.error.HTTPError) as caught:
-                            GitHubClient(timeout=2.5).get_json(url)
+                            client.get_json(url)
                         self.assertIs(caught.exception, error)
                 self.assertEqual(open_url.call_args.kwargs, {"timeout": 2.5})
                 self.assertIsNone(open_url.call_args.args[0].get_header("Authorization"))
