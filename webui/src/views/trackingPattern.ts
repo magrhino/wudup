@@ -6,6 +6,8 @@ const dotNumberParts = "(?:\\.\\d+)+";
 
 export interface TrackingPatternGuide {
   description: string;
+  summary: string;
+  examples: { tag: string; change: string; matches: boolean }[];
   matches: (tag: string) => boolean | null;
 }
 
@@ -46,7 +48,46 @@ function patternParts(body: string): { parts: string[]; hasNumber: boolean } | n
   return { parts: scan.parts, hasNumber: scan.hasNumber };
 }
 
-export function explainTrackingPattern(pattern: string): TrackingPatternGuide | null {
+// Illustrations only: change the installed tag's structure, then test each
+// candidate with the same restricted matcher used for operator input.
+function exampleTags(tag: string): { tag: string; change: string }[] {
+  if (!dockerTag.test(tag)) return [];
+  const examples: { tag: string; change: string }[] = [];
+  const version = /^(v?)(\d+(?:\.\d+)+)(.*)$/.exec(tag);
+  const increment = (digits: string) => String(BigInt(digits) + 1n);
+  if (version) {
+    const [, prefix = "", numbers = "", suffix = ""] = version;
+    const parts = numbers.split(".");
+    const next = [...parts];
+    next[next.length - 1] = increment(next[next.length - 1]!);
+    examples.push({ tag: prefix + next.join(".") + suffix, change: "Version number change" });
+    const first = [increment(parts[0]!), ...parts.slice(1).map(() => "0")];
+    examples.push({ tag: prefix + first.join(".") + suffix, change: "First version number change" });
+    examples.push({
+      tag: prefix + (parts.length === 2 ? numbers + ".1" : parts.slice(0, -1).join(".")) + suffix,
+      change: parts.length === 2 ? "With a patch number" : "Fewer version parts",
+    });
+    if (suffix) {
+      const suffixNumbers = Array.from(suffix.matchAll(/\d+/g));
+      for (const number of [suffixNumbers[0], suffixNumbers.length > 1 ? suffixNumbers.at(-1) : undefined]) {
+        if (!number) continue;
+        const changedSuffix = suffix.slice(0, number.index) + increment(number[0]) + suffix.slice(number.index + number[0].length);
+        examples.push({ tag: prefix + numbers + changedSuffix, change: "Suffix number change" });
+      }
+      examples.push({ tag: prefix + numbers, change: "Without the suffix" });
+    }
+  } else if (/\d/.test(tag)) {
+    examples.push({ tag: tag.replace(/\d+/, increment), change: "First number change" });
+    const number = Array.from(tag.matchAll(/\d+/g)).at(-1)!;
+    const last = tag.slice(0, number.index) + increment(number[0]) + tag.slice(number.index + number[0].length);
+    if (last !== examples[0]?.tag) examples.push({ tag: last, change: "Last number change" });
+  }
+  examples.push({ tag: tag + "-rc1", change: "Extra prerelease suffix" });
+  examples.push({ tag: "latest", change: "Floating tag" });
+  return examples.filter((example) => example.tag !== tag && dockerTag.test(example.tag));
+}
+
+export function explainTrackingPattern(pattern: string, installedTag = ""): TrackingPatternGuide | null {
   if (pattern.length > 256 || !pattern.startsWith("^") || !pattern.endsWith("$")) {
     return null;
   }
@@ -55,8 +96,9 @@ export function explainTrackingPattern(pattern: string): TrackingPatternGuide | 
   const { parts, hasNumber } = parsed;
 
   const expression = new RegExp(pattern);
-  const majorNote = pattern === "^v\\d+(?:\\.\\d+)+$" ||
-    pattern === "^\\d+(?:\\.\\d+)+$"
+  const pinnedMajor = /^\^v?(\d+)(?:\\\.|\(\?:\\\.)/.exec(pattern)?.[1];
+  const versionBody = pattern.slice(1).replace(/^v/, "");
+  const majorNote = versionBody.startsWith("\\d+\\.") || versionBody.startsWith("\\d+(?:\\.")
     ? " The first number can change too, including to a new major version."
     : "";
   const description = hasNumber
@@ -67,6 +109,11 @@ export function explainTrackingPattern(pattern: string): TrackingPatternGuide | 
       ". It will not follow differently named tags. Detecting changes under this same tag depends on WUD digest watching.";
   return {
     description,
+    summary: !hasNumber ? "Tracks this exact tag; same-tag updates depend on WUD digest watching."
+      : majorNote ? "Version numbers can change, including to a new major version."
+      : pinnedMajor ? `Keeps the first version number at ${pinnedMajor}; fixed prefixes and suffixes must still match.`
+      : "Only tags matching the fixed parts and numeric pattern are included.",
+    examples: exampleTags(installedTag).map((example) => ({ ...example, matches: expression.test(example.tag) })),
     matches: (tag) => dockerTag.test(tag) ? expression.test(tag) : null,
   };
 }

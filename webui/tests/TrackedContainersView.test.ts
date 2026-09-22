@@ -101,7 +101,9 @@ describe("TrackedContainersView", () => {
     expect(wrapper.text()).toContain("Fix tracking");
     expect(wrapper.text()).toContain("What this filter would match");
     expect(wrapper.text()).toContain("new major version");
-    expect(wrapper.text()).toContain("Illustrative excluded tag latest");
+    expect(wrapper.get('.tracked-examples').text()).toContain("latest");
+    expect(wrapper.get('.tracked-pattern-details').attributes("open")).toBeUndefined();
+    expect(wrapper.get('.tracked-pattern-details summary').text()).toBe("How this filter works");
     expect(wrapper.text()).toContain("not fetched from the registry");
 
     const sample = wrapper.get('input[aria-label="Tag to test against proposed filter"]');
@@ -189,6 +191,29 @@ describe("TrackedContainersView", () => {
     await wrapper.get('button[aria-label="Inspect media/radarr"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[aria-label="Selected container details"]').text()).toContain("WUD inventory unavailable. Check Doctor");
+  });
+
+  it("keeps the unknown-status filter consistent with its counter and excludes confirmed untracked services", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const tracking = useTrackingStore();
+    const states: TrackedContainerItem["wud_match_state"][] = ["untracked", "unknown", "ambiguous", "watching", "watching"];
+    tracking.inventory = {
+      status: "ready", count: states.length, warnings: [],
+      wud_status: { state: "ready", available: true, metadata_available: true, last_checked_at: "", detail: "" },
+      items: states.map((state, index) => ({ ...item, target_id: `target-${index}`, service: `app-${index}`, wud_match_state: state, wud_update_available: index === 4 ? false : null })),
+    };
+    vi.spyOn(tracking, "load").mockResolvedValue();
+    const router = createWudRouter(createMemoryHistory());
+    await router.push({ name: "containers" });
+    await router.isReady();
+    const wrapper = mountWithApp(TrackedContainersView, { pinia, router });
+    await flushPromises();
+    expect(wrapper.text()).toContain("3 WUD status unknown");
+    await wrapper.get('select[aria-label="Tracking filter"]').setValue("unknown");
+    expect(wrapper.findAll(".tracked-table tbody tr")).toHaveLength(3);
+    expect(wrapper.get(".tracked-table").text()).not.toContain("app-0");
+    expect(wrapper.get(".tracked-table").text()).not.toContain("app-4");
   });
 
   it("shows a still-running repair as progress without an error alert", async () => {

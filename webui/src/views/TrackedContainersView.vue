@@ -45,10 +45,11 @@ const wudInventoryReady = computed(() => tracking.inventory?.wud_status?.metadat
 const selected = computed(() => items.value.find((item) => item.target_id === selectedId.value) ?? null);
 const frozenCount = computed(() => items.value.filter((item) => item.tracking_health === "frozen").length);
 const untrackedCount = computed(() => items.value.filter((item) => item.wud_match_state === "untracked").length);
-const unknownCount = computed(() => items.value.filter((item) =>
-  ["unknown", "ambiguous"].includes(item.wud_match_state) ||
-  (item.wud_match_state === "watching" && item.wud_update_available === null),
-).length);
+function hasUnknownWudStatus(item: TrackedContainerItem): boolean {
+  return ["unknown", "ambiguous"].includes(item.wud_match_state) ||
+    (item.wud_match_state === "watching" && item.wud_update_available === null);
+}
+const unknownCount = computed(() => items.value.filter(hasUnknownWudStatus).length);
 const updateCount = computed(() => items.value.filter((item) => item.wud_update_available === true).length);
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -56,7 +57,7 @@ const filtered = computed(() => {
     if (filter.value === "attention" && !["frozen", "digest-pinned", "custom", "no-image", "image-unresolved"].includes(item.tracking_health)) return false;
     if (filter.value === "update" && item.wud_update_available !== true) return false;
     if (filter.value === "untracked" && item.wud_match_state !== "untracked") return false;
-    if (filter.value === "unknown" && !["unknown", "ambiguous"].includes(item.wud_match_state) && item.wud_update_available !== null) return false;
+    if (filter.value === "unknown" && !hasUnknownWudStatus(item)) return false;
     return !query || [item.service_key, item.image, item.current_tag, item.tracking_regex, item.wud?.name ?? ""]
       .some((value) => value.toLowerCase().includes(query));
   });
@@ -70,15 +71,14 @@ const canPreview = computed(() =>
   editor.value.trim() !== selected.value?.tracking_regex,
 );
 const sameAsCurrent = computed(() => Boolean(editor.value.trim()) && editor.value.trim() === selected.value?.tracking_regex);
-const patternGuide = computed(() => explainTrackingPattern(editor.value.trim()));
+const patternGuide = computed(() => explainTrackingPattern(editor.value.trim(), selected.value?.current_tag));
+const samplePlaceholder = computed(() => {
+  const example = patternGuide.value?.examples.find((item) => item.matches)?.tag || selected.value?.current_tag;
+  return example ? `e.g. ${example}` : "Enter a tag to test";
+});
 const observedCandidate = computed(() =>
   selected.value?.wud_update_available === true ? selected.value.wud?.remote_tag || "" : "",
 );
-const excludedExample = computed(() => {
-  if (!selected.value || !patternGuide.value) return "";
-  return ["latest", selected.value.current_tag + "-rc1"]
-    .find((tag) => patternGuide.value?.matches(tag) === false) || "";
-});
 
 function matchLabel(tag: string): string {
   const result = patternGuide.value?.matches(tag);
@@ -264,12 +264,23 @@ async function apply(): Promise<void> {
           <p v-if="selected.suggested_regex" class="tracked-suggestion">Suggested from installed tag: <code>{{ selected.suggested_regex }}</code></p>
           <div v-if="patternGuide" class="tracked-pattern-guide" aria-label="Proposed filter explanation">
             <strong>What this filter would match</strong>
-            <p>{{ patternGuide.description }}</p>
+            <p>{{ patternGuide.summary }}</p>
             <p>Installed tag <code>{{ selected.current_tag }}</code>: <strong>{{ matchLabel(selected.current_tag) }}</strong></p>
             <p v-if="observedCandidate">WUD-observed candidate <code>{{ observedCandidate }}</code>: <strong>{{ matchLabel(observedCandidate) }}</strong></p>
-            <p v-if="excludedExample">Illustrative excluded tag <code>{{ excludedExample }}</code> — not fetched from the registry.</p>
+            <table v-if="patternGuide.examples.length" class="tracked-examples" aria-label="Illustrative tag matches">
+              <caption>Illustrative examples — not fetched from the registry.</caption>
+              <thead><tr><th scope="col">Example tag</th><th scope="col">Result</th></tr></thead>
+              <tbody><tr v-for="example in patternGuide.examples" :key="example.tag">
+                <td><code>{{ example.tag }}</code><small>{{ example.change }}</small></td>
+                <td>{{ example.matches ? "Matches" : "Excluded" }}</td>
+              </tr></tbody>
+            </table>
+            <details :key="selected.target_id" class="tracked-pattern-details">
+              <summary>How this filter works</summary>
+              <p>{{ patternGuide.description }}</p>
+            </details>
             <label for="tracking-tag-sample">Test another tag (optional)</label>
-            <n-input id="tracking-tag-sample" v-model:value="sampleTag" placeholder="e.g. v1.37" :input-props="{ 'aria-label': 'Tag to test against proposed filter', maxlength: 128 }" />
+            <n-input id="tracking-tag-sample" v-model:value="sampleTag" :placeholder="samplePlaceholder" :input-props="{ 'aria-label': 'Tag to test against proposed filter', maxlength: 128 }" />
             <p v-if="sampleTag" role="status">
               {{ patternGuide.matches(sampleTag) === null ? "Enter a valid Docker tag (letters, numbers, dots, dashes, or underscores)." : patternGuide.matches(sampleTag) ? "This tag matches the proposed filter." : "This tag does not match the proposed filter." }}
             </p>
@@ -334,6 +345,8 @@ async function apply(): Promise<void> {
 </template>
 
 <style scoped>
+.tracked-containers, .tracked-detail, .tracked-repair, .tracked-pattern-guide, .tracked-plan { min-width: 0; }
+.tracked-containers, .tracked-detail, .tracked-repair, .tracked-plan { grid-template-columns: minmax(0, 1fr); }
 .tracked-intro, .tracked-detail-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .tracked-detail h3 { margin: 0; color: var(--color-ink); font-size: var(--text-title-size); }
 .tracked-intro p, .tracked-detail-heading p, .tracked-repair p { margin: 0; color: var(--color-text-secondary); }
@@ -350,7 +363,8 @@ async function apply(): Promise<void> {
 .tracked-table-wrap { overflow-x: auto; }
 .tracked-table { width: 100%; border-collapse: collapse; text-align: left; }
 .tracked-table th, .tracked-table td { padding: 12px 15px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
-.tracked-table th { color: var(--color-text-secondary); font-weight: 600; white-space: nowrap; }
+/* Contain the absolute sr-only heading inside the table's scroll area. */
+.tracked-table th { position: relative; color: var(--color-text-secondary); font-weight: 600; white-space: nowrap; }
 .tracked-table tr.selected { background: var(--color-surface-raised, var(--color-surface)); }
 .tracked-table tbody tr:last-child td { border-bottom: 0; }
 .tracked-mobile-list { display: none; }
@@ -379,15 +393,23 @@ async function apply(): Promise<void> {
 .tracked-links a:focus-visible, .tracked-links summary:focus-visible { outline: 2px solid var(--color-action-blue); outline-offset: 3px; }
 .tracked-repair { display: grid; justify-items: start; gap: 12px; border-top: 1px solid var(--color-border); padding-top: 18px; }
 .tracked-repair h4, .tracked-plan h4 { margin: 0; font-size: var(--text-body-size); }
-.tracked-repair .n-input { width: min(100%, 580px); }
+.tracked-repair .n-input { width: min(100%, 580px); min-width: 0; }
 .tracked-repair label { font-weight: 600; }
 .tracked-suggestion { font-size: var(--text-metadata-size); }
-.tracked-pattern-guide { display: grid; gap: 8px; max-width: 72ch; padding: 12px; border-radius: 7px; background: var(--color-surface-raised, var(--color-surface)); }
+.tracked-pattern-guide { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; width: 100%; max-width: 72ch; padding: 12px; border-radius: 7px; background: var(--color-surface-raised, var(--color-surface)); }
 .tracked-pattern-guide code { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .tracked-pattern-guide small { color: var(--color-muted-text); }
 .tracked-pattern-guide .n-input { width: min(100%, 420px); }
+.tracked-examples { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: var(--text-metadata-size); }
+.tracked-examples caption { padding-bottom: 8px; text-align: left; color: var(--color-muted-text); }
+.tracked-examples th, .tracked-examples td { padding: 6px 0; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.tracked-examples th:last-child, .tracked-examples td:last-child { width: 6em; padding-left: 12px; }
+.tracked-examples small { display: block; }
+.tracked-pattern-details summary { cursor: pointer; color: var(--color-action-blue); font-weight: 600; }
+.tracked-pattern-details summary:focus-visible { outline: 2px solid var(--color-action-blue); outline-offset: 3px; }
+.tracked-pattern-details[open] summary { margin-bottom: 8px; }
 .tracked-plan { display: grid; justify-items: start; gap: 12px; width: 100%; border-top: 1px solid var(--color-border); padding-top: 16px; }
 .tracked-plan pre { box-sizing: border-box; width: 100%; max-height: 350px; overflow: auto; margin: 0; padding: 14px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page, var(--color-surface)); font-size: var(--text-data-size); white-space: pre-wrap; }
-@media (--wud-app-shell) { .tracked-detail, .tracked-plan { scroll-margin-top: 80px; } .tracked-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tracked-table { min-width: 760px; } }
+@media (--wud-app-shell) { .tracked-detail, .tracked-plan { scroll-margin-top: 80px; } .tracked-pattern-details summary { min-height: var(--size-touch-target); padding-block: 10px; } .tracked-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tracked-table { min-width: 760px; } }
 @media (--wud-data-cards) { .tracked-intro { display: none; } .tracked-summary { gap: 4px 12px; padding: 8px 12px; font-size: var(--text-metadata-size); line-height: 1.3; } .tracked-toolbar { flex-direction: column; } .tracked-toolbar .n-input, .tracked-toolbar .n-select { max-width: none; width: 100%; } .tracked-evidence { grid-template-columns: 1fr; } .tracked-table-wrap { display: none; } .tracked-mobile-list { display: block; } .tracked-mobile-item { display: grid; gap: 7px; padding: 15px 16px; border-bottom: 1px solid var(--color-border); } .tracked-mobile-item.selected { background: var(--color-surface-raised, var(--color-surface)); } .tracked-mobile-item:last-child { border-bottom: 0; } .tracked-mobile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; } .tracked-mobile-heading small { display: block; color: var(--color-muted-text); } .tracked-mobile-item p { margin: 0; color: var(--color-text-secondary); } .tracked-mobile-item .n-button { justify-self: start; } }
 </style>
