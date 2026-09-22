@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import subprocess
@@ -233,6 +234,287 @@ def test_production_category_moves_cannot_silently_bypass(repo, target, category
     assert source["category"] == category
     assert source["base_category"] == "production"
     assert "non-enforced category" in source["failures"][0]
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "tests/moved.py",
+        "src/wudup/web_static/moved.py",
+        "requirements.txt",
+        "README.md",
+    ],
+)
+@pytest.mark.parametrize("existing", [False, True])
+def test_comment_only_move_requires_review_when_git_misses_rename(
+    repo, target, existing
+):
+    source = "".join(f"value_{index} = {index}\n" for index in range(900))
+    moved = "".join(f"{line}  # relocated assignment\n" for line in source.splitlines())
+    assert ast.dump(ast.parse(source)) == ast.dump(ast.parse(moved))
+    repo.write("source.py", source.encode())
+    if existing:
+        repo.write(target, b"# Existing unrelated content\n")
+    repo.policy["ceilings"]["source.py"] = exception(900)
+    repo.save_policy()
+    repo.base = repo.commit()
+    (repo.path / "source.py").unlink()
+    repo.write(target, moved.encode())
+    repo.commit()
+    statuses = repo.git("diff", "--name-status", "--find-renames=50%", repo.base)
+    assert not any(line.startswith("R") for line in statuses.splitlines())
+    code, report = repo.check()
+    assert code == 1
+    assert "Possible category move" in row(report, "source.py")["failures"][0]
+    assert report["category_move_candidates"] == [target]
+
+
+@pytest.fixture
+def ambiguous_move(repo):
+    repo.lines("source.py", 900)
+    repo.write("stable.py", b"# Unchanged production owner\n")
+    repo.write("tests/moved.py", b"# Previous test coverage\n" * 1000)
+    repo.policy["ceilings"]["source.py"] = exception(900)
+    repo.save_policy()
+    repo.base = repo.commit()
+    (repo.path / "source.py").unlink()
+    repo.write("tests/moved.py", b"# Changed coverage or relocated code\n" * 900)
+    repo.commit()
+    return repo
+
+
+def declare_transition(repo, destinations):
+    repo.policy["transitions"]["source.py"] = {
+        "base_commit": repo.base,
+        "destinations": destinations,
+        "reason": "Review the removed responsibility and the changed coverage together.",
+    }
+    repo.save_policy()
+    repo.commit()
+
+
+def test_reviewed_deletion_allows_unrelated_test_changes_only_for_its_base(
+    ambiguous_move,
+):
+    repo = ambiguous_move
+    assert repo.check()[0] == 1  # A shrinking excluded destination is still ambiguous.
+    declare_transition(repo, [])
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["transition"]["destinations"] == []
+    assert row(report, "tests/moved.py")["category"] == "tests"
+    # An advanced base with identical files still requires a fresh review decision.
+    advanced = repo.git(
+        "commit-tree",
+        f"{repo.base}^{{tree}}",
+        "-p",
+        repo.base,
+        "-m",
+        "test: advance base",
+    )
+    assert repo.check(base=advanced)[0] == 1
+
+
+@pytest.mark.parametrize("section", ["ceilings", "allowances"])
+def test_declared_move_requires_persistent_classification_and_ceiling(
+    ambiguous_move, section
+):
+    repo = ambiguous_move
+    declare_transition(repo, ["tests/moved.py"])
+    code, report = repo.check()
+    assert code == 1
+    assert "Retain production classification" in row(report, "source.py")["failures"][0]
+    repo.policy["production"]["paths"].append("tests/moved.py")
+    repo.save_policy()
+    repo.commit()
+    code, report = repo.check()
+    assert code == 1
+    assert (
+        "Transfer the source's reviewed ceiling"
+        in row(report, "source.py")["failures"][0]
+    )
+    repo.policy[section]["tests/moved.py"] = repo.policy["ceilings"].pop("source.py")
+    repo.save_policy()
+    repo.commit()
+    assert repo.check()[0] == 0
+    repo.write("tests/moved.py", b"# Changed coverage or relocated code\n" * 901)
+    repo.commit()
+    assert repo.check()[0] == 1
+    # Persisted destination ownership also protects subsequent PRs without a move.
+    repo.write("tests/moved.py", b"# Changed coverage or relocated code\n" * 900)
+    repo.base = repo.commit()
+    repo.write("tests/moved.py", b"# Changed coverage or relocated code\n" * 901)
+    repo.commit()
+    assert repo.check()[0] == 1
+
+
+@pytest.mark.parametrize("destination", ["missing.py", "stable.py"])
+def test_declared_move_cannot_name_missing_or_unchanged_destinations(
+    ambiguous_move, destination
+):
+    repo = ambiguous_move
+    declare_transition(repo, [destination])
+    code, report = repo.check()
+    assert code == 1
+    assert "added or modified destination" in row(report, "source.py")["failures"][0]
+
+
+def test_declared_move_cannot_name_a_mode_only_change(ambiguous_move):
+    repo = ambiguous_move
+    (repo.path / "stable.py").chmod(0o755)
+    repo.policy["ceilings"]["stable.py"] = exception(900)
+    declare_transition(repo, ["stable.py"])
+    code, report = repo.check()
+    assert code == 1
+    assert "added or modified destination" in row(report, "source.py")["failures"][0]
+
+
+@pytest.mark.parametrize("destination_ceiling,code", [(900, 0), (1200, 1)])
+def test_existing_destination_cannot_silently_relax_source_ceiling(
+    repo, destination_ceiling, code
+):
+    repo.lines("source.py", 900)
+    repo.write("destination.py", b"# Unrelated owner\n" * 100)
+    repo.policy["ceilings"].update(
+        {"source.py": exception(900), "destination.py": exception(destination_ceiling)}
+    )
+    repo.save_policy()
+    repo.base = repo.commit()
+    (repo.path / "source.py").unlink()
+    repo.write("destination.py", b"# Transferred responsibility\n" * 900)
+    declare_transition(repo, ["destination.py"])
+    actual, report = repo.check()
+    assert actual == code
+    if code:
+        assert "larger ceiling" in row(report, "source.py")["failures"][0]
+    repo.policy["ceilings"]["destination.py"]["reason"] = (
+        "Reviewed transfer: this destination now owns the removed responsibility."
+    )
+    repo.save_policy()
+    repo.commit()
+    assert repo.check()[0] == 0
+
+
+def test_each_source_and_destination_needs_its_own_resolution(ambiguous_move):
+    repo = ambiguous_move
+    declare_transition(repo, ["tests/moved.py", "tests/second.py"])
+    repo.policy["ceilings"]["tests/moved.py"] = exception(900)
+    repo.write("tests/second.py", b"# Second part of the moved responsibility\n")
+    repo.save_policy()
+    repo.commit()
+    code, report = repo.check()
+    assert code == 1
+    assert "tests/second.py" in row(report, "source.py")["failures"][0]
+    repo.policy["ceilings"]["tests/second.py"] = exception(900)
+    repo.save_policy()
+    repo.commit()
+    assert repo.check()[0] == 0
+    repo.policy["transitions"]["another.py"] = repo.policy["transitions"].pop(
+        "source.py"
+    )
+    repo.policy["ceilings"].pop("tests/second.py")
+    repo.save_policy()
+    repo.commit()
+    assert "Possible category move" in row(repo.check()[1], "source.py")["failures"][0]
+
+
+@pytest.mark.parametrize("section", ["ceilings", "allowances"])
+@pytest.mark.parametrize("operation", ["delete", "rename", "keep"])
+def test_head_policy_cannot_erase_previous_production_classification(
+    repo, section, operation
+):
+    source = "tests/owner.py"
+    repo.lines(source, 900)
+    repo.policy[section][source] = exception(900)
+    repo.save_policy()
+    repo.base = repo.commit()
+    repo.policy[section].pop(source)
+    if operation == "delete":
+        (repo.path / source).unlink()
+        repo.write("tests/moved.py", b"# Completely rewritten coverage\n")
+    elif operation == "rename":
+        (repo.path / source).rename(repo.path / "tests/moved.py")
+    repo.save_policy()
+    repo.commit()
+    code, report = repo.check()
+    assert code == 1
+    path = "tests/moved.py" if operation == "rename" else source
+    assert row(report, path)["base_category"] == (
+        "production" if section == "ceilings" else "declarative"
+    )
+    assert report["base_policy_source"] == f"{repo.base}:{POLICY_PATH}"
+
+
+@pytest.mark.parametrize("source", ["source.py", "tests/obsolete.py"])
+def test_deletions_with_unchanged_excluded_files_do_not_require_review(repo, source):
+    repo.lines(source, 900)
+    repo.write("tests/unchanged.py", b"# Unrelated tests\n" * 1000)
+    repo.base = repo.commit()
+    (repo.path / source).unlink()
+    repo.commit()
+    assert repo.check()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"base_commit": "HEAD"},
+        {"base_commit": True},
+        {"reason": " "},
+        {"destinations": "tests/moved.py"},
+        {"destinations": ["../outside.py"]},
+        {"destinations": ["tests/*.py"]},
+        {"destinations": [False]},
+        {"destinations": ["same.py", "same.py"]},
+        {"approved": True},
+    ],
+)
+def test_invalid_transition_metadata_fails_closed(ambiguous_move, change):
+    repo = ambiguous_move
+    declare_transition(repo, [])
+    repo.policy["transitions"]["source.py"].update(change)
+    repo.save_policy()
+    repo.commit()
+    code, report = repo.check()
+    assert code == 2
+    assert "Invalid policy" in report["error"]
+
+
+def test_previous_policy_without_transitions_is_still_readable(repo):
+    repo.policy.pop("transitions")
+    repo.save_policy()
+    repo.lines("source.py", 1)
+    repo.base = repo.commit()
+    repo.policy["transitions"] = {}
+    repo.save_policy()
+    repo.commit()
+    assert repo.check()[0] == 0
+
+
+def test_transition_declaration_cannot_waive_detected_category_move(repo):
+    repo.lines("source.py", 20)
+    repo.base = repo.commit()
+    (repo.path / "tests").mkdir()
+    (repo.path / "source.py").rename(repo.path / "tests/moved.py")
+    declare_transition(repo, [])
+    code, report = repo.check()
+    assert code == 1
+    assert "non-enforced category" in row(report, "tests/moved.py")["failures"][0]
+
+
+def test_bootstrap_comparison_without_base_policy_is_explicit(repo):
+    (repo.path / POLICY_PATH).unlink()
+    repo.lines("source.py", 1)
+    repo.base = repo.commit()
+    repo.save_policy()
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert (
+        report["base_policy_source"]
+        == "comparison policy (base has no committed policy)"
+    )
+    assert row(report, "source.py")["base_category"] == "production"
 
 
 def test_tests_moved_to_production_are_new_production(repo):

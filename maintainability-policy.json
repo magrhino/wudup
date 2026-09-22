@@ -16,6 +16,7 @@
   "locks": {"paths": ["requirements.txt", "requirements-build.txt", "requirements-dev.txt", "webui/package-lock.json"]},
   "ceilings": {},
   "allowances": {},
+  "transitions": {},
   "remediation": "Extract the new responsibility, keep the change net-neutral by moving cohesive behavior, or request a reviewed exact-path exception with a ceiling, reason, follow-up when deferred, and re-review condition. A Danger acknowledgement cannot bypass enforcement.",
   "anti_gaming": [
     "Do not compress formatting or combine statements solely to lower physical LOC.",

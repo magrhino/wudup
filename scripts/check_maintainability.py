@@ -144,6 +144,12 @@ def issue_link(value: object) -> bool:
     )
 
 
+def commit_id(value: object) -> bool:
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value)
+    )
+
+
 def validate_baseline(value: object) -> None:
     baseline = keys(value, {"status", "commit", "reason", "follow_up"}, "baseline")
     require(
@@ -156,8 +162,7 @@ def validate_baseline(value: object) -> None:
     )
     if baseline["status"] == "ready":
         require(
-            isinstance(baseline["commit"], str)
-            and bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", baseline["commit"])),
+            commit_id(baseline["commit"]),
             "ready baseline needs a full commit ID",
         )
     else:
@@ -227,7 +232,32 @@ def validate_exceptions(value: object, section: str) -> None:
     raise ValueError(f"Invalid policy: {section} must be an exact-path mapping")
 
 
+def validate_transitions(value: object) -> None:
+    require(isinstance(value, dict), "transitions must be an exact-path mapping")
+    for path, value_record in value.items():
+        require(exact_path(path), "transitions need exact source paths")
+        record = keys(
+            value_record, {"base_commit", "destinations", "reason"}, "transition"
+        )
+        require(
+            commit_id(record["base_commit"]), "transition needs a full base commit ID"
+        )
+        require(nonempty(record["reason"]), "transition needs a review reason")
+        destinations = record["destinations"]
+        require(
+            isinstance(destinations, list) and all(exact_path(p) for p in destinations),
+            "transition destinations must be exact paths, or [] for a genuine deletion",
+        )
+        require(
+            len(set(destinations)) == len(destinations),
+            "duplicate transition destination",
+        )
+
+
 def validate_policy(policy: object) -> dict:
+    # Version 1 policies committed before transition review remain readable.
+    if isinstance(policy, dict):
+        policy = {"transitions": {}, **policy}
     policy = keys(
         policy,
         {
@@ -240,6 +270,7 @@ def validate_policy(policy: object) -> dict:
             "locks",
             "ceilings",
             "allowances",
+            "transitions",
             "remediation",
             "anti_gaming",
         },
@@ -269,6 +300,7 @@ def validate_policy(policy: object) -> dict:
     )
     for section in ("ceilings", "allowances"):
         validate_exceptions(policy[section], section)
+    validate_transitions(policy["transitions"])
     require(
         not (policy["ceilings"].keys() & policy["allowances"].keys()),
         "a path cannot have both a ceiling and an allowance",
@@ -370,12 +402,18 @@ def file_status(
 
 
 def file_report(
-    path: str, old: str | None, before: dict, after: dict, counts: dict, policy: dict
+    path: str,
+    old: str | None,
+    before: dict,
+    after: dict,
+    counts: dict,
+    policy: dict,
+    base_policy: dict,
 ) -> dict:
     old_entry, new_entry = before.get(old), after.get(path)
     base_lines = counts.get(old_entry[1], 0) if old_entry else 0
     head_lines = counts.get(new_entry[1], 0) if new_entry else 0
-    base_category = category(old, old_entry[0], policy) if old_entry else None
+    base_category = category(old, old_entry[0], base_policy) if old_entry else None
     head_category = category(path, new_entry[0], policy) if new_entry else None
     current_category = head_category or base_category
     record_path, record, ceiling = applicable_ceiling(
@@ -395,6 +433,74 @@ def file_report(
     }
     row["failures"], row["warnings"] = file_findings(row, record, policy)
     return row
+
+
+def transition_destination_error(
+    path: str, source: str, before: dict, after: dict, policy: dict, base_policy: dict
+) -> str | None:
+    entry = after.get(path)
+    old_entry = before.get(path)
+    if not entry or (old_entry and entry[1] == old_entry[1]):
+        return "Declare an added or modified destination with changed content in the head commit."
+    if category(path, entry[0], policy) not in ENFORCED_CATEGORIES:
+        return "Retain production classification or add an exact-path declarative allowance."
+    source_record = base_policy["ceilings"].get(source) or base_policy[
+        "allowances"
+    ].get(source)
+    destination_record = policy["ceilings"].get(path) or policy["allowances"].get(path)
+    if source_record and not destination_record:
+        return "Transfer the source's reviewed ceiling to the destination's exact path."
+    previous_record = base_policy["ceilings"].get(path) or base_policy[
+        "allowances"
+    ].get(path)
+    if (
+        source_record
+        and destination_record["ceiling"] > source_record["ceiling"]
+        and destination_record == previous_record
+    ):
+        return "Review the destination's larger ceiling with an explicit policy record update for this transfer."
+    return None
+
+
+def review_category_moves(
+    rows: list[dict],
+    before: dict,
+    after: dict,
+    policy: dict,
+    base_policy: dict,
+    base: str,
+) -> list[str]:
+    deleted = [
+        row
+        for row in rows
+        if row["status"] == "deleted" and row["base_category"] in ENFORCED_CATEGORIES
+    ]
+    if not deleted:
+        return []
+    candidates = sorted(
+        path
+        for path, entry in after.items()
+        if entry != before.get(path)
+        and category(path, entry[0], policy) not in ENFORCED_CATEGORIES
+    )
+    for row in deleted:
+        record = policy["transitions"].get(row["path"])
+        if not record or record["base_commit"] != base:
+            if candidates:
+                row["failures"].append(
+                    "Possible category move: production disappeared while non-enforced paths "
+                    "changed. Review category_move_candidates and add a transitions entry "
+                    "for this source and comparison base, declaring destinations or a genuine deletion."
+                )
+            continue
+        row["transition"] = record
+        for destination in record["destinations"]:
+            error = transition_destination_error(
+                destination, row["path"], before, after, policy, base_policy
+            )
+            if error:
+                row["failures"].append(f"{destination}: {error}")
+    return candidates
 
 
 def read_policy(git: Git, head_tree: dict, policy_file: Path | None) -> dict:
@@ -434,6 +540,7 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
     base, head = git.commit(args.base), git.commit(args.head)
     before, after = git.tree(base), git.tree(head)
     policy = read_policy(git, after, args.policy_file)
+    base_policy = read_policy(git, before, None) if POLICY_PATH in before else policy
     counts = git.line_counts([before, after])
     renames = git.renames(base, head)
     rows = [
@@ -444,12 +551,16 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
             after,
             counts,
             policy,
+            base_policy,
         )
         for path in sorted(after)
     ]
     rows.extend(
-        file_report(path, path, before, after, counts, policy)
+        file_report(path, path, before, after, counts, policy, base_policy)
         for path in sorted(before.keys() - after.keys() - set(renames.values()))
+    )
+    move_candidates = review_category_moves(
+        rows, before, after, policy, base_policy, base
     )
     blocked = []
     if policy["baseline"]["status"] != "ready":
@@ -468,6 +579,10 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
         "policy_source": "report-only external policy"
         if args.policy_file
         else f"{head}:{POLICY_PATH}",
+        "base_policy_source": f"{base}:{POLICY_PATH}"
+        if POLICY_PATH in before
+        else "comparison policy (base has no committed policy)",
+        "category_move_candidates": move_candidates,
         "baseline": policy["baseline"],
         "thresholds": policy["thresholds"],
         "blocked": blocked,

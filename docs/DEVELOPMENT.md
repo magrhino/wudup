@@ -72,8 +72,11 @@ artifact keeps the repository-local image build path used by smoke tests.
 ## Maintainability Checker (Draft)
 
 `scripts/check_maintainability.py` compares physical lines in committed Git blobs,
-including a final line without a newline. Its only policy source for enforcement
-is `maintainability-policy.json` in the requested head commit. It reads objects
+including a final line without a newline. Enforcement uses
+`maintainability-policy.json` in the requested head commit, while the committed
+base policy determines each original file's classification. If the base predates
+the policy, the checker uses the comparison policy and explicitly reports that
+fallback in `base_policy_source`. It reads objects
 with Git and the Python standard library; it never imports or executes project
 code, reads working source files, follows symlinks, or fetches missing objects.
 
@@ -120,6 +123,58 @@ or growing files above their applicable ceiling fail. Follow the policy's
 anti-gaming guidance: preserve validation, safeguards, coverage, comments, and type
 precision, and reduce responsibility and navigation burden instead of compressing
 formatting or scattering a cohesive owner among fragments.
+
+### Contributing: resolve a possible category move
+
+Git may report a relocation as deletion plus addition when edits obscure its
+similarity, or when code moves into an existing file. If an enforced file
+disappears without a detected rename and any non-enforced path is added or
+modified, the checker reports **Possible category move** on the deleted source.
+The JSON `category_move_candidates` list identifies the changed non-enforced
+paths. This is a review tripwire, not proof that code moved. It includes shrinking
+files and tests, generated outputs, locks, and other excluded categories.
+Deleting production code while independently updating tests can trigger it too.
+Pure deletions with unchanged excluded files and test additions alone still pass.
+
+Review the deleted responsibility and candidate paths together, then add an
+exact-source-path entry under `transitions` in `maintainability-policy.json`:
+
+```json
+"transitions": {
+  "src/wudup/old_owner.py": {
+    "base_commit": "<full commit ID passed to --base>",
+    "destinations": ["src/wudup/new_owner.py"],
+    "reason": "The responsibility moved intact to its new owner; related test changes exercise that owner."
+  }
+}
+```
+
+Replace the placeholder with the full ID from `git rev-parse BASE_COMMIT`.
+List every destination that received the responsibility. Each destination's content
+must be added or modified in the head and remain production or declarative code under
+the head policy. An excluded destination must have an explicit production path,
+`ceilings` entry, or reviewed declarative `allowances` entry. If the source had a
+reviewed ceiling or allowance, transfer that record to each destination's exact
+path; any ceiling increase needs its own justification and review. An existing
+destination with a larger ceiling also requires a policy-record update explaining
+why that larger limit is appropriate for the transferred responsibility. Normal size
+checks still apply, and persistent destination records protect subsequent PRs.
+A transition entry itself grants no size exemption or new category exclusion.
+
+For a genuine deletion, use `"destinations": []` and explain why the responsibility
+was removed and how the changed non-enforced files are unrelated to a relocation.
+Reviewers must verify that explanation against the diff. Each ambiguous source
+needs its own entry; a PR-body acknowledgement is insufficient. The declaration
+applies only to its exact comparison base commit. Refresh and review it if that
+base changes; obsolete entries can be removed in subsequent work. A declaration
+cannot waive a category violation on a Git-detected rename.
+
+Commit the resolution before running the checker; working-tree policy edits are
+ignored. The checker validates the declaration's scope and destinations, but it
+cannot authenticate human approval or prove semantic equivalence. Policy changes
+still require review through the repository's normal PR process.
+
+### Enforcement command and activation
 
 The future local/CI enforcement command is identical, using the actual PR base
 and head commit IDs (not a synthetic merge commit):
