@@ -133,8 +133,9 @@ such as `^v\d+(?:\.\d+)+$` can follow differently named releases. WUDup does
 not automatically broaden a single-number channel such as `16` to `^\d+$`,
 which would also include other major-version tags. The on-page tester checks
 tag names, not registry availability or whether digest watching is configured.
-Changing a filter requires a previewed Compose-label diff and explicit approval
-before WUDup recreates that service.
+Changing a filter requires a label-only preview and explicit approval before
+WUDup recreates that service. WUDup coordinates its own Compose writers; do not
+edit the same Compose file manually while a WUDup rewrite or repair is running.
 
 ## WUD API Authentication
 

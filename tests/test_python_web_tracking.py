@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import pytest
 from tests.web_test_helpers import (
@@ -16,11 +19,11 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
-from wudup import web_retags, web_tracking, web_wud_api
+from wudup import compose_rewrite, web_retags, web_tracking, web_wud_api
 from wudup.compose_rewrite import apply_compose_tracking_label
-from wudup.db import open_db
+from wudup.db import init_db, insert_update_run, open_db
 from wudup.updater_models import ComposeTagRewriteError
-from wudup.web_models import WudApiStatus
+from wudup.web_models import TrackingRepairPlan, WudApiStatus
 from wudup.web_wud_api import WudApiSnapshot
 
 
@@ -133,6 +136,29 @@ def test_repair_previews_exact_mutable_tag_without_a_numeric_wildcard(tmp_path: 
     assert response.status_code == 200
     assert response.json()["can_apply"] is True
     assert compose_path.read_text(encoding="utf-8") == original
+
+
+def test_repair_preview_never_returns_other_compose_fields(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(tmp_path, mutations=False)
+    compose_path.write_text(
+        compose_path.read_text(encoding="utf-8").replace(
+            "    labels:\n",
+            '    environment:\n      API_TOKEN: "example-secret-do-not-expose"\n    labels:\n',
+        ),
+        encoding="utf-8",
+    )
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert "wud.tag.include" in response.json()["compose_diff"]
+    assert "API_TOKEN" not in response.text
+    assert "example-secret-do-not-expose" not in response.text
 
 
 def test_inventory_includes_wud_watched_service_without_update(
@@ -456,6 +482,43 @@ def test_repair_does_not_recreate_after_tag_moves_during_label_write(
     assert " up " not in _fake_docker_calls(fake_root)
 
 
+def test_repair_rechecks_compose_immediately_before_recreate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, fake_root, compose_path = _tracking_fixture(tmp_path)
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+    plan = client.post(
+        "/api/v1/tracking-repairs", json=payload, headers=_csrf_headers(client),
+    ).json()
+    original_check = web_tracking._matching_runtime_image_id
+    checks = 0
+
+    def edit_after_last_image_check(*args, **kwargs):
+        nonlocal checks
+        result = original_check(*args, **kwargs)
+        checks += 1
+        if checks == 4:
+            compose_path.write_text(
+                compose_path.read_text(encoding="utf-8") + "# operator edit\n",
+                encoding="utf-8",
+            )
+        return result
+
+    monkeypatch.setattr(web_tracking, "_matching_runtime_image_id", edit_after_last_image_check)
+    response = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": plan["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=_csrf_headers(client),
+    )
+    job = _wait_apply_job(client, response.json()["job_id"])
+
+    assert checks == 4
+    assert job["status"] == "failure"
+    assert "Compose file changed" in job["error"]
+    assert " up " not in _fake_docker_calls(fake_root)
+
+
 def test_repair_rejects_stale_plan_and_read_only_mode(tmp_path: Path) -> None:
     client, _fake_root, compose_path = _tracking_fixture(tmp_path)
     target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
@@ -537,6 +600,97 @@ def test_repair_writer_preserves_external_compose_edit(tmp_path: Path) -> None:
         )
 
     assert compose_path.read_bytes() == source + b"# operator change\n"
+
+
+def test_compose_writers_serialize_validation_and_replacement(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "compose.yml"
+    path.write_text("original", encoding="utf-8")
+    source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    first_replacing = Event()
+    finish_first = Event()
+    original_replace = compose_rewrite.os.replace
+
+    def hold_first_replace(source, target):
+        if ".first." in str(source):
+            first_replacing.set()
+            assert finish_first.wait(5)
+        original_replace(source, target)
+
+    monkeypatch.setattr(compose_rewrite.os, "replace", hold_first_replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(
+            compose_rewrite._atomic_replace_compose,
+            path, "first", prefix="first", expected_source_hash=source_hash,
+        )
+        try:
+            assert first_replacing.wait(5)
+            second = pool.submit(
+                compose_rewrite._atomic_replace_compose,
+                path, "second", prefix="second", expected_source_hash=source_hash,
+            )
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.1)
+        finally:
+            finish_first.set()
+        first.result(timeout=5)
+        with pytest.raises(ComposeTagRewriteError, match="Compose file changed"):
+            second.result(timeout=5)
+    assert path.read_text(encoding="utf-8") == "first"
+
+
+def test_compose_rollback_preserves_newer_edit_and_backup_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "compose.yml"
+    backup = tmp_path / "compose.backup.yml"
+    backup.write_bytes(b"services:\r\n  app:\r\n    image: repo/app:v1\r\n")
+    path.write_text("wudup rewrite\n", encoding="utf-8")
+    written_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.write_text("operator change\n", encoding="utf-8")
+
+    with pytest.raises(ComposeTagRewriteError, match="Compose file changed"):
+        compose_rewrite.restore_compose_backup(
+            backup, path, expected_source_hash=written_hash,
+        )
+    assert path.read_text(encoding="utf-8") == "operator change\n"
+    assert backup.exists()
+
+    path.write_text("wudup rewrite\n", encoding="utf-8")
+    compose_rewrite.restore_compose_backup(
+        backup, path, expected_source_hash=written_hash,
+    )
+    assert path.read_bytes() == backup.read_bytes()
+
+
+def test_tracking_audit_rolls_back_event_when_run_update_fails(tmp_path: Path) -> None:
+    client, _fake_root, _compose_path = _tracking_fixture(tmp_path)
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    plan_response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"},
+        headers=_csrf_headers(client),
+    )
+    plan = TrackingRepairPlan.model_validate(plan_response.json())
+    settings = client.app.state.web_settings
+    with open_db(settings.config.db_path) as conn:
+        init_db(conn)
+        run_id = insert_update_run(conn, status="running", mode="web-tracking-repair")
+        conn.execute(
+            "CREATE TRIGGER fail_tracking_run_update BEFORE UPDATE ON update_runs "
+            "BEGIN SELECT RAISE(FAIL, 'blocked'); END"
+        )
+        conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="blocked"):
+        web_tracking._finish_tracking_audit(settings, run_id, plan, "success")
+
+    with open_db(settings.config.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM update_events WHERE run_id = ?", (run_id,)
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT status FROM update_runs WHERE id = ?", (run_id,)
+        ).fetchone()[0] == "running"
 
 
 def test_repair_failure_restores_compose_and_audits(tmp_path: Path) -> None:

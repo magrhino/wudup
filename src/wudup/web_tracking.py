@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import hashlib
 import re
 import secrets
@@ -54,6 +53,7 @@ from .web_models import (
 # lookarounds, backreferences, and syntax that WUD might interpret differently.
 _REGEX_TOKEN = re.compile(r"(?:[A-Za-z0-9_-]|\\\.|\\d\+|\(\?:\\\.\\d\+\)\+)")
 _RELEASE_PREFIX = re.compile(r"v?\d+\.\d+", re.ASCII)
+_DIGEST_MARKER = "@sha256:"
 
 
 def api_tracked_containers(request: Request) -> TrackedContainersResponse:
@@ -131,7 +131,7 @@ def _wud_containers_by_key(
 
 
 def _tracking_health(image: str, tag: str, regex: str, suggested: str) -> tuple[str, str, str]:
-    if "@sha256:" in image:
+    if _DIGEST_MARKER in image:
         return "digest-pinned", "Digest-pinned image; review tracking manually.", ""
     if not regex:
         return "no-filter", "No WUD tag filter is set.", suggested
@@ -286,7 +286,7 @@ def _history_timestamps(
 
 
 def _suggested_regex(tag: str, image: str) -> str:
-    if "@sha256:" in image or not tag_value_valid(tag) or not _release_shaped_tag(tag):
+    if _DIGEST_MARKER in image or not tag_value_valid(tag) or not _release_shaped_tag(tag):
         return ""
     try:
         return retag_tag_include_regex(tag)
@@ -380,7 +380,7 @@ def build_tracking_repair_plan(
         raise HTTPException(status_code=404, detail="Tracking target was not found.")
     record = matches[0]
     item = record.item
-    if "@sha256:" in item.image:
+    if _DIGEST_MARKER in item.image:
         raise HTTPException(status_code=422, detail="Digest-pinned images need manual tracking review.")
     tag = image_tag(item.image)
     _validated_regex(payload.regex, tag)
@@ -400,10 +400,8 @@ def build_tracking_repair_plan(
             status_code=409,
             detail=_safe_exception_detail(settings, "could not preview tracking repair", exc),
         ) from exc
-    diff = "".join(difflib.unified_diff(
-        source.splitlines(keepends=True), rendered.splitlines(keepends=True),
-        fromfile="current Compose", tofile="proposed Compose",
-    ))
+    old_label = repr(current) if current else "(not set)"
+    diff = f"wud.tag.include:\n- {old_label}\n+ {payload.regex!r}\n"
     issues = []
     if record.service_key_ambiguous:
         issues.append("Duplicate service identity; choose an unambiguous Compose service.")
@@ -594,6 +592,7 @@ def _run_tracking_repair(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="running", message="Recreating only the selected service without a pull."),
         )
+        _require_approved_compose_source(path, plan.rendered_hash)
         recreate_started = True
         compose.up(
             stack.directory, stack.file, [item.service],
@@ -616,37 +615,49 @@ def _run_tracking_repair(
             finished_at=utc_timestamp(),
         )
     except Exception as exc:  # noqa: BLE001 - job reports and audits every failure.
-        rollback_error = (
-            _rollback_tracking_repair(
-                settings, record, plan, backup, recreate_started, expected_image_id,
-            )
-            if changed and backup is not None and record is not None and plan is not None
-            else ""
-        )
-        retain_backup = bool(rollback_error)
-        error = _safe_exception_detail(settings, "tracking repair failed", exc)
-        if rollback_error:
-            error += f"; {rollback_error}. Compose backup was preserved for manual recovery"
-        if run_id is not None and plan is not None:
-            try:
-                _finish_tracking_audit(settings, run_id, plan, "failure", error)
-            except Exception as audit_exc:  # noqa: BLE001 - job must become terminal.
-                error += "; " + _safe_exception_detail(
-                    settings, "audit record could not be finalized", audit_exc
-                )
-        web_jobs._append_apply_job_progress(
-            jobs, condition, job_id,
-            UpdaterProgressEvent(phase="completion", status="failure", message=error),
-        )
-        web_jobs._update_apply_job(
-            jobs, condition, job_id, status="failure", run_id=run_id,
-            finished_at=utc_timestamp(), error=error,
+        retain_backup = _finish_failed_tracking_repair(
+            settings, jobs, condition, job_id, exc, run_id, plan, record, backup,
+            changed, recreate_started, expected_image_id,
         )
     finally:
         if backup is not None and not retain_backup:
             backup.unlink(missing_ok=True)
         if lock is not None:
             lock.close()
+
+
+def _finish_failed_tracking_repair(
+    settings: WebSettings, jobs: dict[str, WebApplyJob], condition: Condition,
+    job_id: str, exc: Exception, run_id: int | None, plan: TrackingRepairPlan | None,
+    record: web_retags._RetagTargetRecord | None, backup: Path | None,
+    changed: bool, recreate_started: bool, expected_image_id: str,
+) -> bool:
+    rollback_error = (
+        _rollback_tracking_repair(
+            settings, record, plan, backup, recreate_started, expected_image_id,
+        )
+        if changed and backup is not None and record is not None and plan is not None
+        else ""
+    )
+    error = _safe_exception_detail(settings, "tracking repair failed", exc)
+    if rollback_error:
+        error += f"; {rollback_error}. Compose backup was preserved for manual recovery"
+    if run_id is not None and plan is not None:
+        try:
+            _finish_tracking_audit(settings, run_id, plan, "failure", error)
+        except Exception as audit_exc:  # noqa: BLE001 - job must become terminal.
+            error += "; " + _safe_exception_detail(
+                settings, "audit record could not be finalized", audit_exc
+            )
+    web_jobs._append_apply_job_progress(
+        jobs, condition, job_id,
+        UpdaterProgressEvent(phase="completion", status="failure", message=error),
+    )
+    web_jobs._update_apply_job(
+        jobs, condition, job_id, status="failure", run_id=run_id,
+        finished_at=utc_timestamp(), error=error,
+    )
+    return bool(rollback_error)
 
 
 def _require_approved_compose_source(path: Path, rendered_hash: str) -> None:
@@ -667,14 +678,14 @@ def _finish_tracking_audit(
     with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         now = utc_timestamp()
-        insert_update_event(
-            conn, run_id=run_id, created_at=now, service_name=plan.service,
-            stack_name=plan.stack, image=plan.image, target_image=plan.image,
-            status=status,
-            metadata_json=json_object({"source": "webui", "operation": "tracking-repair", "target_id": plan.target_id, "old_regex": plan.current_regex, "new_regex": plan.proposed_regex, "error": error}),
-        )
-        conn.execute(
-            "UPDATE update_runs SET finished_at = ?, status = ? WHERE id = ?",
-            (now, status, run_id),
-        )
-        conn.commit()
+        with conn:
+            insert_update_event(
+                conn, run_id=run_id, created_at=now, service_name=plan.service,
+                stack_name=plan.stack, image=plan.image, target_image=plan.image,
+                status=status, commit=False,
+                metadata_json=json_object({"source": "webui", "operation": "tracking-repair", "target_id": plan.target_id, "old_regex": plan.current_regex, "new_regex": plan.proposed_regex, "error": error}),
+            )
+            conn.execute(
+                "UPDATE update_runs SET finished_at = ?, status = ? WHERE id = ?",
+                (now, status, run_id),
+            )
