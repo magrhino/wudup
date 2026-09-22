@@ -207,7 +207,7 @@ async function apply(): Promise<void> {
       <RouterLink v-if="tracking.job.run_id" :to="{ name: 'run-detail', params: { id: tracking.job.run_id } }">Review run</RouterLink>
     </n-alert>
     <n-alert v-if="tracking.job?.status === 'queued' || tracking.job?.status === 'running'" type="info" :show-icon="false">
-      {{ tracking.job.progress.at(-1)?.message || "Tracking repair is running." }}
+      Tracking repair is still running. {{ tracking.job.progress.at(-1)?.message }} Job {{ tracking.job.job_id }}. You can refresh later.
     </n-alert>
     <n-alert v-if="tracking.job?.status === 'failure'" type="error" :show-icon="false">
       {{ tracking.job.error || "Tracking repair failed. Review the job and run history before retrying." }}
@@ -288,7 +288,7 @@ async function apply(): Promise<void> {
           <h4>Review the change</h4>
           <p><strong>{{ tracking.plan.service_key }}</strong> · Compose label only · Recreate this service without pulling or building an image.</p>
           <n-alert v-for="issue in tracking.plan.issues" :key="issue" type="warning" :show-icon="false">{{ issue }}</n-alert>
-          <pre :aria-label="'Compose diff for ' + tracking.plan.service_key">{{ tracking.plan.compose_diff }}</pre>
+          <pre :aria-label="'Tracking label preview for ' + tracking.plan.service_key">{{ tracking.plan.compose_diff }}</pre>
           <n-checkbox v-model:checked="approved" :disabled="!tracking.plan.can_apply || tracking.applying">I reviewed the diff and understand this will recreate {{ selected.service }}.</n-checkbox>
           <n-button type="primary" :disabled="!approved || !tracking.plan.can_apply || tracking.applying || auth.session?.mutations_enabled !== true" :loading="tracking.applying" @click="apply">Apply tracking repair</n-button>
         </div>

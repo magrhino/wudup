@@ -8,7 +8,7 @@ import { createWudRouter } from "../src/router";
 import { useAuthStore } from "../src/stores/auth";
 import { useTrackingStore } from "../src/stores/tracking";
 import TrackedContainersView from "../src/views/TrackedContainersView.vue";
-import { authSession } from "./helpers/fixtures";
+import { applyJobResponse, authSession } from "./helpers/fixtures";
 import { mountWithApp } from "./helpers/mount";
 
 const item: TrackedContainerItem = {
@@ -189,6 +189,25 @@ describe("TrackedContainersView", () => {
     await wrapper.get('button[aria-label="Inspect media/radarr"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[aria-label="Selected container details"]').text()).toContain("WUD inventory unavailable. Check Doctor");
+  });
+
+  it("shows a still-running repair as progress without an error alert", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useAuthStore().session = authSession({ authenticated: true });
+    const tracking = useTrackingStore();
+    tracking.job = applyJobResponse({ status: "running" });
+    vi.spyOn(tracking, "load").mockResolvedValue();
+    const router = createWudRouter(createMemoryHistory());
+    await router.push({ name: "containers" });
+    await router.isReady();
+
+    const wrapper = mountWithApp(TrackedContainersView, { pinia, router });
+    await flushPromises();
+
+    expect(wrapper.get('[data-alert-type="info"]').text()).toContain("Tracking repair is still running.");
+    expect(wrapper.get('[data-alert-type="info"]').text()).toContain("Job job-test. You can refresh later.");
+    expect(wrapper.find('[data-alert-type="error"]').exists()).toBe(false);
   });
 
   it("returns focus and scroll to the originating Inspect button on close", async () => {

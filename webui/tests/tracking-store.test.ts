@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { webApi, type TrackingRepairPlan } from "../src/api/client";
+import { ApiError, webApi, type TrackingRepairPlan } from "../src/api/client";
 import { useAuthStore } from "../src/stores/auth";
 import { useTrackingStore } from "../src/stores/tracking";
 import { applyJobResponse } from "./helpers/fixtures";
@@ -15,10 +15,12 @@ const plan: TrackingRepairPlan = {
 
 describe("tracking store", () => {
   beforeEach(() => {
+    globalThis.sessionStorage.clear();
     setActivePinia(createPinia());
     vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-test");
   });
   afterEach(() => {
+    globalThis.sessionStorage.clear();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -59,6 +61,7 @@ describe("tracking store", () => {
     expect(store.job?.status).toBe("success");
     expect(store.plan).toBeNull();
     expect(store.applying).toBe(false);
+    expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBeNull();
   });
 
   it("keeps job failure and polling errors visible without leaving apply active", async () => {
@@ -83,5 +86,65 @@ describe("tracking store", () => {
     expect(apply).toHaveBeenCalledTimes(2);
     expect(store.error).toContain("Job unavailable");
     expect(store.applying).toBe(false);
+  });
+
+  it("stops polling a long-running job and keeps its ID visible", async () => {
+    vi.useFakeTimers();
+    const store = useTrackingStore();
+    store.plan = plan;
+    vi.spyOn(webApi, "applyTrackingRepair")
+      .mockResolvedValue(applyJobResponse({ status: "running" }));
+    const poll = vi.spyOn(webApi, "applyJob")
+      .mockResolvedValue(applyJobResponse({ status: "running" }));
+
+    const pending = store.apply();
+    await vi.advanceTimersByTimeAsync(300_000);
+    await pending;
+
+    expect(poll).toHaveBeenCalledTimes(400);
+    expect(store.job?.job_id).toBe("job-test");
+    expect(store.error).toBe("");
+    expect(store.applying).toBe(false);
+    expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBe("job-test");
+  });
+
+  it("recovers a still-running repair job after a fresh store loads", async () => {
+    globalThis.sessionStorage.setItem("trackingRepairJobId", "job-test");
+    const store = useTrackingStore();
+    const inventory = vi.spyOn(webApi, "trackedContainers").mockResolvedValue({
+      status: "ready", count: 0, items: [], wud_status: null, warnings: [],
+    });
+    const check = vi.spyOn(webApi, "applyJob")
+      .mockResolvedValueOnce(applyJobResponse({ status: "running" }))
+      .mockResolvedValueOnce(applyJobResponse({ status: "success" }));
+
+    await store.load();
+    expect(check).toHaveBeenCalledWith("job-test");
+    expect(store.job?.job_id).toBe("job-test");
+    expect(store.error).toBe("");
+    expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBe("job-test");
+
+    await store.load();
+    expect(store.job?.status).toBe("success");
+    expect(store.error).toBe("");
+    expect(check.mock.invocationCallOrder[1]).toBeLessThan(inventory.mock.invocationCallOrder[1]);
+    expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBeNull();
+  });
+
+  it("retires a missing repair job instead of retrying its 404 on every load", async () => {
+    globalThis.sessionStorage.setItem("trackingRepairJobId", "job-lost");
+    const store = useTrackingStore();
+    vi.spyOn(webApi, "trackedContainers").mockResolvedValue({
+      status: "ready", count: 0, items: [], wud_status: null, warnings: [],
+    });
+    const check = vi.spyOn(webApi, "applyJob")
+      .mockRejectedValue(new ApiError(404, "apply job not found"));
+
+    await store.load();
+    expect(store.error).toContain("job-lost");
+    expect(store.rememberedJobId).toBe("");
+    expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBeNull();
+    await store.load();
+    expect(check).toHaveBeenCalledOnce();
   });
 });
