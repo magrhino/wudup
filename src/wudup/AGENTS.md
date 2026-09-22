@@ -33,7 +33,9 @@ Prefer small modules with one clear reason to change:
 | Web self-update and container restart | `web_self_update.py` | Preserve plan TTL, image/tag validation, restart validation, audit, and redaction. |
 | Updater CLI facade and runner orchestration | `updater.py` | Preserve `UpdateFromWudRunner` and `run_update_from_wud`; helper APIs belong in their owning modules, not facade re-exports. |
 | Updater dataclasses, typed records, exceptions | `updater_models.py` | Preserve dataclass options, defaults, and custom exception classes. |
-| Compose YAML tag/digest/exclusion rewrites | `compose_rewrite.py` | Preserve fail-closed YAML handling, atomic writes, file mode/owner, and cleanup. |
+| Compose tag/digest/exclusion rewrite operations | `compose_rewrite.py` | Stable entrypoints own update/approval matching, regex policy, and resolved-tag marker semantics. Keep YAML mechanics and persistence in their owners. |
+| Compose round-trip YAML source editing | `compose_source.py` | Own parsing, source spans, label styles, anchor/alias guards, and comment-token containers; preserve exact source handling and fail-closed errors without choosing update policy or writing files. |
+| Compose atomic persistence and backups | `compose_persistence.py` | All writers, backups, and guarded restores share the directory lock. Preserve source-hash checks, file mode/owner, replacement ordering, and temporary-file cleanup. |
 | Registry HTTPS transport and authentication | `registry_http.py`, `digest_verifier.py` | Keep token origins authorized per registry, DNS addresses pinned, redirects disabled, and request size/time bounded; the live probe shares the resolver. Run `tests/test_python_registry_http.py` and digest verifier tests. |
 | Docker tag-stream parsing and WebUI decision planning | `tag_streams.py` | Keep detection strict, manifest-verified, LinuxServer-aware, and free of GET-time registry calls. |
 
