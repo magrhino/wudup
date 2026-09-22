@@ -192,8 +192,8 @@ def test_threshold_crossing_and_shrinking_below_threshold(repo, before, after, c
     assert repo.check()[0] == code
 
 
-@pytest.mark.parametrize("count,code", [(900, 0), (901, 1)])
-def test_git_rename_preserves_old_path_ceiling_including_growth(repo, count, code):
+@pytest.mark.parametrize("count", [900, 901])
+def test_git_rename_reports_old_path_ceiling_until_transferred(repo, count):
     repo.lines("old.py", 900)
     repo.policy["ceilings"]["old.py"] = exception(900)
     repo.save_policy()
@@ -202,12 +202,14 @@ def test_git_rename_preserves_old_path_ceiling_including_growth(repo, count, cod
     repo.lines("new.py", count)
     repo.commit()
     actual, report = repo.check()
-    assert actual == code
+    assert actual == 1
     source = row(report, "new.py")
     assert source["status"] == "renamed"
     assert source["base_path"] == source["ceiling_path"] == "old.py"
     assert source["base_lines"] == source["ceiling"] == 900
     assert source["delta"] == count - 900
+    assert any("destination's exact path" in error for error in source["failures"])
+    assert any("exceeds" in error for error in source["failures"]) is (count > 900)
     assert not any(item["path"] == "old.py" for item in report["files"])
 
 

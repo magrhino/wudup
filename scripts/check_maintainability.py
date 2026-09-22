@@ -15,6 +15,7 @@ POLICY_PATH = "maintainability-policy.json"
 ENFORCED_CATEGORIES = {"production", "declarative"}
 REGULAR_MODES = {"100644", "100755"}
 BLOB_CHUNK_SIZE = 64 * 1024
+MAX_POLICY_BYTES = 1024 * 1024
 
 
 class Git:
@@ -464,6 +465,9 @@ def file_report(
     record_path, record, ceiling = applicable_ceiling(
         path, old, current_category, policy
     )
+    source_record = base_policy["ceilings"].get(old) or base_policy["allowances"].get(old)
+    if path != old and not record and source_record:
+        record_path, record, ceiling = old, source_record, source_record["ceiling"]
     row = {
         "path": path,
         "base_path": old,
@@ -477,6 +481,10 @@ def file_report(
         "ceiling_path": record_path,
     }
     row["failures"], row["warnings"] = file_findings(row, record, policy)
+    if row["status"] == "renamed" and (source_record or record) and record_path != path:
+        row["failures"].append(
+            "Transfer the source's reviewed ceiling to the destination's exact path so it remains enforced after this rename."
+        )
     return row
 
 
@@ -549,18 +557,23 @@ def review_category_moves(
 
 
 def read_policy(git: Git, head_tree: dict, policy_file: Path | None) -> dict:
+    size_error = "policy exceeds 1 MiB; reduce its size before running the checker."
     if policy_file:
-        content = policy_file.read_bytes()
+        with policy_file.open("rb") as source:
+            content = source.read(MAX_POLICY_BYTES + 1)
     else:
         entry = head_tree.get(POLICY_PATH)
         if not entry or entry[0] not in REGULAR_MODES:
             raise ValueError(
                 "The committed head needs a regular maintainability-policy.json file."
             )
+        # The same immutable object ID is sized and read, with replacements disabled.
+        require(int(git.run("cat-file", "-s", entry[1])) <= MAX_POLICY_BYTES, size_error)
         content = git.run("cat-file", "blob", entry[1])
+    require(len(content) <= MAX_POLICY_BYTES, size_error)
     try:
         return validate_policy(json.loads(content))
-    except (TypeError, KeyError, UnicodeError) as exc:
+    except (TypeError, KeyError, UnicodeError, RecursionError) as exc:
         raise ValueError("Invalid policy structure or encoding.") from exc
 
 

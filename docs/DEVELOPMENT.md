@@ -83,6 +83,10 @@ Blob counting drains one Git batch response at a time in 64 KiB chunks, includin
 binary files and very long lines. It retains counts and tree metadata, not the
 contents of the compared blobs. Missing or truncated objects and failed Git
 processes produce an error rather than a partial passing report.
+Each policy input (committed base/head or external report-only file) is limited
+to 1 MiB before JSON parsing. Git object sizes are checked before loading policy
+contents, and external reads stop after the limit plus one byte. Oversized policies
+exit with status 2 and must be reduced before the checker can run.
 
 The policy is **baseline pending**. Enforcement exits with status 2 until the
 predecessor work under [#694](https://github.com/magrhino/wudup/issues/694) is
@@ -119,8 +123,11 @@ Exact production paths and reviewed records take precedence over directory
 categories, so an explicitly retained production owner cannot hide inside tests
 or generated output. Ordinary tests remain report-only.
 
-Git-detected renames retain the old path's ceiling unless the new exact path has a
-reviewed record. A production rename into tests or an excluded category fails:
+Git-detected renames with a reviewed ceiling or allowance require a record at the
+destination's exact path. Move or copy the source record in the same PR, including
+ceilings below the default blocking threshold, so later comparisons retain it.
+The old path's ceiling is still shown for diagnosis until the record is transferred,
+but that rename fails. A production rename into tests or an excluded category fails:
 retain production classification or review an exact-path declarative allowance.
 Unchanged and shrinking oversized files with recorded ceilings are allowed; new
 or growing files above their applicable ceiling fail. Follow the policy's
