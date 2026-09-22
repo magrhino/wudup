@@ -1912,7 +1912,7 @@ def test_startup_probe_waits_for_wud_api_readiness(
 
     monkeypatch.setattr(web_wud_transport, "_request_json", fake_request_json)
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_cache,
         "WUD_API_STARTUP_RETRY_INTERVAL_SECONDS",
         0.0,
     )
