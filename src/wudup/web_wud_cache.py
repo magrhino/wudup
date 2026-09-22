@@ -14,7 +14,7 @@ import sqlite3
 import time
 import urllib.error
 import urllib.parse
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import Lock
@@ -678,22 +678,18 @@ def _watch_batch(
                 time.monotonic() - request_started,
             )
             watched_count += 1
-            # A global watch returns a list; selected watches return one container.
-            for container_payload in payload if isinstance(payload, list) else [payload]:
-                rate_limited_container_id = _watch_rate_limited_container_id(
-                    container_payload,
-                    settings,
+            for rate_limited_container_id in _watch_rate_limited_container_ids(
+                payload, settings,
+            ):
+                _start_watch_rate_limit_cooldown(
+                    cache_key,
+                    rate_limited_container_id or requested_container_id,
                 )
-                if rate_limited_container_id is not None:
-                    _start_watch_rate_limit_cooldown(
-                        cache_key,
-                        rate_limited_container_id or requested_container_id,
-                    )
-                    cooldown_remaining = max(
-                        cooldown_remaining,
-                        WUD_API_RATE_LIMIT_COOLDOWN_SECONDS,
-                    )
-                    watched_all = False
+                cooldown_remaining = max(
+                    cooldown_remaining,
+                    WUD_API_RATE_LIMIT_COOLDOWN_SECONDS,
+                )
+                watched_all = False
         except urllib.error.HTTPError as exc:
             if exc.code == 404 and requested_container_id:
                 remaining_watch_seconds -= max(
@@ -789,6 +785,21 @@ def _remaining_degraded_container_ids(
         for container_id in requested_container_ids
         if container_id in degraded
     )
+
+
+def _watch_rate_limited_container_ids(
+    payload: object,
+    settings: WebSettings,
+) -> Iterator[str]:
+    # Yield lazily: record each cooldown before parsing the next response item.
+    # A global watch returns a list; selected watches return one container.
+    for container_payload in payload if isinstance(payload, list) else [payload]:
+        rate_limited_container_id = _watch_rate_limited_container_id(
+            container_payload,
+            settings,
+        )
+        if rate_limited_container_id is not None:
+            yield rate_limited_container_id
 
 
 def _watch_rate_limited_container_id(
