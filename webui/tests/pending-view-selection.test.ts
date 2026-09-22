@@ -39,6 +39,61 @@ async function selectAllAndPreview(
     ?.trigger("click");
 }
 
+function unmatchedCleanupPlan(
+  item: ReturnType<typeof unmatchedPendingItem>,
+  canRemoveUnmatched: boolean,
+) {
+  return planResponse({
+    can_apply: false,
+    status: "blocked",
+    summary: {
+      target_count: 1,
+      matched_target_count: 0,
+      stack_count: 0,
+      service_count: 0,
+      skipped_count: 1,
+      issue_count: 1,
+    },
+    stacks: [],
+    issues: [
+      {
+        severity: "error",
+        code: "unmatched",
+        message: "No Compose service matched repo/old:latest.",
+        line_no: 1,
+        stack: "",
+        service: "",
+        hint: item.diagnostic?.hint ?? "",
+        details: {},
+      },
+    ],
+    skipped: [
+      {
+        line_no: 1,
+        raw: "repo/old:latest",
+        image: "repo/old:latest",
+        desired_tag: "",
+        reason: "unmatched",
+      },
+    ],
+    cleanup: {
+      cleanup_id: "cleanup-test",
+      can_remove_unmatched: canRemoveUnmatched,
+      items: [
+        {
+          line_no: 1,
+          raw: "repo/old:latest",
+          image: "repo/old:latest",
+          desired_tag: "",
+          digest: "",
+          reason: "unmatched",
+          diagnostic: item.diagnostic,
+        },
+      ],
+    },
+  });
+}
+
 function mountPendingWithSnooze(kind: SnoozeKind) {
   const snoozedItem = pendingGroupedItem({
     line_no: 1,
@@ -238,55 +293,7 @@ describe("pending view selection actions", () => {
     updates.pending = pendingWithUnmatched(item);
     mockPendingLifecycle(settings, updates);
     vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = planResponse({
-        can_apply: false,
-        status: "blocked",
-        summary: {
-          target_count: 1,
-          matched_target_count: 0,
-          stack_count: 0,
-          service_count: 0,
-          skipped_count: 1,
-          issue_count: 1,
-        },
-        stacks: [],
-        issues: [
-          {
-            severity: "error",
-            code: "unmatched",
-            message: "No Compose service matched repo/old:latest.",
-            line_no: 1,
-            stack: "",
-            service: "",
-            hint: item.diagnostic?.hint ?? "",
-            details: {},
-          },
-        ],
-        skipped: [
-          {
-            line_no: 1,
-            raw: "repo/old:latest",
-            image: "repo/old:latest",
-            desired_tag: "",
-            reason: "unmatched",
-          },
-        ],
-        cleanup: {
-          cleanup_id: "cleanup-test",
-          can_remove_unmatched: false,
-          items: [
-            {
-              line_no: 1,
-              raw: "repo/old:latest",
-              image: "repo/old:latest",
-              desired_tag: "",
-              digest: "",
-              reason: "unmatched",
-              diagnostic: item.diagnostic,
-            },
-          ],
-        },
-      });
+      updates.plan = unmatchedCleanupPlan(item, false);
     });
     const cleanupPending = vi.spyOn(updates, "cleanupPending");
     const wrapper = mountPendingView(pinia);
@@ -487,55 +494,7 @@ describe("pending view selection actions", () => {
       .mockResolvedValue();
     const loadRuns = vi.spyOn(runs, "loadRuns").mockResolvedValue();
     vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = planResponse({
-        can_apply: false,
-        status: "blocked",
-        summary: {
-          target_count: 1,
-          matched_target_count: 0,
-          stack_count: 0,
-          service_count: 0,
-          skipped_count: 1,
-          issue_count: 1,
-        },
-        stacks: [],
-        issues: [
-          {
-            severity: "error",
-            code: "unmatched",
-            message: "No Compose service matched repo/old:latest.",
-            line_no: 1,
-            stack: "",
-            service: "",
-            hint: item.diagnostic?.hint ?? "",
-            details: {},
-          },
-        ],
-        skipped: [
-          {
-            line_no: 1,
-            raw: "repo/old:latest",
-            image: "repo/old:latest",
-            desired_tag: "",
-            reason: "unmatched",
-          },
-        ],
-        cleanup: {
-          cleanup_id: "cleanup-test",
-          can_remove_unmatched: true,
-          items: [
-            {
-              line_no: 1,
-              raw: "repo/old:latest",
-              image: "repo/old:latest",
-              desired_tag: "",
-              digest: "",
-              reason: "unmatched",
-              diagnostic: item.diagnostic,
-            },
-          ],
-        },
-      });
+      updates.plan = unmatchedCleanupPlan(item, true);
     });
     const cleanupPending = vi
       .spyOn(updates, "cleanupPending")
@@ -868,55 +827,7 @@ describe("pending view selection actions", () => {
     };
     mockPendingLifecycle(settings, updates);
     vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = planResponse({
-        can_apply: false,
-        status: "blocked",
-        summary: {
-          target_count: 1,
-          matched_target_count: 0,
-          stack_count: 0,
-          service_count: 0,
-          skipped_count: 1,
-          issue_count: 1,
-        },
-        stacks: [],
-        issues: [
-          {
-            severity: "error",
-            code: "unmatched",
-            message: "No Compose service matched repo/old:latest.",
-            line_no: 1,
-            stack: "",
-            service: "",
-            hint: item.diagnostic?.hint ?? "",
-            details: {},
-          },
-        ],
-        skipped: [
-          {
-            line_no: 1,
-            raw: "repo/old:latest",
-            image: "repo/old:latest",
-            desired_tag: "",
-            reason: "unmatched",
-          },
-        ],
-        cleanup: {
-          cleanup_id: "cleanup-test",
-          can_remove_unmatched: false,
-          items: [
-            {
-              line_no: 1,
-              raw: "repo/old:latest",
-              image: "repo/old:latest",
-              desired_tag: "",
-              digest: "",
-              reason: "unmatched",
-              diagnostic: item.diagnostic,
-            },
-          ],
-        },
-      });
+      updates.plan = unmatchedCleanupPlan(item, false);
     });
     const cleanupPending = vi.spyOn(updates, "cleanupPending");
     const wrapper = mountPendingView(pinia);

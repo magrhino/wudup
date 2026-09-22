@@ -31,6 +31,37 @@ import {
   setupStores,
 } from "./helpers/viewSecurity";
 
+function mutationEnabledSettingsResponse(
+  overrides: Parameters<typeof settingsResponse>[0] = {},
+) {
+  return settingsResponse({
+    webui: settingsResponse().webui.map((entry) =>
+      entry.name === "WUD_WEB_MUTATIONS_ENABLED"
+        ? { ...entry, value: "true", configured: true, source: "configured" as const }
+        : entry,
+    ),
+    ...overrides,
+  });
+}
+
+function configuredWebhookSettingsResponse() {
+  return mutationEnabledSettingsResponse({
+    managed: settingsResponse().managed.map((entry) =>
+      entry.key === "release_notifications_discord_webhook"
+        ? { ...entry, configured: true, source: "configured" as const }
+        : entry,
+    ),
+  });
+}
+
+function mockContainerRestart(connection: ReturnType<typeof setupStores>["connection"]) {
+  return vi.spyOn(connection, "restartContainer").mockResolvedValue({
+    status: "scheduled",
+    audit_run_id: 42,
+    container: "wudup",
+  });
+}
+
 describe("settings mutation views", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -564,13 +595,7 @@ describe("settings mutation views", () => {
 
   it("saves managed preference changes through the store", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = mutationEnabledSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const updateManagedSettings = vi
@@ -611,12 +636,7 @@ describe("settings mutation views", () => {
 
   it("saves release-note notification settings from the notifications section", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
+    settings.settings = mutationEnabledSettingsResponse({
       managed: settingsResponse().managed.map((entry) =>
         entry.key === "release_notifications_mode"
           ? { ...entry, value: "per_container", source: "configured" as const }
@@ -710,18 +730,7 @@ describe("settings mutation views", () => {
 
   it("clears a configured Discord webhook from the notifications section", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-      managed: settingsResponse().managed.map((entry) =>
-        entry.key === "release_notifications_discord_webhook"
-          ? { ...entry, configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = configuredWebhookSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const updateManagedSettings = vi
@@ -752,18 +761,7 @@ describe("settings mutation views", () => {
 
   it("sends a configured test webhook after confirmation", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-      managed: settingsResponse().managed.map((entry) =>
-        entry.key === "release_notifications_discord_webhook"
-          ? { ...entry, configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = configuredWebhookSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const testWebhook = vi
@@ -802,18 +800,7 @@ describe("settings mutation views", () => {
 
   it("shows an error when sending the test webhook fails", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-      managed: settingsResponse().managed.map((entry) =>
-        entry.key === "release_notifications_discord_webhook"
-          ? { ...entry, configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = configuredWebhookSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const testWebhook = vi
@@ -848,18 +835,7 @@ describe("settings mutation views", () => {
 
   it("blocks test webhook while dirty, unconfigured, or read-only", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-      managed: settingsResponse().managed.map((entry) =>
-        entry.key === "release_notifications_discord_webhook"
-          ? { ...entry, configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = configuredWebhookSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const testWebhook = vi.spyOn(settings, "testReleaseNotificationWebhook");
@@ -877,13 +853,7 @@ describe("settings mutation views", () => {
     expect(testWebhook).not.toHaveBeenCalled();
 
     const unconfigured = setupStores(true);
-    unconfigured.settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    unconfigured.settings.settings = mutationEnabledSettingsResponse();
     unconfigured.settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(unconfigured.settings, "loadSettings").mockResolvedValue();
     const unconfiguredWrapper = mountWithApp(SettingsView, {
@@ -939,13 +909,7 @@ describe("settings mutation views", () => {
 
   it("does not dirty release-note cooldown for equivalent normalized values", async () => {
     const { pinia, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = mutationEnabledSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
     const updateManagedSettings = vi.spyOn(settings, "updateManagedSettings");
@@ -1064,20 +1028,10 @@ describe("settings mutation views", () => {
 
   it("requires warning confirmation before restarting the WebUI container", async () => {
     const { pinia, connection, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = mutationEnabledSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
-    const restartContainer = vi.spyOn(connection, "restartContainer").mockResolvedValue({
-      status: "scheduled",
-      audit_run_id: 42,
-      container: "wudup",
-    });
+    const restartContainer = mockContainerRestart(connection);
 
     const wrapper = mountWithApp(SettingsView, { pinia });
     await flushPromises();
@@ -1105,20 +1059,10 @@ describe("settings mutation views", () => {
 
   it("blocks container restart controls while restart is pending", async () => {
     const { pinia, connection, settings } = setupStores(true);
-    settings.settings = settingsResponse({
-      webui: settingsResponse().webui.map((entry) =>
-        entry.name === "WUD_WEB_MUTATIONS_ENABLED"
-          ? { ...entry, value: "true", configured: true, source: "configured" as const }
-          : entry,
-      ),
-    });
+    settings.settings = mutationEnabledSettingsResponse();
     settings.onboarding = onboardingChecklistResponse({ visible: false });
     vi.spyOn(settings, "loadSettings").mockResolvedValue();
-    const restartContainer = vi.spyOn(connection, "restartContainer").mockResolvedValue({
-      status: "scheduled",
-      audit_run_id: 42,
-      container: "wudup",
-    });
+    const restartContainer = mockContainerRestart(connection);
 
     const wrapper = mountWithApp(SettingsView, { pinia });
     await flushPromises();
