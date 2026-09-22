@@ -39,6 +39,10 @@ Prefer small modules with one clear reason to change:
 | Compose atomic persistence and backups | `compose_persistence.py` | All writers, backups, and guarded restores share the directory lock. Preserve source-hash checks, file mode/owner, replacement ordering, and temporary-file cleanup. |
 | Registry HTTPS transport and authentication | `registry_http.py`, `digest_verifier.py` | Keep token origins authorized per registry, DNS addresses pinned, redirects disabled, and request size/time bounded; the live probe shares the resolver. Run `tests/test_python_registry_http.py` and digest verifier tests. |
 | Docker tag-stream parsing and WebUI decision planning | `tag_streams.py` | Keep detection strict, manifest-verified, LinuxServer-aware, and free of GET-time registry calls. |
+| Release-note API and context orchestration | `release_notes.py`, `release_note_models.py` | Preserve public imports, shared record defaults, context cache keys, candidate selection, and backfill fallback. Provider, security, and cache owners must not import the facade. |
+| GitHub/LSIO release-note providers | `release_note_providers.py` | Own the shared GitHub client, source discovery, bounded release lookup, breaking detection, and LSIO classification; preserve request/fallback order and upstream mappings. |
+| Release-note security assessment | `release_note_security.py` | Own advisory matching, version-range evidence, severity, scan/fetch limits, and retryable reasons; use the same provider client without adding cache writes. |
+| Release-note cache persistence | `release_note_cache.py` | Own legacy row decoding, digest pruning, upserts, and TTL decisions; preserve SQL/serialization and keep cached reads network-free. |
 
 If the exact owner does not exist yet, create the narrowest reasonable module instead of growing `web.py`, `updater.py`, or a giant test file.
 
