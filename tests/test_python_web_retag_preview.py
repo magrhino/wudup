@@ -75,10 +75,9 @@ def test_preview_rejects_another_active_job(tmp_path: Path, status: str) -> None
     first = preview._RetagPreviewJob(id="first", status=status)
     preview._store_retag_preview_job(state, first)
 
+    second = preview._RetagPreviewJob(id="second", status="queued")
     with pytest.raises(HTTPException) as caught:
-        preview._store_retag_preview_job(
-            state, preview._RetagPreviewJob(id="second", status="queued"),
-        )
+        preview._store_retag_preview_job(state, second)
 
     assert caught.value.status_code == 409
     assert caught.value.detail == "retag preview is already running"
@@ -91,8 +90,9 @@ def test_preview_submission_failure_cleans_up_job(tmp_path: Path) -> None:
     error = RuntimeError("executor stopped")
     state.web_retag_preview_executor.submit.side_effect = error
 
+    payload = _payload()
     with pytest.raises(RuntimeError) as caught:
-        routes.api_start_retag_plan_preview(_payload(), request)
+        routes.api_start_retag_plan_preview(payload, request)
 
     assert caught.value is error
     assert state.web_retag_preview_jobs == {}
@@ -190,8 +190,9 @@ def test_preview_read_only_gate_does_not_store_or_submit(tmp_path: Path) -> None
     state = request.app.state
     state.web_settings = replace(state.web_settings, mutations_enabled=False)
 
+    payload = _payload()
     with pytest.raises(HTTPException) as caught:
-        routes.api_start_retag_plan_preview(_payload(), request)
+        routes.api_start_retag_plan_preview(payload, request)
 
     assert caught.value.status_code == 403
     assert caught.value.detail == "mutations are disabled"
