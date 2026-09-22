@@ -15,14 +15,17 @@
   "packageRules": [
     {
       "description": "Mark non-major Docker updates for merge automation",
+      "matchDepNames": ["!aquasec/trivy"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "addLabels": ["automerge"]
     },
     {
-      "description": "Hold Trivy version updates while its patched source build is pinned to v0.74.0",
+      "description": "Open Trivy updates for manual review while its patched source build is pinned",
       "matchDepNames": ["aquasec/trivy"],
-      "matchUpdateTypes": ["major", "minor", "patch"],
-      "enabled": false
+      "automerge": false,
+      "minimumReleaseAge": "0 days",
+      "schedule": ["at any time"],
+      "prBodyNotes": ["Review only: the Trivy binary is built from separately pinned source in Dockerfile. Update its source tag, commit, version metadata, and patched dependencies before merging."]
     }
   ],
   "pinDigests": true
