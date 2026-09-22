@@ -9,12 +9,14 @@ ARG TARGETARCH
 RUN apk add --no-cache git \
     && git clone --depth 1 --branch v0.74.0 https://github.com/aquasecurity/trivy.git /trivy \
     && test "$(git -C /trivy rev-parse HEAD)" = e1fd17a0ea4a8cf24bc4b4dd7e2cfbf4bb31b994
+# Apply reviewed go.mod/go.sum versions and checksums before the read-only build.
+COPY docker/trivy-grpc-lock.patch /tmp/trivy-grpc-lock.patch
 WORKDIR /trivy
 # Remove this rebuild when an upstream Trivy release includes fixed gRPC.
 # Trivy v0.74.0 bundles gRPC v1.82.1; v1.83.2 fixes its release-blocking CVEs.
-RUN go get google.golang.org/grpc@v1.83.2 \
+RUN git apply /tmp/trivy-grpc-lock.patch \
     && mkdir -p /out \
-    && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+    && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=readonly -trimpath \
       -ldflags '-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.74.0' \
       -o /out/trivy ./cmd/trivy
 
@@ -80,11 +82,9 @@ COPY pyproject.toml README.md /app/
 COPY src/ /app/src/
 COPY --from=webui-build /webui/dist/ /app/src/wudup/web_static/
 
-# Build trusted repository source with the locked backend, without fetching dependencies.
-RUN python -m pip install --no-deps --no-build-isolation --no-cache-dir .
-
-# pip is only needed while building; its bundled libraries need not ship in the runtime.
-RUN python -m pip uninstall --yes pip
+# Build trusted source with the locked backend, then remove build-only pip.
+RUN python -m pip install --no-deps --no-build-isolation --no-cache-dir . \
+    && python -m pip uninstall --yes pip
 
 COPY bin/ /app/bin/
 COPY wud/ /app/wud/
