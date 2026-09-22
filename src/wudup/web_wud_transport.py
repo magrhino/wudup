@@ -16,8 +16,12 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from .web_auth import WebConfigError
-from .web_models import WudApiClientConfig
+from .web_auth import (
+    WebConfigError,
+    _redact_sensitive_text,
+    _redact_unknown_absolute_paths,
+)
+from .web_models import WebSettings, WudApiClientConfig
 
 DEFAULT_WUD_API_BASE_URL = "http://wud:3000"
 WUD_API_BASE_URL_ENV = "WUD_API_BASE_URL"
@@ -295,3 +299,55 @@ def _join_url(base_url: str, path: str) -> str:
     return f"{base_url}{path}"
 
 
+
+_HTTP_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+
+
+def _sanitize_detail(settings: WebSettings, value: str) -> str:
+    if not value:
+        return ""
+    sanitized = _scrub_http_url_secrets(value)
+    sanitized = _redact_sensitive_text(settings, sanitized)
+    return _redact_unknown_absolute_paths(sanitized)
+
+
+def _scrub_http_url_secrets(value: str) -> str:
+    return _HTTP_URL_RE.sub(_scrub_http_url_match, value)
+
+
+def _scrub_http_url_match(match: re.Match[str]) -> str:
+    candidate = match.group(0)
+    trailing = ""
+    while candidate and candidate[-1] in ".,;!?)]}":
+        trailing = candidate[-1] + trailing
+        candidate = candidate[:-1]
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+        if (
+            parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return f"{candidate}{trailing}"
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL host is unavailable")
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed.port
+    except ValueError:
+        scheme = candidate.partition("://")[0]
+        return f"{scheme}://<redacted>{trailing}"
+    netloc = f"{host}:{port}" if port is not None else host
+    return (
+        urllib.parse.urlunsplit(
+            (
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                "<redacted>" if parsed.query else "",
+                "<redacted>" if parsed.fragment else "",
+            )
+        )
+        + trailing
+    )
