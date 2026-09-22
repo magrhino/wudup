@@ -78,7 +78,8 @@ function exampleTags(tag: string): { tag: string; change: string }[] {
     }
   } else if (/\d/.test(tag)) {
     examples.push({ tag: tag.replace(/\d+/, increment), change: "First number change" });
-    const last = tag.replace(/\d+(?!.*\d)/, increment);
+    const number = Array.from(tag.matchAll(/\d+/g)).at(-1)!;
+    const last = tag.slice(0, number.index) + increment(number[0]) + tag.slice(number.index + number[0].length);
     if (last !== examples[0]?.tag) examples.push({ tag: last, change: "Last number change" });
   }
   examples.push({ tag: tag + "-rc1", change: "Extra prerelease suffix" });

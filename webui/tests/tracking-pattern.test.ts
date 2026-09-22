@@ -63,6 +63,22 @@ describe("tracking pattern explanation", () => {
     for (const example of guide.examples) expect(example.matches).toBe(guide.matches(example.tag));
   });
 
+  it.each([
+    [String.raw`^\d+-\d+$`, `${"1".repeat(126)}-2`, `${"1".repeat(126)}-3`],
+    [String.raw`^r\d+-build\d+-stable$`, "r007-build009-stable", "r007-build10-stable"],
+  ])("increments only the last number while preserving surrounding text for %s", (pattern, tag, expected) => {
+    const guide = explainTrackingPattern(pattern, tag)!;
+    expect(guide.examples).toContainEqual({ tag: expected, change: "Last number change", matches: true });
+  });
+
+  it("does not duplicate the first-number example when the tag has only one number", () => {
+    const guide = explainTrackingPattern(String.raw`^v\d+$`, "v5")!;
+    expect(guide.examples.filter((example) => example.tag === "v6")).toEqual([
+      { tag: "v6", change: "First number change", matches: true },
+    ]);
+    expect(guide.examples.some((example) => example.change === "Last number change")).toBe(false);
+  });
+
   it("shows Alpine patch matches and major exclusions with a pinned-major summary", () => {
     const guide = explainTrackingPattern(String.raw`^2(?:\.\d+)+-alpine$`, "2.7-alpine")!;
     expect(guide.summary).toContain("at 2");
