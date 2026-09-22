@@ -99,7 +99,8 @@ def test_pending_mutation_orders_locked_audit_file_write_and_transaction(
 
     def audited(conn: sqlite3.Connection, *args: object) -> int:
         assert conn.in_transaction
-        assert locks[0].held and lock_dir_for(wud_file).is_dir()
+        assert locks[0].held
+        assert lock_dir_for(wud_file).is_dir()
         audit_connections.append(conn)
         run_id = insert_audit(conn, *args)
         events.append("audit")
@@ -113,7 +114,8 @@ def test_pending_mutation_orders_locked_audit_file_write_and_transaction(
         events.append("file")
         assert audit_connections[0].in_transaction
         assert selected == [3]
-        assert kwargs["lock"] is locks[0] and locks[0].held
+        assert kwargs["lock"] is locks[0]
+        assert locks[0].held
         assert kwargs["owner"] == owners[0]
         with closing(sqlite3.connect(db_path)) as external:
             assert external.execute(
@@ -138,7 +140,8 @@ def test_pending_mutation_orders_locked_audit_file_write_and_transaction(
         expected.append("file")
     expected.extend(["ROLLBACK" if failure else "COMMIT", "unlock"])
     assert events == expected
-    assert len(locks) == 1 and not locks[0].held
+    assert len(locks) == 1
+    assert not locks[0].held
     assert not lock_dir_for(wud_file).exists()
     with closing(sqlite3.connect(db_path)) as conn:
         assert conn.execute(
@@ -172,6 +175,7 @@ def test_pending_mutation_lock_timeout_preserves_existing_lock_and_file(
         response = client.post(f"/api/v1/pending/{operation}", json=payload, headers=headers)
         assert response.status_code == 409
         assert response.json()["detail"] == "WUD file is locked"
-        assert lock.held and lock_dir_for(wud_file).is_dir()
+        assert lock.held
+        assert lock_dir_for(wud_file).is_dir()
         assert wud_file.read_text(encoding="utf-8") == original_text
     assert not lock_dir_for(wud_file).exists()
