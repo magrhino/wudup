@@ -8,16 +8,15 @@ import sqlite3
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from threading import Condition, Lock
-from typing import Any, Protocol
+from threading import Condition
+from typing import Protocol
 
 from fastapi import HTTPException, Request
 
-from . import web_database, web_jobs
+from . import web_database, web_jobs, web_retag_preview
 from .command import CommandError, CommandRunner
 from .compose import (
     COMPOSE_RUNTIME_FORMAT,
@@ -87,7 +86,6 @@ from .web_auth import _redact_sensitive_text, _safe_exception_detail, _settings
 from .web_database import ReadOnlyDatabaseMissing
 from .web_metadata import json_object as _json_object
 from .web_models import (
-    ApplyJobProgressEvent,
     ApplyJobResponse,
     RetagApplyRequest,
     RetagChoiceRequest,
@@ -135,6 +133,13 @@ from .web_retag_plans import (
 from .web_retag_plans import (
     retag_update_service as _retag_update_service,
 )
+from .web_retag_preview import (
+    RETAG_PREVIEW_ACTIVE_STATUSES,  # noqa: F401 - compatibility re-export
+    RETAG_PREVIEW_EXECUTOR_MAX_WORKERS,  # noqa: F401 - compatibility re-export
+    RETAG_PREVIEW_JOB_LIMIT,  # noqa: F401 - compatibility re-export
+    initialize_retag_preview_state,  # noqa: F401 - application lifecycle compatibility
+    shutdown_retag_preview_state,  # noqa: F401 - application lifecycle compatibility
+)
 from .wud_file import WudTarget
 
 KEEP_CURRENT_CHOICE = "keep-current"
@@ -145,9 +150,6 @@ GITHUB_LATEST_MISSING_CACHE_WARNING = (
     "metadata is available. Refresh candidates and try again."
 )
 _REGEX_SPECIAL_CHARS = "\\^$.*+?()[]{}|"
-RETAG_PREVIEW_EXECUTOR_MAX_WORKERS = 1
-RETAG_PREVIEW_JOB_LIMIT = 20
-RETAG_PREVIEW_ACTIVE_STATUSES = frozenset({"queued", "running"})
 _GHCR_GITHUB_REPO_RE = re.compile(
     r"^ghcr[.]io/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)/"
@@ -181,16 +183,6 @@ class _RetagGitHubLatestTarget:
     target: WudTarget
 
 
-@dataclass
-class _RetagPreviewJob:
-    id: str
-    status: str
-    plan: RetagPlanResponse | None = None
-    warnings: tuple[str, ...] = ()
-    error: str = ""
-    progress: tuple[ApplyJobProgressEvent, ...] = ()
-
-
 class _RetagApplyFailed(RuntimeError):
     def __init__(
         self,
@@ -221,19 +213,6 @@ def configure(
     global _effective_config_loader, _retag_digest_pins_loader
     _effective_config_loader = effective_config_loader
     _retag_digest_pins_loader = retag_digest_pins_loader
-
-
-def initialize_retag_preview_state(state: Any) -> None:
-    state.web_retag_preview_executor = ThreadPoolExecutor(
-        max_workers=RETAG_PREVIEW_EXECUTOR_MAX_WORKERS
-    )
-    state.web_retag_preview_lock = Lock()
-    state.web_retag_preview_jobs = {}
-
-
-def shutdown_retag_preview_state(state: Any) -> None:
-    executor: ThreadPoolExecutor = state.web_retag_preview_executor
-    executor.shutdown(wait=False, cancel_futures=True)
 
 
 def api_retag_targets(
@@ -270,30 +249,17 @@ def api_start_retag_plan_preview(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail=MUTATIONS_DISABLED_DETAIL)
-    state = request.app.state
-    job = _RetagPreviewJob(id=secrets.token_urlsafe(18), status="queued")
-    _store_retag_preview_job(state, job)
-    executor: ThreadPoolExecutor = state.web_retag_preview_executor
-    try:
-        executor.submit(
-            _run_retag_plan_preview_job,
-            state,
-            settings,
-            payload,
-            job.id,
-        )
-    except Exception:
-        _delete_retag_preview_job(state, job.id)
-        raise
-    return _retag_preview_job_response(job)
+    return web_retag_preview.start_retag_plan_preview(
+        request.app.state, settings, payload, build_plan=_build_current_retag_plan,
+    )
 
 
 def api_retag_plan_preview_job(
     preview_job_id: str,
     request: Request,
 ) -> RetagPreviewJobResponse:
-    return _retag_preview_job_response(
-        _require_retag_preview_job(request.app.state, preview_job_id)
+    return web_retag_preview.retag_preview_job_response(
+        request.app.state, preview_job_id,
     )
 
 
@@ -330,158 +296,11 @@ def retag_targets_response(
     )
 
 
-def _run_retag_plan_preview_job(
-    state: Any,
-    settings: WebSettings,
-    payload: RetagPlanRequest,
-    job_id: str,
-) -> None:
-    _update_retag_preview_job(state, job_id, status="running")
-    _append_retag_preview_progress(
-        state,
-        job_id,
-        phase="preview",
-        status="running",
-        message="Building the retag preview from the selected candidates.",
-    )
-    try:
-        build = _build_current_retag_plan(settings, payload)
-        _append_retag_preview_progress(
-            state,
-            job_id,
-            phase="preview",
-            status="success",
-            message="Retag preview is ready.",
-        )
-        _update_retag_preview_job(
-            state,
-            job_id,
-            status="success",
-            plan=build.response,
-            warnings=tuple(build.response.warnings),
-        )
-    except Exception as exc:  # noqa: BLE001 - the preview job records all failures.
-        safe_error = _safe_exception_detail(settings, "retag preview failed", exc)
-        _append_retag_preview_progress(
-            state,
-            job_id,
-            phase="preview",
-            status="failure",
-            message=safe_error,
-        )
-        _update_retag_preview_job(
-            state,
-            job_id,
-            status="failure",
-            error=safe_error,
-        )
-
-
 def _build_current_retag_plan(
     settings: WebSettings,
     payload: RetagPlanRequest,
 ) -> _RetagPlanBuild:
     return build_retag_plan(settings, payload)
-
-
-def _store_retag_preview_job(state: Any, job: _RetagPreviewJob) -> None:
-    lock: Lock = state.web_retag_preview_lock
-    jobs: dict[str, _RetagPreviewJob] = state.web_retag_preview_jobs
-    with lock:
-        if any(
-            existing.status in RETAG_PREVIEW_ACTIVE_STATUSES
-            for existing in jobs.values()
-        ):
-            raise HTTPException(status_code=409, detail="retag preview is already running")
-        terminal_ids = [
-            job_id
-            for job_id, existing in jobs.items()
-            if existing.status in {"success", "failure"}
-        ]
-        for job_id in terminal_ids[: max(0, len(jobs) - RETAG_PREVIEW_JOB_LIMIT + 1)]:
-            jobs.pop(job_id, None)
-        jobs[job.id] = job
-
-
-def _delete_retag_preview_job(state: Any, job_id: str) -> None:
-    lock: Lock = state.web_retag_preview_lock
-    jobs: dict[str, _RetagPreviewJob] = state.web_retag_preview_jobs
-    with lock:
-        jobs.pop(job_id, None)
-
-
-def _require_retag_preview_job(state: Any, job_id: str) -> _RetagPreviewJob:
-    lock: Lock = state.web_retag_preview_lock
-    jobs: dict[str, _RetagPreviewJob] = state.web_retag_preview_jobs
-    with lock:
-        job = jobs.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="retag preview job not found")
-        return job
-
-
-def _update_retag_preview_job(
-    state: Any,
-    job_id: str,
-    *,
-    status: str | None = None,
-    plan: RetagPlanResponse | None = None,
-    warnings: tuple[str, ...] | None = None,
-    error: str | None = None,
-) -> None:
-    lock: Lock = state.web_retag_preview_lock
-    jobs: dict[str, _RetagPreviewJob] = state.web_retag_preview_jobs
-    with lock:
-        job = jobs.get(job_id)
-        if job is None:
-            return
-        if status is not None:
-            job.status = status
-        if plan is not None:
-            job.plan = plan
-        if warnings is not None:
-            job.warnings = warnings
-        if error is not None:
-            job.error = error
-
-
-def _append_retag_preview_progress(
-    state: Any,
-    job_id: str,
-    *,
-    phase: str,
-    status: str,
-    message: str,
-) -> None:
-    lock: Lock = state.web_retag_preview_lock
-    jobs: dict[str, _RetagPreviewJob] = state.web_retag_preview_jobs
-    with lock:
-        job = jobs.get(job_id)
-        if job is None:
-            return
-        job.progress = (
-            *job.progress,
-            ApplyJobProgressEvent(
-                job_id=job_id,
-                phase=phase,
-                status=status,
-                message=message,
-                created_at=utc_timestamp(),
-            ),
-        )
-
-
-def _retag_preview_job_response(
-    job: _RetagPreviewJob,
-) -> RetagPreviewJobResponse:
-    return RetagPreviewJobResponse(
-        preview_job_id=job.id,
-        status=job.status,
-        plan=job.plan,
-        warnings=list(job.warnings),
-        error=job.error,
-        progress=list(job.progress),
-    )
 
 
 def build_retag_plan(

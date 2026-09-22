@@ -453,30 +453,18 @@ def test_retag_preview_rejects_second_active_job(
     started = Event()
     release = Event()
 
-    def slow_preview_job(
-        state: object,
+    def slow_build(
         _settings: object,
         _payload: object,
-        job_id: str,
     ) -> None:
-        web_retags_module._update_retag_preview_job(
-            state,
-            job_id,
-            status="running",
-        )
         started.set()
         release.wait(timeout=2)
-        web_retags_module._update_retag_preview_job(
-            state,
-            job_id,
-            status="failure",
-            error="test preview released",
-        )
+        raise RuntimeError("test preview released")
 
     monkeypatch.setattr(
         web_retags_module,
-        "_run_retag_plan_preview_job",
-        slow_preview_job,
+        "_build_current_retag_plan",
+        slow_build,
     )
 
     first = client.post(
