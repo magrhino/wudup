@@ -85,8 +85,9 @@ def test_streamed_counts_preserve_binary_and_chunk_boundaries(
     ],
 )
 def test_invalid_or_truncated_batch_output_fails_closed(checker, response):
+    stream = io.BytesIO(response)
     with pytest.raises(ValueError, match="Git"):
-        checker.Git.blob_line_count(io.BytesIO(response), "a" * 40)
+        checker.Git.blob_line_count(stream, "a" * 40)
 
 
 def test_short_pipe_reads_preserve_remaining_size_and_final_line(checker):
@@ -147,8 +148,9 @@ def test_batch_failure_discards_counts_and_closes_process(
     elif failure == "broken_pipe":
         batch.stdin.write.side_effect = BrokenPipeError
     monkeypatch.setattr(checker.subprocess, "Popen", MagicMock(return_value=batch))
+    git = checker.Git(tmp_path)
     with pytest.raises(ValueError, match="Git"):
-        checker.Git(tmp_path).line_counts([{"source.py": ("100644", oid)}])
+        git.line_counts([{"source.py": ("100644", oid)}])
     batch.__exit__.assert_called_once()
     if failure != "nonzero":
         batch.kill.assert_called_once()

@@ -69,6 +69,38 @@ def test_transferred_rename_record_still_applies_in_later_comparisons(
     assert "exceeds its applicable ceiling" in row(report, "new.py")["failures"][0]
 
 
+@pytest.mark.parametrize("section", ["ceilings", "allowances"])
+@pytest.mark.parametrize("destination_ceiling", [800, 900, 1200])
+def test_rename_cannot_reuse_a_larger_stale_destination_record(
+    tmp_path, section, destination_ceiling
+):
+    repo = Repository(tmp_path)
+    repo.lines("old.py", 900)
+    repo.policy[section].update(
+        {"old.py": exception(900), "new.py": exception(destination_ceiling)}
+    )
+    repo.save_policy()
+    repo.base = repo.commit()
+    (repo.path / "old.py").rename(repo.path / "new.py")
+    repo.lines("new.py", destination_ceiling)
+    repo.commit()
+
+    code, report = repo.check()
+    renamed = row(report, "new.py")
+    assert renamed["status"] == "renamed"
+    assert renamed["ceiling_path"] == "new.py"
+    assert renamed["ceiling"] == destination_ceiling
+    assert code == (1 if destination_ceiling > 900 else 0)
+    if destination_ceiling > 900:
+        assert any("larger ceiling" in error for error in renamed["failures"])
+        repo.policy[section]["new.py"]["reason"] = (
+            "Reviewed rename and growth of the transferred responsibility."
+        )
+        repo.save_policy()
+        repo.commit()
+        assert repo.check()[0] == 0
+
+
 @pytest.mark.parametrize("location", ["head", "base", "external"])
 @pytest.mark.parametrize("extra_byte", [0, 1])
 def test_policy_size_limit_includes_boundary(tmp_path, location, extra_byte):
@@ -151,6 +183,7 @@ def test_policy_parser_recursion_returns_structured_cli_error(
 @pytest.mark.parametrize(
     "content",
     [b'{"x":' * 10000 + b"0" + b"}" * 10000, b"[" * 100000 + b"]" * 100000],
+    ids=["nested-object", "nested-array"],
 )
 def test_deeply_nested_policy_is_a_structured_error(tmp_path, content):
     repo = Repository(tmp_path)

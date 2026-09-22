@@ -762,14 +762,21 @@ def test_non_deferred_record_may_have_no_followup(repo):
     assert repo.check()[0] == 0
 
 
-def test_baseline_must_be_ancestor_of_requested_base(repo):
+@pytest.mark.parametrize("report_only", [False, True])
+def test_baseline_ancestry_is_required_only_for_enforcement(repo, report_only):
     later = repo.commit()
     repo.policy["baseline"]["commit"] = later
     repo.save_policy()
     repo.commit()
-    code, report = repo.check()
-    assert code == 2
-    assert "merge-base failed" in report["error"]
+    code, report = repo.check(*(("--report-only",) if report_only else ()))
+    if report_only:
+        assert code == 0
+        assert report["result"] == "REPORT ONLY / NOT ENFORCED"
+        assert report["base"] == repo.base
+        assert report["baseline"]["commit"] == later
+    else:
+        assert code == 2
+        assert "merge-base failed" in report["error"]
 
 
 def test_option_like_ref_does_not_become_git_option(repo):

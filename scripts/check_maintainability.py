@@ -485,6 +485,19 @@ def file_report(
         row["failures"].append(
             "Transfer the source's reviewed ceiling to the destination's exact path so it remains enforced after this rename."
         )
+    previous_record = base_policy["ceilings"].get(path) or base_policy[
+        "allowances"
+    ].get(path)
+    if (
+        row["status"] == "renamed"
+        and source_record
+        and record_path == path
+        and record == previous_record
+        and record["ceiling"] > source_record["ceiling"]
+    ):
+        row["failures"].append(
+            "Review the destination's larger ceiling with an explicit policy record update for this rename."
+        )
     return row
 
 
@@ -625,7 +638,7 @@ def run(args: argparse.Namespace) -> tuple[dict, int]:
         blocked.append(
             "Baseline pending: enforcement is blocked until ceilings from post-refactor main are approved."
         )
-    else:
+    elif not args.report_only:
         baseline = git.commit(policy["baseline"]["commit"])
         git.run("merge-base", "--is-ancestor", baseline, base)
     failed = any(row["failures"] for row in rows)

@@ -104,6 +104,8 @@ python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD
 
 `--policy-file` is available only with `--report-only`. Such a report always says
 `REPORT ONLY / NOT ENFORCED`; its successful command exit is not a passing gate.
+Report-only inventory may use a base older than the approved baseline; only
+enforcement requires that baseline to be an ancestor of the requested base.
 An inventory with identical base/head commits includes unchanged files. JSON output
 reports resolved commits and, for every tracked path, the category, base/head line
 counts, delta, Git rename origin, applicable ceiling, warnings, and violations.
@@ -127,7 +129,9 @@ Git-detected renames with a reviewed ceiling or allowance require a record at th
 destination's exact path. Move or copy the source record in the same PR, including
 ceilings below the default blocking threshold, so later comparisons retain it.
 The old path's ceiling is still shown for diagnosis until the record is transferred,
-but that rename fails. A production rename into tests or an excluded category fails:
+but that rename fails. Reusing an existing destination record with a larger ceiling
+requires an explicit policy-record update explaining the increase.
+A production rename into tests or an excluded category fails:
 retain production classification or review an exact-path declarative allowance.
 Unchanged and shrinking oversized files with recorded ceilings are allowed; new
 or growing files above their applicable ceiling fail. Follow the policy's
