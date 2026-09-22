@@ -16,7 +16,7 @@ from tests.web_wud_rescan_helpers import (
     settings,
 )
 
-from wudup import web_pending_rescan_audit, web_wud_api
+from wudup import web_pending_rescan_audit, web_wud_api, web_wud_transport
 from wudup.db import open_db
 
 
@@ -25,12 +25,12 @@ def test_pending_rescan_endpoint_enforces_auth_csrf_and_read_only(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_request_json",
         lambda url, _client_config=None: {"status": "ok"},
     )
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_post_json",
         lambda url, _client_config=None, **_kwargs: {"status": "ok"},
     )
@@ -305,7 +305,7 @@ def test_pending_rescan_reports_wud_api_unavailable_without_file_mutation(
     _install_wud_api(monkeypatch, health=OSError("connection refused"))
     posts: list[str] = []
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_post_json",
         lambda url, _client_config=None, **_kwargs: posts.append(
             urllib.parse.urlsplit(url).path
@@ -350,7 +350,7 @@ def test_pending_rescan_reports_wud_api_auth_required_without_watch(
     _install_wud_api(monkeypatch, health=(401, {"error": "authentication required"}))
     posts: list[str] = []
     monkeypatch.setattr(
-        web_wud_api,
+        web_wud_transport,
         "_post_json",
         lambda url, _client_config=None, **_kwargs: posts.append(
             urllib.parse.urlsplit(url).path
@@ -395,7 +395,7 @@ def test_pending_rescan_reports_wud_watch_auth_required_on_http_error(
             fp=None,
         )
 
-    monkeypatch.setattr(web_wud_api, "_post_json", raise_watch_http_error)
+    monkeypatch.setattr(web_wud_transport, "_post_json", raise_watch_http_error)
     client = _client(
         tmp_path,
         {

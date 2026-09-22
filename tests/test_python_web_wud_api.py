@@ -35,6 +35,7 @@ from wudup import (
     web_scheduler,
     web_security,
     web_wud_api,
+    web_wud_cache,
     web_wud_observation_store,
     web_wud_observations,
     web_wud_transport,
@@ -188,8 +189,8 @@ class _ToggleableWudApi:
         self.now = 0.0
         self.reachable = reachable
         self.calls: list[str] = []
-        monkeypatch.setattr(web_wud_api.time, "monotonic", lambda: self.now)
-        monkeypatch.setattr(web_wud_api, "_request_json", self.request_json)
+        monkeypatch.setattr(web_wud_cache.time, "monotonic", lambda: self.now)
+        monkeypatch.setattr(web_wud_transport, "_request_json", self.request_json)
 
     def request_json(self, url: str, _client_config=None) -> object:
         path = urllib.parse.urlsplit(url).path
@@ -436,8 +437,8 @@ def test_wud_api_retains_unique_last_good_when_current_digest_is_missing(
     assert degraded.retryable_degraded_container_ids == (
         "docker.local.bazarr",
     )
-    cache_key = web_wud_api._cache_key(settings, settings.wud_api_base_url)
-    cached_identities = tuple(web_wud_api._pending_observation_cache[cache_key])
+    cache_key = web_wud_cache._cache_key(settings, settings.wud_api_base_url)
+    cached_identities = tuple(web_wud_cache._pending_observation_cache[cache_key])
     assert len(cached_identities) == 1
     assert cached_identities[0][5] == "sha256:local"
 
@@ -528,7 +529,7 @@ def test_wud_api_forced_refreshes_serialize_last_good_reconciliation(
             force=True,
         )
 
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
     settings = _settings(tmp_path, "https://wud.concurrent-refresh.test:3000")
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -557,8 +558,8 @@ def test_wud_api_pending_observation_survives_process_restart(
     settings.config.db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(settings.config.db_path)):
         pass
-    monkeypatch.setattr(web_wud_api, "_snapshot_cache", {})
-    monkeypatch.setattr(web_wud_api, "_pending_observation_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_snapshot_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_pending_observation_cache", {})
 
     web_wud_api.initialize_pending_observation_cache(settings)
     ready = web_wud_api.get_snapshot(
@@ -573,8 +574,8 @@ def test_wud_api_pending_observation_survives_process_restart(
     web_wud_api.checkpoint_pending_observation_cache(settings)
     assert len(_persisted_observations(settings)) == 1
 
-    web_wud_api._snapshot_cache.clear()
-    web_wud_api._pending_observation_cache.clear()
+    web_wud_cache._snapshot_cache.clear()
+    web_wud_cache._pending_observation_cache.clear()
     degraded = _container_payload(name="app", update_available=False)
     degraded["result"] = None
     degraded["error"] = {"message": "registry lookup failed"}
@@ -612,8 +613,8 @@ def test_wud_api_pending_observation_survives_process_restart(
     assert authoritative.degraded_container_count == 0
     web_wud_api.checkpoint_pending_observation_cache(settings)
 
-    web_wud_api._snapshot_cache.clear()
-    web_wud_api._pending_observation_cache.clear()
+    web_wud_cache._snapshot_cache.clear()
+    web_wud_cache._pending_observation_cache.clear()
     containers[:] = [degraded]
     web_wud_api.initialize_pending_observation_cache(settings)
     cleared = web_wud_api.get_snapshot(
@@ -641,15 +642,15 @@ def test_wud_api_persisted_observation_does_not_cross_container_identity(
     settings.config.db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(settings.config.db_path)):
         pass
-    monkeypatch.setattr(web_wud_api, "_snapshot_cache", {})
-    monkeypatch.setattr(web_wud_api, "_pending_observation_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_snapshot_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_pending_observation_cache", {})
 
     web_wud_api.initialize_pending_observation_cache(settings)
     web_wud_api.get_snapshot(settings, include_containers=True, force=True)
     web_wud_api.checkpoint_pending_observation_cache(settings)
 
-    web_wud_api._snapshot_cache.clear()
-    web_wud_api._pending_observation_cache.clear()
+    web_wud_cache._snapshot_cache.clear()
+    web_wud_cache._pending_observation_cache.clear()
     replacement = _container_payload(name="app", update_available=False)
     replacement_image = replacement["image"]
     assert isinstance(replacement_image, dict)
@@ -681,8 +682,8 @@ def test_wud_api_authenticated_client_does_not_load_persisted_observations(
     unauthenticated.config.db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(unauthenticated.config.db_path)):
         pass
-    monkeypatch.setattr(web_wud_api, "_snapshot_cache", {})
-    monkeypatch.setattr(web_wud_api, "_pending_observation_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_snapshot_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_pending_observation_cache", {})
 
     web_wud_api.initialize_pending_observation_cache(unauthenticated)
     web_wud_api.get_snapshot(
@@ -692,8 +693,8 @@ def test_wud_api_authenticated_client_does_not_load_persisted_observations(
     )
     web_wud_api.checkpoint_pending_observation_cache(unauthenticated)
 
-    web_wud_api._snapshot_cache.clear()
-    web_wud_api._pending_observation_cache.clear()
+    web_wud_cache._snapshot_cache.clear()
+    web_wud_cache._pending_observation_cache.clear()
     degraded = _container_payload(name="app", update_available=False)
     degraded["result"] = None
     degraded["error"] = {"message": "registry lookup failed"}
@@ -803,9 +804,9 @@ def test_wud_api_checkpoint_waits_for_active_refresh(
             return [_container_payload(name="app")]
         raise AssertionError(f"unexpected WUD API URL: {url}")
 
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
-    monkeypatch.setattr(web_wud_api, "_snapshot_cache", {})
-    monkeypatch.setattr(web_wud_api, "_pending_observation_cache", {})
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_cache, "_snapshot_cache", {})
+    monkeypatch.setattr(web_wud_cache, "_pending_observation_cache", {})
     settings = _settings(tmp_path, "https://wud.checkpoint-race.test:3000")
     settings.config.db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(settings.config.db_path)):
@@ -1275,9 +1276,9 @@ def test_wud_api_container_watch_has_one_batch_timeout_budget(
         clock[0] += 3.0
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(web_wud_api, "_post_json", post_json)
-    monkeypatch.setattr(web_wud_api, "WUD_API_WATCH_BATCH_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(web_wud_cache.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(web_wud_transport, "_post_json", post_json)
+    monkeypatch.setattr(web_wud_cache, "WUD_API_WATCH_BATCH_TIMEOUT_SECONDS", 5.0)
 
     watch = web_wud_api.watch_containers(
         _settings(tmp_path, "https://wud.batch-timeout.test:3000"),
@@ -1302,25 +1303,25 @@ def test_wud_api_watch_cooldown_prunes_expired_identities(monkeypatch) -> None:
     cache_key = ("https://wud.cooldown-prune.test:3000", "fingerprint")
     old_key = (cache_key, "docker.local.old")
     new_key = (cache_key, "docker.local.new")
-    monkeypatch.setattr(web_wud_api, "_watch_rate_limit_until", {})
-    monkeypatch.setattr(web_wud_api.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(web_wud_cache, "_watch_rate_limit_until", {})
+    monkeypatch.setattr(web_wud_cache.time, "monotonic", lambda: clock[0])
 
-    web_wud_api._start_watch_rate_limit_cooldown(cache_key, old_key[1])
+    web_wud_cache._start_watch_rate_limit_cooldown(cache_key, old_key[1])
     clock[0] += web_wud_api.WUD_API_RATE_LIMIT_COOLDOWN_SECONDS + 1
-    web_wud_api._start_watch_rate_limit_cooldown(cache_key, new_key[1])
+    web_wud_cache._start_watch_rate_limit_cooldown(cache_key, new_key[1])
 
-    assert old_key not in web_wud_api._watch_rate_limit_until
-    assert new_key in web_wud_api._watch_rate_limit_until
+    assert old_key not in web_wud_cache._watch_rate_limit_until
+    assert new_key in web_wud_cache._watch_rate_limit_until
 
     clock[0] += web_wud_api.WUD_API_RATE_LIMIT_COOLDOWN_SECONDS + 1
     assert (
-        web_wud_api._watch_rate_limit_cooldown_remaining(
+        web_wud_cache._watch_rate_limit_cooldown_remaining(
             cache_key,
             "docker.local.unrelated",
         )
         == 0.0
     )
-    assert new_key not in web_wud_api._watch_rate_limit_until
+    assert new_key not in web_wud_cache._watch_rate_limit_until
 
 
 def test_container_triggers_ignores_non_object_entries(
@@ -1338,7 +1339,7 @@ def test_container_triggers_ignores_non_object_entries(
             None,
         ]
 
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
 
     triggers, warning = web_wud_api.container_triggers(
         _settings(tmp_path, "https://wud.triggers.test:3000"),
@@ -1456,8 +1457,8 @@ def test_wud_api_bearer_auth_applies_to_get_and_post_requests(
         calls.append(("POST", path, web_wud_transport._request_headers(client_config)))
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
-    monkeypatch.setattr(web_wud_api, "_post_json", post_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_transport, "_post_json", post_json)
     settings = _settings(
         tmp_path,
         "https://wud.auth-header.test:3000",
@@ -1617,7 +1618,7 @@ def test_wud_api_snapshot_cache_is_separated_by_auth_headers(
             return [_container_payload(name=name)]
         raise AssertionError(f"unexpected WUD API URL: {url}")
 
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
     base_url = "https://wud.auth-cache.test:3000"
     first_settings = _settings(
         tmp_path,
@@ -1909,7 +1910,7 @@ def test_startup_probe_waits_for_wud_api_readiness(
             raise OSError("connection refused")
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_request_json", fake_request_json)
+    monkeypatch.setattr(web_wud_transport, "_request_json", fake_request_json)
     monkeypatch.setattr(
         web_wud_api,
         "WUD_API_STARTUP_RETRY_INTERVAL_SECONDS",
@@ -2092,8 +2093,8 @@ def test_wud_api_partially_degraded_snapshot_retries_after_short_interval(
             return containers
         raise AssertionError(f"unexpected WUD API URL: {url}")
 
-    monkeypatch.setattr(web_wud_api.time, "monotonic", lambda: clock.now)
-    monkeypatch.setattr(web_wud_api, "_request_json", request_json)
+    monkeypatch.setattr(web_wud_cache.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(web_wud_transport, "_request_json", request_json)
     settings = _settings(tmp_path, "https://wud.partial-retry.test:3000")
 
     ready = web_wud_api.get_snapshot(

@@ -1,6 +1,6 @@
 """WUD client configuration and synchronous HTTP transport.
 
-Cache, watcher, and observation lifecycles belong to web_wud_api. This module
+Cache and watcher lifecycles belong to web_wud_cache. This module
 owns credential loading, header validation, URL handling, and request execution.
 """
 

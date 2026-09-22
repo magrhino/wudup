@@ -18,7 +18,7 @@ from tests.web_test_helpers import (
     _wud_api_container,
 )
 
-from wudup import web_jobs, web_plans, web_wud_api
+from wudup import web_jobs, web_plans, web_wud_transport
 from wudup.db import open_db
 from wudup.locks import DirectoryLock, WudLockError, lock_dir_for
 
@@ -311,7 +311,7 @@ def test_apply_endpoint_uses_api_pending_source_without_editing_wud_file(
             containers.clear()
         return {"status": "ok"}
 
-    monkeypatch.setattr(web_wud_api, "_post_json", fake_post_json)
+    monkeypatch.setattr(web_wud_transport, "_post_json", fake_post_json)
     client = _client(
         tmp_path,
         {
