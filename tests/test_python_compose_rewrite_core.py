@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import unittest
 from unittest import mock
 
@@ -11,6 +12,7 @@ from wudup.compose_rewrite import (
     _is_simple_exact_tag_include,
     exact_tags_regex,
 )
+from wudup.updater_models import ComposeTagRewriteError
 
 
 class ComposeExactTagRegexTests(unittest.TestCase):
@@ -70,7 +72,7 @@ class ComposeBackupTests(ComposeRewriteTestCase):
         compose_file = self.write_compose("services: {}\n")
 
         with mock.patch(
-            "wudup.compose_rewrite.shutil.copy2",
+            "wudup.compose_persistence.shutil.copy2",
             side_effect=OSError("copy failed"),
         ):
             with self.assertRaisesRegex(OSError, "copy failed"):
@@ -83,7 +85,7 @@ class ComposeBackupTests(ComposeRewriteTestCase):
             "services:\n  app:\n    image: repo/app:1.0\n"
         )
 
-        with mock.patch("wudup.compose_rewrite.shutil.copy2") as mock_copy2:
+        with mock.patch("wudup.compose_persistence.shutil.copy2") as mock_copy2:
             mock_copy2.side_effect = RuntimeError("copy failed")
 
             with mock.patch("pathlib.Path.unlink") as mock_unlink:
@@ -91,3 +93,63 @@ class ComposeBackupTests(ComposeRewriteTestCase):
 
                 with self.assertRaisesRegex(RuntimeError, "copy failed"):
                     _backup_compose(compose_file)
+
+
+class ComposeAtomicWriteTests(ComposeRewriteTestCase):
+    def test_filesystem_failures_preserve_source_and_clean_temporary_file(self) -> None:
+        original = b"services:\r\n  app:\r\n    image: repo/app:1.0\r\n"
+        compose_file = self.root / "compose.yml"
+        compose_file.write_bytes(original)
+        for operation in ("chown", "chmod", "replace"):
+            with self.subTest(operation=operation):
+                error = OSError(f"{operation} failed")
+                written_hashes = ["previous write"]
+                with mock.patch(
+                    f"wudup.compose_persistence.os.{operation}", side_effect=error
+                ):
+                    with self.assertRaises(OSError) as caught:
+                        compose_rewrite._atomic_replace_compose(
+                            compose_file, "changed", prefix="tag",
+                            written_hashes=written_hashes,
+                        )
+
+                self.assertIs(caught.exception, error)
+                self.assertEqual(compose_file.read_bytes(), original)
+                self.assertEqual(written_hashes, ["previous write"])
+                self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
+
+    def test_stale_source_preserves_original_and_operation_specific_error(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        for prefix, message in (
+            ("tag", "Compose file changed before it could be rewritten; retry from a fresh state."),
+            ("tracking-repair", "Compose file changed before tracking repair; preview it again."),
+        ):
+            with self.subTest(prefix=prefix):
+                written_hashes: list[str] = []
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    compose_rewrite._atomic_replace_compose(
+                        compose_file, "changed", prefix=prefix,
+                        expected_source_hash="stale", written_hashes=written_hashes,
+                    )
+
+                self.assertEqual(str(caught.exception), message)
+                self.assertEqual(compose_file.read_text(), "services: {}\n")
+                self.assertEqual(written_hashes, [])
+                self.assertEqual(list(self.root.glob(f".compose.yml.{prefix}.*")), [])
+
+    def test_success_records_exact_written_bytes_and_preserves_backup(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        backup = _backup_compose(compose_file)
+        rendered = "services:\r\n  app:\r\n    image: repo/app:2.0\r\n"
+        written_hashes: list[str] = []
+
+        compose_rewrite._atomic_replace_compose(
+            compose_file, rendered, prefix="tag",
+            expected_source_hash=hashlib.sha256(backup.read_bytes()).hexdigest(),
+            written_hashes=written_hashes,
+        )
+
+        self.assertEqual(compose_file.read_bytes(), rendered.encode("utf-8"))
+        self.assertEqual(written_hashes, [hashlib.sha256(compose_file.read_bytes()).hexdigest()])
+        self.assertEqual(backup.read_bytes(), b"services: {}\n")
+        self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
