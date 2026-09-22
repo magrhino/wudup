@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import stat
 from pathlib import Path
 
 from ruamel.yaml import YAML
 
 from compose_rewrite_helpers import ComposeRewriteTestCase
-from wudup.compose_rewrite import apply_compose_tag_updates
+from wudup.compose_rewrite import _backup_compose, apply_compose_tag_updates
 from wudup.updater_models import (
     ComposeTagRewriteError,
     TagStreamUpdate,
@@ -15,6 +16,26 @@ from wudup.updater_models import (
 
 
 class ComposeTagUpdateTests(ComposeRewriteTestCase):
+    def test_rewrite_rejects_change_after_backup(self) -> None:
+        original = "services:\n  app:\n    image: repo/app:1.0\n  sibling:\n    image: repo/sibling:1.0\n"
+        compose_file = self.write_compose(original)
+        backup = _backup_compose(compose_file)
+        backup_hash = hashlib.sha256(backup.read_bytes()).hexdigest()
+        newer = original.replace("repo/sibling:1.0", "repo/sibling:2.0")
+        compose_file.write_text(newer, encoding="utf-8")
+
+        with self.assertRaisesRegex(ComposeTagRewriteError, "Compose file changed"):
+            apply_compose_tag_updates(
+                compose_file,
+                (TagUpdate(
+                    old_image="repo/app:1.0", desired_tag="2.0",
+                    new_image="repo/app:2.0", services=("app",),
+                ),),
+                expected_source_hash=backup_hash,
+            )
+
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), newer)
+
     def test_stream_image_and_list_label_are_rewritten_atomically(self) -> None:
         original = (
             "services:\n"

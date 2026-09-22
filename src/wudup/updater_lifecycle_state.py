@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .command import CommandError
@@ -39,6 +39,7 @@ class _StackUpdateState:
     applied_digest_pins: tuple[AppliedDigestPinUpdate, ...] = ()
     applied_digest_unpins: tuple[AppliedDigestUnpinUpdate, ...] = ()
     compose_backup: Path | None = None
+    compose_written_hashes: list[str] = field(default_factory=list)
     running_services: tuple[str, ...] = ()
     stopped_services: tuple[str, ...] = ()
 

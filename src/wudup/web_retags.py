@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import secrets
-import shutil
 import sqlite3
 import time
 from collections import Counter
@@ -32,12 +31,14 @@ from .compose import (
 from .compose_rewrite import (
     WUD_TAG_INCLUDE_LABEL,
     _backup_compose,
+    _compose_source_hash,
     apply_compose_digest_pins,
     apply_compose_retag_updates,
     compose_escape_dollars,
     compose_unescape_dollars,
     render_compose_digest_pins,
     render_compose_retag_updates,
+    restore_compose_backup,
 )
 from .config import ConfigError, UpdaterConfig
 from .db import (
@@ -1598,6 +1599,7 @@ def _apply_retag_updates(
             )
         )
         backup: Path | None = None
+        written_hashes: list[str] = []
         try:
             _revalidate_retag_runtime_before_apply(settings, compose, stack_updates)
             _progress(
@@ -1612,6 +1614,7 @@ def _apply_retag_updates(
             )
             compose_path = stack.directory / stack.file
             backup = _backup_compose(compose_path)
+            backup_hash = _compose_source_hash(backup)
             applier = (
                 apply_compose_digest_pins
                 if stack_updates[0].digest_pin
@@ -1621,6 +1624,8 @@ def _apply_retag_updates(
                 compose_path,
                 tuple(item.update for item in stack_updates),
                 stack_name=stack.name,
+                written_hashes=written_hashes,
+                expected_source_hash=backup_hash,
             )
             if not applied:
                 raise RuntimeError("no Compose image lines were retagged")
@@ -1679,24 +1684,28 @@ def _apply_retag_updates(
             successful_updates.extend(stack_updates)
         except Exception as exc:
             if backup is not None:
-                try:
-                    _restore_retag_compose(
-                        compose,
-                        docker,
-                        config,
-                        stack,
-                        services,
-                        backup,
-                        jobs,
-                        apply_condition,
-                        job_id,
-                        original_error=str(exc),
-                    )
-                except Exception as restore_exc:
-                    raise _RetagApplyFailed(
-                        str(restore_exc),
-                        successful_updates,
-                    ) from restore_exc
+                if written_hashes:
+                    try:
+                        _restore_retag_compose(
+                            compose,
+                            docker,
+                            config,
+                            stack,
+                            services,
+                            backup,
+                            jobs,
+                            apply_condition,
+                            job_id,
+                            original_error=str(exc),
+                            expected_source_hash=written_hashes[-1],
+                        )
+                    except Exception as restore_exc:
+                        raise _RetagApplyFailed(
+                            str(restore_exc),
+                            successful_updates,
+                        ) from restore_exc
+                else:
+                    _delete_path(backup)
                 backup = None
             raise _RetagApplyFailed(str(exc), successful_updates) from exc
     return tuple(successful_updates)
@@ -1935,9 +1944,13 @@ def _restore_retag_compose(
     job_id: str,
     *,
     original_error: str,
+    expected_source_hash: str,
 ) -> None:
     try:
-        shutil.copy2(backup, stack.directory / stack.file)
+        restore_compose_backup(
+            backup, stack.directory / stack.file,
+            expected_source_hash=expected_source_hash,
+        )
         wait_handled = _compose_up_retag_services(compose, stack, services, config)
         if not wait_handled:
             _wait_for_retag_health(
