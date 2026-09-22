@@ -19,7 +19,13 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
-from wudup import compose_rewrite, web_retags, web_tracking, web_wud_api
+from wudup import (
+    compose_persistence,
+    compose_rewrite,
+    web_retags,
+    web_tracking,
+    web_wud_api,
+)
 from wudup.compose_rewrite import apply_compose_tracking_label
 from wudup.db import init_db, insert_update_run, open_db
 from wudup.updater_models import ComposeTagRewriteError
@@ -610,7 +616,7 @@ def test_compose_writers_serialize_validation_and_replacement(
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     first_replacing = Event()
     finish_first = Event()
-    original_replace = compose_rewrite.os.replace
+    original_replace = compose_persistence.os.replace
 
     def hold_first_replace(source, target):
         if ".first." in str(source):
@@ -618,7 +624,7 @@ def test_compose_writers_serialize_validation_and_replacement(
             assert finish_first.wait(5)
         original_replace(source, target)
 
-    monkeypatch.setattr(compose_rewrite.os, "replace", hold_first_replace)
+    monkeypatch.setattr(compose_persistence.os, "replace", hold_first_replace)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(
             compose_rewrite._atomic_replace_compose,

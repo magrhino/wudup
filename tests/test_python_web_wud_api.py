@@ -36,6 +36,8 @@ from wudup import (
     web_security,
     web_wud_api,
     web_wud_observation_store,
+    web_wud_observations,
+    web_wud_transport,
 )
 from wudup import (
     web_release_notes as release_notes_module,
@@ -174,10 +176,10 @@ def test_wud_api_persisted_container_round_trips_without_transient_fields() -> N
         local_image_id="sha256:image",
     )
 
-    stored = web_wud_api._stored_observation(container)
-    restored = web_wud_api._container_from_stored_observation(stored)
+    stored = web_wud_observations._stored_observation(container)
+    restored = web_wud_observations._container_from_stored_observation(stored)
 
-    assert stored.keys() == web_wud_api._PERSISTED_WUD_API_CONTAINER_FIELDS
+    assert stored.keys() == web_wud_observations._PERSISTED_WUD_API_CONTAINER_FIELDS
     assert restored == replace(container, error="", labels={})
 
 
@@ -199,6 +201,29 @@ class _ToggleableWudApi:
         if path == "/api/containers":
             return [_container_payload(name="app")]
         raise AssertionError(f"unexpected WUD API URL: {url}")
+
+
+def test_wud_api_reconciliation_keeps_earlier_snapshots_unchanged(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    settings = _settings(tmp_path, "https://wud.snapshot-lifetime.test:3000")
+    healthy = _container_payload()
+    _install_wud_api(monkeypatch, containers=[healthy])
+    fresh = web_wud_api.get_snapshot(settings, include_containers=True, force=True)
+    degraded = {**healthy, "error": "HTTP 429", "result": {}}
+    _install_wud_api(monkeypatch, containers=[degraded])
+    retained = web_wud_api.get_snapshot(settings, include_containers=True, force=True)
+    _install_wud_api(monkeypatch, containers=[])
+    empty = web_wud_api.get_snapshot(settings, include_containers=True, force=True)
+
+    assert empty.containers == ()
+    assert fresh.containers[0].metadata_status == "fresh"
+    assert fresh.containers[0].error == ""
+    assert fresh.containers[0].remote_tag == "1.1.0"
+    assert retained.containers[0].metadata_status == "retained"
+    assert retained.containers[0].remote_tag == "1.1.0"
+    assert retained.retained_update_count == 1
+    assert retained.observation_diagnostics[0].outcome == "retained"
 
 
 def test_wud_api_snapshot_reads_update_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -1210,7 +1235,7 @@ def test_wud_api_watch_uses_longer_timeout_than_metadata_reads(
             return response([_container_payload()])
         raise AssertionError(f"unexpected WUD API URL: {request.get_full_url()}")
 
-    monkeypatch.setattr(web_wud_api.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(web_wud_transport.urllib.request, "urlopen", urlopen)
 
     watch = web_wud_api.watch_all(_settings(tmp_path, "https://wud.timeout.test:3000"))
 
@@ -1419,7 +1444,7 @@ def test_wud_api_bearer_auth_applies_to_get_and_post_requests(
 
     def request_json(url: str, client_config=None) -> object:
         path = urllib.parse.urlsplit(url).path
-        calls.append(("GET", path, web_wud_api._request_headers(client_config)))
+        calls.append(("GET", path, web_wud_transport._request_headers(client_config)))
         if path == "/health":
             return {"status": "ok"}
         if path == "/api/containers":
@@ -1428,7 +1453,7 @@ def test_wud_api_bearer_auth_applies_to_get_and_post_requests(
 
     def post_json(url: str, client_config=None, **_kwargs) -> object:
         path = urllib.parse.urlsplit(url).path
-        calls.append(("POST", path, web_wud_api._request_headers(client_config)))
+        calls.append(("POST", path, web_wud_transport._request_headers(client_config)))
         return {"status": "ok"}
 
     monkeypatch.setattr(web_wud_api, "_request_json", request_json)
@@ -1476,7 +1501,7 @@ def test_wud_api_basic_auth_password_file_builds_authorization_header(
         b"wud-user:basic-password-secret"
     ).decode("ascii")
 
-    headers = web_wud_api._request_headers(settings.wud_api_client)
+    headers = web_wud_transport._request_headers(settings.wud_api_client)
 
     assert headers["Authorization"] == f"Basic {expected_token}"
     assert "basic-password-secret" in settings.wud_api_client.secret_values
@@ -1500,7 +1525,7 @@ def test_wud_api_static_json_headers_are_added_to_requests(tmp_path: Path) -> No
         "https://wud.static-headers.test:3000",
         {web_wud_api.WUD_API_HEADERS_FILE_ENV: str(headers_file)},
     )
-    headers = web_wud_api._request_headers(settings.wud_api_client)
+    headers = web_wud_transport._request_headers(settings.wud_api_client)
 
     assert headers["X-Api-Key"] == "static-header-secret"
     assert headers["X-WUD-Trace"] == "enabled"
@@ -1524,7 +1549,7 @@ def test_wud_api_client_config_fingerprint_is_opaque_without_secret_text(
     monkeypatch,
 ) -> None:
     tokens = iter(("opaque-one", "opaque-two", "opaque-three"))
-    monkeypatch.setattr(web_wud_api.secrets, "token_hex", lambda _bytes: next(tokens))
+    monkeypatch.setattr(web_wud_transport.secrets, "token_hex", lambda _bytes: next(tokens))
     base_url = "https://wud.fingerprint.test:3000"
     first = _settings(
         tmp_path,
@@ -1583,7 +1608,7 @@ def test_wud_api_snapshot_cache_is_separated_by_auth_headers(
 
     def request_json(url: str, client_config=None) -> object:
         path = urllib.parse.urlsplit(url).path
-        authorization = web_wud_api._request_headers(client_config)["Authorization"]
+        authorization = web_wud_transport._request_headers(client_config)["Authorization"]
         calls.append(f"{authorization} {path}")
         if path == "/health":
             return {"status": "ok"}
@@ -1639,7 +1664,7 @@ def test_wud_api_auth_config_values_are_redacted_from_details(tmp_path: Path) ->
         },
     )
 
-    detail = web_wud_api._sanitize_detail(
+    detail = web_wud_transport._sanitize_detail(
         settings,
         "file-token-secret static-header-secret Bearer file-token-secret",
     )
