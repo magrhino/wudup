@@ -656,9 +656,15 @@ def test_retag_plan_requires_start_approval_for_inactive_runtime(
     assert approved_plan["plan_id"] != blocked_plan["plan_id"]
 
 
+@pytest.mark.parametrize(
+    ("target_tag", "expected_regex"),
+    [("3.0", r"^\d+(?:\.\d+)+$$"), ("2.7-alpine", r"^2(?:\.\d+)+-alpine$$")],
+)
 def test_retag_plan_manual_target_allows_non_latest_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    target_tag: str,
+    expected_regex: str,
 ) -> None:
     fake_env, fake_root = _fake_docker_env(tmp_path)
     client = _client(
@@ -678,7 +684,7 @@ def test_retag_plan_manual_target_allows_non_latest_service(
     digest = "sha256:" + "3" * 64
     _patch_digest_resolution(
         monkeypatch,
-        expected_image="repo/app:3.0",
+        expected_image=f"repo/app:{target_tag}",
         digest=digest,
     )
 
@@ -689,7 +695,7 @@ def test_retag_plan_manual_target_allows_non_latest_service(
                 {
                     "service_key": "stack/app",
                     "choice": "switch-to-concrete",
-                    "target_tag": "3.0",
+                    "target_tag": target_tag,
                 }
             ]
         },
@@ -703,9 +709,9 @@ def test_retag_plan_manual_target_allows_non_latest_service(
     update = body["stacks"][0]["tag_updates"][0]
     assert update["service_key"] == "stack/app"
     assert update["source_image"] == "repo/app:1.0"
-    assert update["target_tag"] == "3.0"
-    assert update["final_image"] == "repo/app:3.0"
-    assert update["label_value"] == r"^\d+(?:\.\d+)+$$"
+    assert update["target_tag"] == target_tag
+    assert update["final_image"] == f"repo/app:{target_tag}"
+    assert update["label_value"] == expected_regex
     _assert_pending_grouping_did_not_mutate(_fake_docker_calls(fake_root))
 
 

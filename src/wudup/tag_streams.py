@@ -119,6 +119,11 @@ def tag_stream_include_regex(tag: str) -> str:
 def retag_tag_include_regex(tag: str) -> str:
     if not tag_value_valid(tag):
         raise ValueError(f"tag is not valid: {tag}")
+    # Keep Alpine release channels on their selected major, but allow both
+    # minor aliases and fully qualified patch tags (e.g. 2.7 -> 2.7.12).
+    alpine_version = re.fullmatch(r"(v?\d+)(?:\.\d+)+-alpine", tag)
+    if alpine_version is not None:
+        return rf"^{alpine_version.group(1)}(?:\.\d+)+-alpine$"
     dotted_version = re.fullmatch(r"(v?)\d+(?:\.\d+)+", tag)
     if dotted_version is not None:
         return rf"^{dotted_version.group(1)}\d+(?:\.\d+)+$"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 from tests.web_plan_test_helpers import _seed_known_digest_provenance
 from tests.web_test_helpers import (
@@ -20,12 +21,20 @@ from tests.web_test_helpers import (
 
 from wudup import web_jobs, web_plans, web_wud_transport
 from wudup.db import open_db
+from wudup.digest_verifier import ManifestLookupError, RegistryHttpManifestResolver
 from wudup.locks import DirectoryLock, WudLockError, lock_dir_for
 
 
+@mock.patch.object(
+    RegistryHttpManifestResolver,
+    "fetch",
+    side_effect=ManifestLookupError("registry unavailable in offline test"),
+)
 def test_apply_endpoint_applies_digest_unpin_plan_and_records_provenance(
+    registry_fetch: mock.Mock,
     tmp_path: Path,
 ) -> None:
+    # Keep the inconclusive preflight offline; post-pull verification still runs.
     fake_env, fake_root = _fake_docker_env(tmp_path)
     client = _client(
         tmp_path,
@@ -88,6 +97,8 @@ def test_apply_endpoint_applies_digest_unpin_plan_and_records_provenance(
     assert "wud.tag.include=^latest$" in rendered
     assert wud_file.read_text(encoding="utf-8") == ""
     calls = _fake_docker_calls(fake_root)
+    registry_fetch.assert_called_once()
+    assert "manifest inspect docker.io/repo/app:latest" in calls
     assert " pull app" in calls
     assert " up -d --remove-orphans --pull never --no-build --no-deps" in calls
     assert " app" in calls
