@@ -4,6 +4,20 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.61.0](https://github.com/magrhino/wudup/compare/v0.60.2...v0.61.0) (2026-09-22)
+
+
+### Features
+
+* **webui:** add tracked containers and tracking repair ([#717](https://github.com/magrhino/wudup/issues/717)) ([34c2fbf](https://github.com/magrhino/wudup/commit/34c2fbf88db0810b0021dce6f9abdaf35f786d99))
+
+
+### Dependencies
+
+* **deps-dev:** bump ruff ([#709](https://github.com/magrhino/wudup/issues/709)) ([73374ef](https://github.com/magrhino/wudup/commit/73374ef6686d5f25453cb62eea50026f8f768290))
+* **deps:** bump the github-actions group with 5 updates ([#714](https://github.com/magrhino/wudup/issues/714)) ([def1967](https://github.com/magrhino/wudup/commit/def1967e46f37276303988b516988b5ff852c655))
+* **deps:** bump the python-production group with 2 updates ([#708](https://github.com/magrhino/wudup/issues/708)) ([f536556](https://github.com/magrhino/wudup/commit/f536556ee3d17d43908bfd99bbd6c9ba01290f04))
+
 ## [0.60.2](https://github.com/magrhino/wudup/compare/v0.60.1...v0.60.2) (2026-09-20)
 
 
