@@ -661,7 +661,7 @@ def _yaml_scalar_source_rewrite(
 
 def _yaml_scalar_boundary_matches(tail: str, *, flow: bool) -> bool:
     if flow:
-        return re.match(r"[ \t]*(?:[,}\]]|#)", tail) is not None
+        return re.match(r"[ \t]*[,}\]#]", tail) is not None
     return re.fullmatch(r"[ \t]*(?:#.*)?", tail) is not None
 
 
@@ -961,14 +961,18 @@ def _get_service_label_value(service_config: CommentedMap, key: str) -> str:
             raise ComposeTagRewriteError(f"Label {key} is not a string value.")
         return value
     if isinstance(labels, CommentedSeq):
-        for item in labels:
-            if not isinstance(item, str):
-                raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
-            label_key, sep, label_value = item.partition("=")
-            if sep and label_key == key:
-                return label_value
-        return ""
+        return _sequence_label_value(labels, key)
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
+
+
+def _sequence_label_value(labels: CommentedSeq, key: str) -> str:
+    for item in labels:
+        if not isinstance(item, str):
+            raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
+        label_key, sep, label_value = item.partition("=")
+        if sep and label_key == key:
+            return label_value
+    return ""
 
 
 def _service_comment_tokens(

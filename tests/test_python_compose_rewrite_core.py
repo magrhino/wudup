@@ -4,6 +4,8 @@ import hashlib
 import unittest
 from unittest import mock
 
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
 from compose_rewrite_helpers import ComposeRewriteTestCase
 from wudup import compose_rewrite
 from wudup.compose_rewrite import (
@@ -12,7 +14,56 @@ from wudup.compose_rewrite import (
     _is_simple_exact_tag_include,
     exact_tags_regex,
 )
+from wudup.compose_source import _get_service_label_value, _yaml_scalar_boundary_matches
 from wudup.updater_models import ComposeTagRewriteError
+
+
+class ComposeSourceLookupTests(unittest.TestCase):
+    def test_sequence_label_lookup_preserves_first_match_and_value(self) -> None:
+        for labels, expected in (
+            ([], ""),
+            (["other=value", "target"], ""),
+            (["target", "target=value=tail"], "value=tail"),
+            (["target=", "target=later"], ""),
+            (["other=value", "target=first", "target=later"], "first"),
+            (["target=first", 123], "first"),
+        ):
+            with self.subTest(labels=labels):
+                service = CommentedMap(labels=CommentedSeq(labels))
+                self.assertEqual(_get_service_label_value(service, "target"), expected)
+
+    def test_sequence_label_lookup_rejects_non_strings_before_match(self) -> None:
+        for labels in ([123, "target=value"], ["other=value", None], ["target", 123]):
+            with self.subTest(labels=labels):
+                service = CommentedMap(labels=CommentedSeq(labels))
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    _get_service_label_value(service, "target")
+                self.assertEqual(
+                    str(caught.exception),
+                    "Service labels use unsupported non-string list entries.",
+                )
+
+    def test_yaml_scalar_boundaries_preserve_flow_and_block_rules(self) -> None:
+        for tail, flow_expected, block_expected in (
+            ("", False, True),
+            (" \t", False, True),
+            (", next", True, False),
+            (" }", True, False),
+            ("\t]", True, False),
+            ("# comment", True, True),
+            (" \t# comment", True, True),
+            ("# comment\nnext", True, False),
+            ("value", False, False),
+            (" : value", False, False),
+            ("[", False, False),
+            ("{", False, False),
+            ("\n,", False, False),
+            ("\r,", False, False),
+            ("\u00a0,", False, False),
+        ):
+            for flow, expected in ((True, flow_expected), (False, block_expected)):
+                with self.subTest(tail=tail, flow=flow):
+                    self.assertEqual(_yaml_scalar_boundary_matches(tail, flow=flow), expected)
 
 
 class ComposeExactTagRegexTests(unittest.TestCase):
