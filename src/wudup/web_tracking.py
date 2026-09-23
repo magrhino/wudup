@@ -401,8 +401,10 @@ def build_tracking_repair_plan(
             status_code=409,
             detail=_safe_exception_detail(settings, "could not preview tracking repair", exc),
         ) from exc
-    old_label = repr(current) if current else "(not set)"
-    diff = f"wud.tag.include:\n- {old_label}\n+ {payload.regex!r}\n"
+    old_label = f"(set) {current}" if current else "(not set)"
+    if current and not current.isprintable():
+        old_label = f"(set) {current!r}"
+    diff = f"wud.tag.include:\n- {old_label}\n+ (set) {payload.regex}\n"
     issues = []
     if record.service_key_ambiguous:
         issues.append("Duplicate service identity; choose an unambiguous Compose service.")

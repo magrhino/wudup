@@ -161,6 +161,33 @@ def test_repair_previews_exact_mutable_tag_without_a_numeric_wildcard(tmp_path: 
     assert compose_path.read_text(encoding="utf-8") == original
 
 
+@pytest.mark.parametrize(
+    ("current", "expected_old"),
+    [
+        ("", "(not set)"),
+        ("(not set)", "(set) (not set)"),
+        ("^v1'foo$", "(set) ^v1'foo$"),
+        ("^v1\u2028.36.2$", r"(set) '^v1\u2028.36.2$'"),
+    ],
+)
+def test_repair_preview_distinguishes_missing_label_and_escapes_line_separator(
+    tmp_path: Path, current: str, expected_old: str,
+) -> None:
+    client, _fake_root, _compose_path = _tracking_fixture(tmp_path, regex=current)
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["compose_diff"].splitlines() == [
+        "wud.tag.include:", f"- {expected_old}", r"+ (set) ^v\d+(?:\.\d+)+$",
+    ]
+
+
 def test_repair_preview_never_returns_other_compose_fields(tmp_path: Path) -> None:
     client, _fake_root, compose_path = _tracking_fixture(tmp_path, mutations=False)
     compose_path.write_text(
@@ -404,7 +431,9 @@ def test_repair_plan_apply_recreates_only_selected_service(tmp_path: Path) -> No
     assert preview.status_code == 200
     plan = preview.json()
     assert plan["can_apply"] is True
-    assert "wud.tag.include" in plan["compose_diff"]
+    assert plan["compose_diff"].splitlines() == [
+        "wud.tag.include:", r"- (set) ^v1\.36\.2$", r"+ (set) ^v\d+(?:\.\d+)+$",
+    ]
     assert compose_path.read_text(encoding="utf-8") == original
 
     apply = client.post(
