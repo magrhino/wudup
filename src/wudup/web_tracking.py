@@ -189,7 +189,8 @@ def _tracked_record_item(
     match = matches[0] if len(matches) == 1 else None
     return TrackedContainerItem(
         target_id=item.target_id, service_key=item.service_key, stack=item.stack,
-        service=item.service, image=item.image, current_tag=tag,
+        service=item.service, compose_path=str(record.stack.directory / record.stack.file),
+        image=item.image, current_tag=tag,
         runtime_state=item.runtime_state, tracking_regex=regex,
         tracking_health=health, tracking_detail=detail + match_detail,
         suggested_regex=suggested if suggested != regex else "",
@@ -213,7 +214,8 @@ def _unresolved_service_item(
         target_id=web_retags._retag_target_id_from_values(
             stack.directory, stack.file, stack.project_directory, stack.name, service,
         ),
-        service_key=key, stack=stack.name, service=service, image="", current_tag="",
+        service_key=key, stack=stack.name, service=service,
+        compose_path=str(stack.directory / stack.file), image="", current_tag="",
         runtime_state="unknown",
         tracking_health="no-image" if stack.inspection_complete else "image-unresolved",
         tracking_detail=(

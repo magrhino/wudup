@@ -776,6 +776,7 @@ class TrackedContainerItem(BaseModel):
     service_key: str
     stack: str
     service: str
+    compose_path: str
     image: str
     current_tag: str
     runtime_state: RetagRuntimeState
