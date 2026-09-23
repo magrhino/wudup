@@ -38,6 +38,8 @@ export const useTrackingStore = defineStore("tracking", () => {
   const planning = ref(false);
   const applying = ref(false);
   const error = ref("");
+  const applyError = ref("");
+  const applyErrorJobId = ref("");
   const rememberedJobId = ref(storedTrackingJobId());
 
   function forgetJob(): void {
@@ -65,21 +67,30 @@ export const useTrackingStore = defineStore("tracking", () => {
   async function load(): Promise<void> {
     loading.value = true;
     error.value = "";
-    if (rememberedJobId.value && !applying.value) {
+    const checkedJobId = rememberedJobId.value;
+    if (checkedJobId && !applying.value) {
       try {
-        job.value = await webApi.applyJob(rememberedJobId.value);
-        rememberJob(job.value);
-        if (job.value.status === "failure") {
-          error.value = job.value.error || `Tracking repair job ${job.value.job_id} failed.`;
+        const checkedJob = await webApi.applyJob(checkedJobId);
+        if (rememberedJobId.value === checkedJobId && !applying.value) {
+          job.value = checkedJob;
+          rememberJob(checkedJob);
+          if (applyErrorJobId.value === checkedJobId) {
+            applyError.value = "";
+            applyErrorJobId.value = "";
+          }
+          if (checkedJob.status === "failure") {
+            error.value = checkedJob.error || `Tracking repair job ${checkedJob.job_id} failed.`;
+          }
         }
       } catch (exc) {
-        const missingJobId = rememberedJobId.value;
-        if (exc instanceof ApiError && exc.status === 404) {
-          forgetJob();
-          job.value = null;
-          error.value = `Tracking repair job ${missingJobId} is no longer available. Review run history before retrying.`;
-        } else {
-          error.value = `Could not check tracking repair job ${missingJobId}: ${errorMessage(exc)}`;
+        if (rememberedJobId.value === checkedJobId && !applying.value) {
+          if (exc instanceof ApiError && exc.status === 404) {
+            forgetJob();
+            job.value = null;
+            error.value = `Tracking repair job ${checkedJobId} is no longer available. Review run history before retrying.`;
+          } else {
+            error.value = `Could not check tracking repair job ${checkedJobId}: ${errorMessage(exc)}`;
+          }
         }
       }
     }
@@ -95,6 +106,8 @@ export const useTrackingStore = defineStore("tracking", () => {
   async function preview(targetId: string, regex: string): Promise<void> {
     planning.value = true;
     error.value = "";
+    applyError.value = "";
+    applyErrorJobId.value = "";
     plan.value = null;
     try {
       plan.value = await webApi.createTrackingRepairPlan(
@@ -119,10 +132,13 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
     applying.value = true;
     error.value = "";
+    applyError.value = "";
+    applyErrorJobId.value = "";
     const selected = plan.value;
     plan.value = null;
+    let current: ApplyJobResponse | null = null;
     try {
-      let current = await webApi.applyTrackingRepair(
+      current = await webApi.applyTrackingRepair(
         selected,
         await useAuthStore().ensureCsrf(),
       );
@@ -141,16 +157,18 @@ export const useTrackingStore = defineStore("tracking", () => {
       if (current.status === "success") {
         await load();
       } else if (current.status === "failure") {
-        error.value = current.error || "Tracking repair failed. Review the job before retrying.";
+        applyErrorJobId.value = current.job_id;
+        applyError.value = current.error || "Tracking repair failed. Review the job before retrying.";
       }
     } catch (exc) {
-      error.value = rememberedJobId.value
-        ? `Could not check tracking repair job ${rememberedJobId.value}: ${errorMessage(exc)}`
-        : errorMessage(exc);
+      applyErrorJobId.value = current?.job_id ?? "";
+      applyError.value = current
+        ? `Could not check tracking repair job ${current.job_id}: ${errorMessage(exc)}`
+        : `Could not start tracking repair: ${errorMessage(exc)}`;
     } finally {
       applying.value = false;
     }
   }
 
-  return { inventory, plan, job, rememberedJobId, loading, planning, applying, error, load, preview, clearPlan, apply };
+  return { inventory, plan, job, rememberedJobId, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
 });

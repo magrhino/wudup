@@ -27,6 +27,9 @@ const approved = ref(false);
 const detailRef = ref<HTMLElement | null>(null);
 const inventoryRef = ref<HTMLElement | null>(null);
 const planRef = ref<HTMLElement | null>(null);
+const applyStatusRef = ref<HTMLElement | null>(null);
+const appliedTargetId = ref("");
+const previousJobId = ref("");
 let inspectTrigger: HTMLElement | null = null;
 const isDemoMode = import.meta.env.MODE === "demo" || import.meta.env.VITE_WUD_DEMO_MODE === "true";
 
@@ -43,6 +46,13 @@ const filterOptions = computed(() => [
 const items = computed(() => tracking.inventory?.items ?? []);
 const wudInventoryReady = computed(() => tracking.inventory?.wud_status?.metadata_available === true);
 const selected = computed(() => items.value.find((item) => item.target_id === selectedId.value) ?? null);
+const inlineJob = computed(() =>
+  tracking.job?.job_id === previousJobId.value ? null : tracking.job,
+);
+const showInlineRepairStatus = computed(() =>
+  appliedTargetId.value === selectedId.value && Boolean(appliedTargetId.value) &&
+  (tracking.applying || Boolean(tracking.applyError) || Boolean(inlineJob.value)),
+);
 const frozenCount = computed(() => items.value.filter((item) => item.tracking_health === "frozen").length);
 const untrackedCount = computed(() => items.value.filter((item) => item.wud_match_state === "untracked").length);
 function hasUnknownWudStatus(item: TrackedContainerItem): boolean {
@@ -101,6 +111,7 @@ useRouteRefresh(tracking.load);
 
 async function select(item: TrackedContainerItem, event: MouseEvent): Promise<void> {
   inspectTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  appliedTargetId.value = "";
   selectedId.value = item.target_id;
   await nextTick();
   detailRef.value?.focus({ preventScroll: true });
@@ -111,6 +122,7 @@ async function select(item: TrackedContainerItem, event: MouseEvent): Promise<vo
 }
 
 async function closeDetails(): Promise<void> {
+  appliedTargetId.value = "";
   selectedId.value = "";
   await nextTick();
   const target = inspectTrigger?.isConnected ? inspectTrigger : inventoryRef.value;
@@ -170,6 +182,7 @@ function wudExplanation(item: TrackedContainerItem): string {
 
 async function preview(): Promise<void> {
   if (!selected.value || !canPreview.value) return;
+  appliedTargetId.value = "";
   await tracking.preview(selected.value.target_id, editor.value.trim());
   if (tracking.plan) {
     await nextTick();
@@ -183,7 +196,16 @@ async function preview(): Promise<void> {
 
 async function apply(): Promise<void> {
   if (!approved.value || !tracking.plan?.can_apply || tracking.applying) return;
-  await tracking.apply();
+  appliedTargetId.value = selectedId.value;
+  previousJobId.value = tracking.rememberedJobId || tracking.job?.job_id || "";
+  const applyPromise = tracking.apply();
+  await nextTick();
+  applyStatusRef.value?.focus({ preventScroll: true });
+  applyStatusRef.value?.scrollIntoView({
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+    block: "start",
+  });
+  await applyPromise;
   approved.value = false;
 }
 </script>
@@ -201,15 +223,16 @@ async function apply(): Promise<void> {
     </div>
 
     <n-alert v-if="tracking.error" type="error" :show-icon="false">{{ tracking.error }}</n-alert>
+    <n-alert v-if="tracking.applyError && !showInlineRepairStatus && inlineJob?.status !== 'failure'" type="error" :show-icon="false">{{ tracking.applyError }}</n-alert>
     <n-alert v-for="warning in tracking.inventory?.warnings ?? []" :key="warning" type="warning" :show-icon="false">{{ warning }}</n-alert>
-    <n-alert v-if="tracking.job?.status === 'success'" type="success" :show-icon="false">
+    <n-alert v-if="!showInlineRepairStatus && tracking.job?.status === 'success'" type="success" :show-icon="false">
       Tracking repaired. WUD may need its next watch cycle before the new filter is reflected here.
       <RouterLink v-if="tracking.job.run_id" :to="{ name: 'run-detail', params: { id: tracking.job.run_id } }">Review run</RouterLink>
     </n-alert>
-    <n-alert v-if="tracking.job?.status === 'queued' || tracking.job?.status === 'running'" type="info" :show-icon="false">
+    <n-alert v-if="!showInlineRepairStatus && (tracking.job?.status === 'queued' || tracking.job?.status === 'running')" type="info" :show-icon="false">
       Tracking repair is still running. {{ tracking.job.progress.at(-1)?.message }} Job {{ tracking.job.job_id }}. You can refresh later.
     </n-alert>
-    <n-alert v-if="tracking.job?.status === 'failure'" type="error" :show-icon="false">
+    <n-alert v-if="!showInlineRepairStatus && tracking.job?.status === 'failure'" type="error" :show-icon="false">
       {{ tracking.job.error || "Tracking repair failed. Review the job and run history before retrying." }}
     </n-alert>
 
@@ -230,6 +253,7 @@ async function apply(): Promise<void> {
         <div><h3>{{ selected.service }}</h3><p>{{ selected.stack }} · {{ selected.image }}</p></div>
         <n-button text aria-label="Close container details" @click="closeDetails">Close</n-button>
       </div>
+      <div class="tracked-source"><span>Compose file</span><code>{{ selected.compose_path }}</code></div>
       <div class="tracked-evidence">
         <div><span>Runtime</span><strong>{{ selected.runtime_state }}</strong></div>
         <div><span>WUD status</span><strong>{{ wudLabel(selected) }}</strong><small v-if="wudExplanation(selected)">{{ wudExplanation(selected) }} <RouterLink :to="{ name: 'doctor' }">Check Doctor</RouterLink></small></div>
@@ -267,28 +291,29 @@ async function apply(): Promise<void> {
             <p>{{ patternGuide.summary }}</p>
             <p>Installed tag <code>{{ selected.current_tag }}</code>: <strong>{{ matchLabel(selected.current_tag) }}</strong></p>
             <p v-if="observedCandidate">WUD-observed candidate <code>{{ observedCandidate }}</code>: <strong>{{ matchLabel(observedCandidate) }}</strong></p>
-            <table v-if="patternGuide.examples.length" class="tracked-examples" aria-label="Illustrative tag matches">
-              <caption>Illustrative examples — not fetched from the registry.</caption>
-              <thead><tr><th scope="col">Example tag</th><th scope="col">Result</th></tr></thead>
-              <tbody><tr v-for="example in patternGuide.examples" :key="example.tag">
-                <td><code>{{ example.tag }}</code><small>{{ example.change }}</small></td>
-                <td>{{ example.matches ? "Matches" : "Excluded" }}</td>
-              </tr></tbody>
-            </table>
             <details :key="selected.target_id" class="tracked-pattern-details">
-              <summary>How this filter works</summary>
+              <summary>More examples and tag tests</summary>
               <p>{{ patternGuide.description }}</p>
+              <table v-if="patternGuide.examples.length" class="tracked-examples" aria-label="Illustrative tag matches">
+                <caption>Illustrative examples — not fetched from the registry.</caption>
+                <thead><tr><th scope="col">Example tag</th><th scope="col">Result</th></tr></thead>
+                <tbody><tr v-for="example in patternGuide.examples" :key="example.tag">
+                  <td><code>{{ example.tag }}</code><small>{{ example.change }}</small></td>
+                  <td>{{ example.matches ? "Matches" : "Excluded" }}</td>
+                </tr></tbody>
+              </table>
+              <label for="tracking-tag-sample">Test another tag (optional)</label>
+              <n-input id="tracking-tag-sample" v-model:value="sampleTag" :placeholder="samplePlaceholder" :input-props="{ 'aria-label': 'Tag to test against proposed filter', maxlength: 128 }" />
+              <p v-if="sampleTag" role="status">
+                {{ patternGuide.matches(sampleTag) === null ? "Enter a valid Docker tag (letters, numbers, dots, dashes, or underscores)." : patternGuide.matches(sampleTag) ? "This tag matches the proposed filter." : "This tag does not match the proposed filter." }}
+              </p>
+              <small>Only tags already shown by WUD are observed. This check does not fetch repository tags or confirm a tag exists.</small>
             </details>
-            <label for="tracking-tag-sample">Test another tag (optional)</label>
-            <n-input id="tracking-tag-sample" v-model:value="sampleTag" :placeholder="samplePlaceholder" :input-props="{ 'aria-label': 'Tag to test against proposed filter', maxlength: 128 }" />
-            <p v-if="sampleTag" role="status">
-              {{ patternGuide.matches(sampleTag) === null ? "Enter a valid Docker tag (letters, numbers, dots, dashes, or underscores)." : patternGuide.matches(sampleTag) ? "This tag matches the proposed filter." : "This tag does not match the proposed filter." }}
-            </p>
-            <small>Only tags already shown by WUD are observed. This check does not fetch repository tags or confirm a tag exists.</small>
           </div>
           <p v-else-if="editor.trim()" class="tracked-muted">This pattern is outside WUDup’s built-in tester and repair syntax. It may still work in WUD; manage it in Compose or enter an anchored exact tag or supported numeric pattern here.</p>
           <p v-if="patternGuide && selected.current_tag && patternGuide.matches(selected.current_tag) !== true" class="tracked-muted">The proposed filter must match the installed tag before repair can be previewed.</p>
-          <n-button secondary :disabled="!canPreview || tracking.applying" :loading="tracking.planning" @click="preview">Preview repair</n-button>
+          <n-button class="tracked-preview-button" :type="tracking.plan?.target_id === selected.target_id ? 'default' : 'primary'" :secondary="tracking.plan?.target_id === selected.target_id" :disabled="!canPreview || tracking.applying" :loading="tracking.planning" @click="preview">Preview repair</n-button>
+          <p v-if="!editor.trim() && !isDemoMode" class="tracked-muted">Enter a tag filter to enable the preview.</p>
           <p v-if="sameAsCurrent" class="tracked-muted">This is already the current filter; there is no label change to preview.</p>
         </template>
         <p v-if="isDemoMode" class="tracked-muted">The public demo is read-only; repair previews require a live WUDup instance.</p>
@@ -302,6 +327,18 @@ async function apply(): Promise<void> {
           <pre :aria-label="'Tracking label preview for ' + tracking.plan.service_key">{{ tracking.plan.compose_diff }}</pre>
           <n-checkbox v-model:checked="approved" :disabled="!tracking.plan.can_apply || tracking.applying">I reviewed the diff and understand this will recreate {{ selected.service }}.</n-checkbox>
           <n-button type="primary" :disabled="!approved || !tracking.plan.can_apply || tracking.applying || auth.session?.mutations_enabled !== true" :loading="tracking.applying" @click="apply">Apply tracking repair</n-button>
+        </div>
+        <div v-if="showInlineRepairStatus" ref="applyStatusRef" tabindex="-1" class="tracked-apply-status" aria-label="Tracking repair status" aria-live="polite">
+          <n-alert v-if="inlineJob?.status === 'success'" type="success" :show-icon="false">
+            Tracking repaired for {{ selected.service }}. WUD may need its next watch cycle before the new filter is reflected here.
+            <RouterLink v-if="inlineJob.run_id" :to="{ name: 'run-detail', params: { id: inlineJob.run_id } }">Review run</RouterLink>
+          </n-alert>
+          <n-alert v-if="inlineJob?.status === 'failure' || tracking.applyError" type="error" :show-icon="false">
+            {{ tracking.applyError || inlineJob?.error || "Tracking repair failed. Review run history before retrying." }}
+          </n-alert>
+          <n-alert v-if="!tracking.applyError && inlineJob?.status !== 'success' && inlineJob?.status !== 'failure'" type="info" :show-icon="false">
+            {{ inlineJob ? `Tracking repair for ${selected.service} is still running. ${inlineJob.progress.at(-1)?.message || ""} Job ${inlineJob.job_id}. You can refresh later.` : `Starting tracking repair for ${selected.service}…` }}
+          </n-alert>
         </div>
       </section>
     </section>
@@ -376,6 +413,9 @@ async function apply(): Promise<void> {
 .tracked-empty { padding: 36px 16px; text-align: center; color: var(--color-text-secondary); }
 .tracked-detail { display: grid; gap: 18px; scroll-margin-top: 16px; }
 .tracked-detail-heading p { overflow-wrap: anywhere; }
+.tracked-source { display: grid; gap: 4px; min-width: 0; }
+.tracked-source span { color: var(--color-muted-text); font-size: var(--text-metadata-size); }
+.tracked-source code { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .tracked-evidence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .tracked-evidence div { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--color-border); }
 .tracked-evidence span, .tracked-regex span { color: var(--color-muted-text); font-size: var(--text-metadata-size); }
@@ -409,7 +449,9 @@ async function apply(): Promise<void> {
 .tracked-pattern-details summary:focus-visible { outline: 2px solid var(--color-action-blue); outline-offset: 3px; }
 .tracked-pattern-details[open] summary { margin-bottom: 8px; }
 .tracked-plan { display: grid; justify-items: start; gap: 12px; width: 100%; border-top: 1px solid var(--color-border); padding-top: 16px; }
+.tracked-apply-status { display: grid; gap: 8px; width: 100%; scroll-margin-top: 16px; }
 .tracked-plan pre { box-sizing: border-box; width: 100%; max-height: 350px; overflow: auto; margin: 0; padding: 14px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-page, var(--color-surface)); font-size: var(--text-data-size); white-space: pre-wrap; }
-@media (--wud-app-shell) { .tracked-detail, .tracked-plan { scroll-margin-top: 80px; } .tracked-pattern-details summary { min-height: var(--size-touch-target); padding-block: 10px; } .tracked-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tracked-table { min-width: 760px; } }
+@media (--wud-app-shell) { .tracked-detail, .tracked-plan, .tracked-apply-status { scroll-margin-top: 80px; } .tracked-pattern-details summary { min-height: var(--size-touch-target); padding-block: 10px; } .tracked-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tracked-table { min-width: 760px; } }
 @media (--wud-data-cards) { .tracked-intro { display: none; } .tracked-summary { gap: 4px 12px; padding: 8px 12px; font-size: var(--text-metadata-size); line-height: 1.3; } .tracked-toolbar { flex-direction: column; } .tracked-toolbar .n-input, .tracked-toolbar .n-select { max-width: none; width: 100%; } .tracked-evidence { grid-template-columns: 1fr; } .tracked-table-wrap { display: none; } .tracked-mobile-list { display: block; } .tracked-mobile-item { display: grid; gap: 7px; padding: 15px 16px; border-bottom: 1px solid var(--color-border); } .tracked-mobile-item.selected { background: var(--color-surface-raised, var(--color-surface)); } .tracked-mobile-item:last-child { border-bottom: 0; } .tracked-mobile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; } .tracked-mobile-heading small { display: block; color: var(--color-muted-text); } .tracked-mobile-item p { margin: 0; color: var(--color-text-secondary); } .tracked-mobile-item .n-button { justify-self: start; } }
+@media (--wud-data-cards) { .tracked-preview-button { width: 100%; min-height: var(--size-touch-target); } .tracked-links a { display: inline-flex; align-items: center; min-height: var(--size-touch-target); } .tracked-links summary { box-sizing: border-box; min-height: var(--size-touch-target); padding-block: 10px; } }
 </style>

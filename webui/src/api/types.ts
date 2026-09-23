@@ -47,6 +47,7 @@ export interface TrackedContainerItem {
   service_key: string;
   stack: string;
   service: string;
+  compose_path: string;
   image: string;
   current_tag: string;
   runtime_state: "running" | "not-running" | "unknown";
