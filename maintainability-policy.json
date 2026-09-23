@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "baseline": {
+    "status": "pending",
+    "commit": null,
+    "reason": "Draft only: generate and review ceilings from main after the #694 predecessor refactors are integrated or explicitly deferred. Validated pull requests are not an integrated baseline.",
+    "follow_up": "https://github.com/magrhino/wudup/issues/706"
+  },
+  "thresholds": {"warn": 500, "block": 800},
+  "production": {
+    "extensions": [".py", ".sh", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".css", ".html", ".json", ".yaml", ".yml", ".toml"],
+    "paths": ["Dockerfile", "Makefile", "bin/updates", "bin/docker-update-from-wud"]
+  },
+  "tests": {"prefixes": ["tests/", "webui/tests/"]},
+  "generated": {"prefixes": ["src/wudup/web_static/", "webui/dist/", "webui/coverage/"]},
+  "locks": {"paths": ["requirements.txt", "requirements-build.txt", "requirements-dev.txt", "webui/package-lock.json"]},
+  "ceilings": {},
+  "allowances": {},
+  "transitions": {},
+  "remediation": "Extract the new responsibility, keep the change net-neutral by moving cohesive behavior, or request a reviewed exact-path exception with a ceiling, reason, follow-up when deferred, and re-review condition. A Danger acknowledgement cannot bypass enforcement.",
+  "anti_gaming": [
+    "Do not compress formatting or combine statements solely to lower physical LOC.",
+    "Do not delete validation, safeguards, tests, comments, or useful type precision to satisfy the check.",
+    "Do not move unrelated behavior into a generic helper.",
+    "Do not disguise handwritten code as generated output or add it to an exclusion.",
+    "Do not split a cohesive file into fragments that every task must still read together.",
+    "Review reduced responsibility and navigation burden, not line-count reduction alone."
+  ]
+}

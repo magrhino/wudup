@@ -69,6 +69,142 @@ tests/container-build.sh
 The deployment compose example uses the published GHCR image. The build compose
 artifact keeps the repository-local image build path used by smoke tests.
 
+## Maintainability Checker (Draft)
+
+`scripts/check_maintainability.py` compares physical lines in committed Git blobs,
+including a final line without a newline. Enforcement uses
+`maintainability-policy.json` in the requested head commit, while the committed
+base policy determines each original file's classification. If the base predates
+the policy, the checker uses the comparison policy and explicitly reports that
+fallback in `base_policy_source`. It reads objects
+with Git and the Python standard library; it never imports or executes project
+code, reads working source files, follows symlinks, or fetches missing objects.
+Blob counting drains one Git batch response at a time in 64 KiB chunks, including
+binary files and very long lines. It retains counts and tree metadata, not the
+contents of the compared blobs. Missing or truncated objects and failed Git
+processes produce an error rather than a partial passing report.
+Each policy input (committed base/head or external report-only file) is limited
+to 1 MiB before JSON parsing. Git object sizes are checked before loading policy
+contents, and external reads stop after the limit plus one byte. Oversized policies
+exit with status 2 and must be reduced before the checker can run.
+
+The policy is **baseline pending**. Enforcement exits with status 2 until the
+predecessor work under [#694](https://github.com/magrhino/wudup/issues/694) is
+integrated into main or explicitly deferred and the initial ceilings are reviewed.
+Validated pull requests do not establish that baseline. This draft adds no CI job
+or required status. The earlier local LOC audit script was not available to promote;
+the checker follows [#706](https://github.com/magrhino/wudup/issues/706) and synthetic
+Git repository tests.
+
+For current or historical inventory using the draft policy:
+
+```bash
+python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT --report-only --policy-file maintainability-policy.json
+```
+
+`--policy-file` is available only with `--report-only`. Such a report always says
+`REPORT ONLY / NOT ENFORCED`; its successful command exit is not a passing gate.
+Report-only inventory may use a base older than the approved baseline; only
+enforcement requires that baseline to be an ancestor of the requested base.
+An inventory with identical base/head commits includes unchanged files. JSON output
+reports resolved commits and, for every tracked path, the category, base/head line
+counts, delta, Git rename origin, applicable ceiling, warnings, and violations.
+Deleted files remain visible. Tests, generated outputs, locks, other non-source
+files, symlinks, and submodules are reported separately without size enforcement.
+
+After integration, review the production inventory from post-refactor main, set
+`baseline.status` to `ready`, and record its full commit ID. Every remaining
+oversized production file needs an exact-path entry in `ceilings`. Exceptional
+declarative collections or fixture generators belong in `allowances`, also with an
+explicit ceiling; they remain visible and subject to growth checks. Each record
+has `ceiling`, `reason`, `deferred` (boolean), `follow_up` (linked issue when deferred,
+otherwise null or a link), and `re_review` (the condition for another review).
+Policy changes, including higher ceilings or category changes, require review.
+Never add broad source exclusions to solve a failure.
+Exact production paths and reviewed records take precedence over directory
+categories, so an explicitly retained production owner cannot hide inside tests
+or generated output. Ordinary tests remain report-only.
+
+Git-detected renames with a reviewed ceiling or allowance require a record at the
+destination's exact path. Move or copy the source record in the same PR, including
+ceilings below the default blocking threshold, so later comparisons retain it.
+The old path's ceiling is still shown for diagnosis until the record is transferred,
+but that rename fails. Reusing an existing destination record with a larger ceiling
+requires an explicit policy-record update explaining the increase.
+A production rename into tests or an excluded category fails:
+retain production classification or review an exact-path declarative allowance.
+Unchanged and shrinking oversized files with recorded ceilings are allowed; new
+or growing files above their applicable ceiling fail. Follow the policy's
+anti-gaming guidance: preserve validation, safeguards, coverage, comments, and type
+precision, and reduce responsibility and navigation burden instead of compressing
+formatting or scattering a cohesive owner among fragments.
+
+### Contributing: resolve a possible category move
+
+Git may report a relocation as deletion plus addition when edits obscure its
+similarity, or when code moves into an existing file. If an enforced file
+disappears without a detected rename and any non-enforced path is added or
+modified, the checker reports **Possible category move** on the deleted source.
+The JSON `category_move_candidates` list identifies the changed non-enforced
+paths. This is a review tripwire, not proof that code moved. It includes shrinking
+files and tests, generated outputs, locks, and other excluded categories.
+Deleting production code while independently updating tests can trigger it too.
+Pure deletions with unchanged excluded files and test additions alone still pass.
+
+Review the deleted responsibility and candidate paths together, then add an
+exact-source-path entry under `transitions` in `maintainability-policy.json`:
+
+```json
+"transitions": {
+  "src/wudup/old_owner.py": {
+    "base_commit": "<full commit ID passed to --base>",
+    "destinations": ["src/wudup/new_owner.py"],
+    "reason": "The responsibility moved intact to its new owner; related test changes exercise that owner."
+  }
+}
+```
+
+Replace the placeholder with the full ID from `git rev-parse BASE_COMMIT`.
+List every destination that received the responsibility. Each destination's content
+must be added or modified in the head and remain production or declarative code under
+the head policy. An excluded destination must have an explicit production path,
+`ceilings` entry, or reviewed declarative `allowances` entry. If the source had a
+reviewed ceiling or allowance, transfer that record to each destination's exact
+path; any ceiling increase needs its own justification and review. An existing
+destination with a larger ceiling also requires a policy-record update explaining
+why that larger limit is appropriate for the transferred responsibility. Normal size
+checks still apply, and persistent destination records protect subsequent PRs.
+A transition entry itself grants no size exemption or new category exclusion.
+
+For a genuine deletion, use `"destinations": []` and explain why the responsibility
+was removed and how the changed non-enforced files are unrelated to a relocation.
+Reviewers must verify that explanation against the diff. Each ambiguous source
+needs its own entry; a PR-body acknowledgement is insufficient. The declaration
+applies only to its exact comparison base commit. Refresh and review it if that
+base changes; obsolete entries can be removed in subsequent work. A declaration
+cannot waive a category violation on a Git-detected rename.
+
+Commit the resolution before running the checker; working-tree policy edits are
+ignored. The checker validates the declaration's scope and destinations, but it
+cannot authenticate human approval or prove semantic equivalence. Policy changes
+still require review through the repository's normal PR process.
+
+### Enforcement command and activation
+
+The future local/CI enforcement command is identical, using the actual PR base
+and head commit IDs (not a synthetic merge commit):
+
+```bash
+python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT
+```
+
+It exits 0 for a passing enforced comparison, 1 for violations, or 2 for a pending
+baseline, invalid policy, or unavailable Git objects. Before wiring CI or requiring
+its status, validate representative PRs against the reviewed baseline and resolve
+false positives. Future CI must use a trusted checker and review policy changes;
+it must not execute candidate project code. Danger remains advisory, and
+`Danger: large-file-review-complete` cannot bypass this checker.
+
 ## WebUI Development
 
 Install the frontend dependencies before running the Vue/Vite checks:

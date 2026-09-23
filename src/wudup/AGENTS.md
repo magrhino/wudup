@@ -14,6 +14,10 @@ Rules for files under `src/wudup/`. Root `AGENTS.md` controls repo-wide safety, 
 
 Prefer small modules with one clear reason to change:
 
+Use the shared [maintainability policy](../../maintainability-policy.json) and
+[checker guidance](../../docs/DEVELOPMENT.md#maintainability-checker-draft) when
+reviewing module growth; its initial baseline is still pending integration.
+
 | Area | Preferred owner | Notes |
 |---|---|---|
 | Web app factory, startup, CLI handoff | `web.py` | Do not add new route families or large helper clusters here. Import owning `web_*` modules directly instead of adding facade exports. |

@@ -387,7 +387,7 @@ async function runLargeFileRules() {
         [
           `\`${file}\` grew by ${added} added lines in this PR.`,
           "",
-          "Consider splitting the file, extracting a narrow helper, or opening a follow-up issue. Add `Danger: large-file-review-complete` if the growth is intentional.",
+          "Review responsibility and navigation burden using `maintainability-policy.json`. Extract a cohesive responsibility or document a reviewed path-specific exception. Add `Danger: large-file-review-complete` to acknowledge this advisory; the marker cannot bypass maintainability enforcement. The checker remains draft-only until its post-refactor baseline is approved.",
         ].join("\n"),
       );
     }
