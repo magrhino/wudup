@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TrackedContainerItem } from "../src/api/client";
+import type { TrackedContainerItem, TrackingRepairPlan } from "../src/api/client";
 import { createWudRouter } from "../src/router";
 import { useAuthStore } from "../src/stores/auth";
 import { useTrackingStore } from "../src/stores/tracking";
@@ -32,6 +32,13 @@ const item: TrackedContainerItem = {
   last_action_status: "",
   last_action_run_id: null,
   retag_available: false,
+};
+const repairPlan: TrackingRepairPlan = {
+  plan_id: "plan-radarr", source_hash: "source", rendered_hash: "rendered",
+  target_id: item.target_id, service_key: item.service_key, stack: item.stack,
+  service: item.service, image: item.image, current_regex: item.tracking_regex,
+  proposed_regex: item.suggested_regex, compose_diff: "+wud.tag.include=^v\\d+$",
+  will_recreate: true, can_apply: true, issues: [],
 };
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
@@ -256,13 +263,7 @@ describe("TrackedContainersView", () => {
     await flushPromises();
 
     await wrapper.get('button[aria-label="Inspect media/radarr"]').trigger("click");
-    tracking.plan = {
-      plan_id: "plan-radarr", source_hash: "source", rendered_hash: "rendered",
-      target_id: item.target_id, service_key: item.service_key, stack: item.stack,
-      service: item.service, image: item.image, current_regex: item.tracking_regex,
-      proposed_regex: item.suggested_regex, compose_diff: "+wud.tag.include=^v\\d+$",
-      will_recreate: true, can_apply: true, issues: [],
-    };
+    tracking.plan = repairPlan;
     await flushPromises();
     await wrapper.get('input[type="checkbox"]').setValue(true);
     let finishApply!: () => void;
@@ -315,13 +316,7 @@ describe("TrackedContainersView", () => {
     await flushPromises();
 
     await wrapper.get('button[aria-label="Inspect media/radarr"]').trigger("click");
-    tracking.plan = {
-      plan_id: "plan-radarr", source_hash: "source", rendered_hash: "rendered",
-      target_id: item.target_id, service_key: item.service_key, stack: item.stack,
-      service: item.service, image: item.image, current_regex: item.tracking_regex,
-      proposed_regex: item.suggested_regex, compose_diff: "+wud.tag.include=^v\\d+$",
-      will_recreate: true, can_apply: true, issues: [],
-    };
+    tracking.plan = repairPlan;
     await flushPromises();
     await wrapper.get('input[type="checkbox"]').setValue(true);
     vi.spyOn(tracking, "apply").mockImplementation(async () => {

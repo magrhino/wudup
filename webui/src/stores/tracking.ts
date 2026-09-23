@@ -65,34 +65,34 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
   }
 
+  async function refreshRememberedJob(checkedJobId: string, version: number): Promise<void> {
+    if (!checkedJobId || applying.value) return;
+    try {
+      const checkedJob = await webApi.applyJob(checkedJobId);
+      if (version !== loadVersion || rememberedJobId.value !== checkedJobId || applying.value) return;
+      job.value = checkedJob;
+      rememberJob(checkedJob);
+      if (applyErrorJobId.value === checkedJobId) {
+        applyError.value = "";
+        applyErrorJobId.value = "";
+      }
+    } catch (exc) {
+      if (version !== loadVersion || rememberedJobId.value !== checkedJobId || applying.value) return;
+      if (exc instanceof ApiError && exc.status === 404) {
+        forgetJob();
+        job.value = null;
+        error.value = `Tracking repair job ${checkedJobId} is no longer available. Review run history before retrying.`;
+      } else {
+        error.value = `Could not check tracking repair job ${checkedJobId}: ${errorMessage(exc)}`;
+      }
+    }
+  }
+
   async function load(): Promise<void> {
     const version = ++loadVersion;
     loading.value = true;
     error.value = "";
-    const checkedJobId = rememberedJobId.value;
-    if (checkedJobId && !applying.value) {
-      try {
-        const checkedJob = await webApi.applyJob(checkedJobId);
-        if (version === loadVersion && rememberedJobId.value === checkedJobId && !applying.value) {
-          job.value = checkedJob;
-          rememberJob(checkedJob);
-          if (applyErrorJobId.value === checkedJobId) {
-            applyError.value = "";
-            applyErrorJobId.value = "";
-          }
-        }
-      } catch (exc) {
-        if (version === loadVersion && rememberedJobId.value === checkedJobId && !applying.value) {
-          if (exc instanceof ApiError && exc.status === 404) {
-            forgetJob();
-            job.value = null;
-            error.value = `Tracking repair job ${checkedJobId} is no longer available. Review run history before retrying.`;
-          } else {
-            error.value = `Could not check tracking repair job ${checkedJobId}: ${errorMessage(exc)}`;
-          }
-        }
-      }
-    }
+    await refreshRememberedJob(rememberedJobId.value, version);
     try {
       const currentInventory = await webApi.trackedContainers();
       if (version === loadVersion) inventory.value = currentInventory;
