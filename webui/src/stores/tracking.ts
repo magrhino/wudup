@@ -41,6 +41,7 @@ export const useTrackingStore = defineStore("tracking", () => {
   const applyError = ref("");
   const applyErrorJobId = ref("");
   const rememberedJobId = ref(storedTrackingJobId());
+  let loadVersion = 0;
 
   function forgetJob(): void {
     rememberedJobId.value = "";
@@ -65,25 +66,23 @@ export const useTrackingStore = defineStore("tracking", () => {
   }
 
   async function load(): Promise<void> {
+    const version = ++loadVersion;
     loading.value = true;
     error.value = "";
     const checkedJobId = rememberedJobId.value;
     if (checkedJobId && !applying.value) {
       try {
         const checkedJob = await webApi.applyJob(checkedJobId);
-        if (rememberedJobId.value === checkedJobId && !applying.value) {
+        if (version === loadVersion && rememberedJobId.value === checkedJobId && !applying.value) {
           job.value = checkedJob;
           rememberJob(checkedJob);
           if (applyErrorJobId.value === checkedJobId) {
             applyError.value = "";
             applyErrorJobId.value = "";
           }
-          if (checkedJob.status === "failure") {
-            error.value = checkedJob.error || `Tracking repair job ${checkedJob.job_id} failed.`;
-          }
         }
       } catch (exc) {
-        if (rememberedJobId.value === checkedJobId && !applying.value) {
+        if (version === loadVersion && rememberedJobId.value === checkedJobId && !applying.value) {
           if (exc instanceof ApiError && exc.status === 404) {
             forgetJob();
             job.value = null;
@@ -95,11 +94,14 @@ export const useTrackingStore = defineStore("tracking", () => {
       }
     }
     try {
-      inventory.value = await webApi.trackedContainers();
+      const currentInventory = await webApi.trackedContainers();
+      if (version === loadVersion) inventory.value = currentInventory;
     } catch (exc) {
-      error.value = [error.value, errorMessage(exc)].filter(Boolean).join(" ");
+      if (version === loadVersion) {
+        error.value = [error.value, errorMessage(exc)].filter(Boolean).join(" ");
+      }
     } finally {
-      loading.value = false;
+      if (version === loadVersion) loading.value = false;
     }
   }
 

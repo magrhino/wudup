@@ -292,6 +292,11 @@ describe("TrackedContainersView", () => {
     expect(status.text()).not.toContain("Inventory unavailable");
     expect(status.find('[data-alert-type="error"]').exists()).toBe(false);
     expect(wrapper.get('[data-alert-type="error"]').text()).toContain("Inventory unavailable");
+    tracking.error = "";
+    tracking.job = applyJobResponse({ status: "failure", error: "Compose failed" });
+    await flushPromises();
+    expect(status.text()).toContain("Compose failed");
+    expect(wrapper.findAll('[data-alert-type="error"]')).toHaveLength(1);
     wrapper.unmount();
   });
 
@@ -333,6 +338,7 @@ describe("TrackedContainersView", () => {
     const status = wrapper.get('[aria-label="Tracking repair status"]');
     expect(status.text()).toContain("Could not start tracking repair: Rejected");
     expect(status.text()).not.toContain("Tracking repaired");
+    expect(wrapper.get('[data-alert-type="success"]').text()).toContain("Earlier tracking repair job older-job completed.");
   });
 
   it("returns focus and scroll to the originating Inspect button on close", async () => {

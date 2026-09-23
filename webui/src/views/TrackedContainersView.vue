@@ -53,6 +53,7 @@ const showInlineRepairStatus = computed(() =>
   appliedTargetId.value === selectedId.value && Boolean(appliedTargetId.value) &&
   (tracking.applying || Boolean(tracking.applyError) || Boolean(inlineJob.value)),
 );
+const showGlobalJobStatus = computed(() => !showInlineRepairStatus.value || !inlineJob.value);
 const frozenCount = computed(() => items.value.filter((item) => item.tracking_health === "frozen").length);
 const untrackedCount = computed(() => items.value.filter((item) => item.wud_match_state === "untracked").length);
 function hasUnknownWudStatus(item: TrackedContainerItem): boolean {
@@ -225,15 +226,15 @@ async function apply(): Promise<void> {
     <n-alert v-if="tracking.error" type="error" :show-icon="false">{{ tracking.error }}</n-alert>
     <n-alert v-if="tracking.applyError && !showInlineRepairStatus && inlineJob?.status !== 'failure'" type="error" :show-icon="false">{{ tracking.applyError }}</n-alert>
     <n-alert v-for="warning in tracking.inventory?.warnings ?? []" :key="warning" type="warning" :show-icon="false">{{ warning }}</n-alert>
-    <n-alert v-if="!showInlineRepairStatus && tracking.job?.status === 'success'" type="success" :show-icon="false">
-      Tracking repaired. WUD may need its next watch cycle before the new filter is reflected here.
+    <n-alert v-if="showGlobalJobStatus && tracking.job?.status === 'success'" type="success" :show-icon="false">
+      {{ showInlineRepairStatus ? `Earlier tracking repair job ${tracking.job.job_id} completed.` : "Tracking repaired. WUD may need its next watch cycle before the new filter is reflected here." }}
       <RouterLink v-if="tracking.job.run_id" :to="{ name: 'run-detail', params: { id: tracking.job.run_id } }">Review run</RouterLink>
     </n-alert>
-    <n-alert v-if="!showInlineRepairStatus && (tracking.job?.status === 'queued' || tracking.job?.status === 'running')" type="info" :show-icon="false">
-      Tracking repair is still running. {{ tracking.job.progress.at(-1)?.message }} Job {{ tracking.job.job_id }}. You can refresh later.
+    <n-alert v-if="showGlobalJobStatus && (tracking.job?.status === 'queued' || tracking.job?.status === 'running')" type="info" :show-icon="false">
+      {{ showInlineRepairStatus ? "Earlier tracking repair" : "Tracking repair" }} is still running. {{ tracking.job.progress.at(-1)?.message }} Job {{ tracking.job.job_id }}. You can refresh later.
     </n-alert>
-    <n-alert v-if="!showInlineRepairStatus && tracking.job?.status === 'failure'" type="error" :show-icon="false">
-      {{ tracking.job.error || "Tracking repair failed. Review the job and run history before retrying." }}
+    <n-alert v-if="showGlobalJobStatus && tracking.job?.status === 'failure'" type="error" :show-icon="false">
+      {{ showInlineRepairStatus ? `Earlier tracking repair job ${tracking.job.job_id} failed: ` : "" }}{{ tracking.job.error || "Tracking repair failed. Review the job and run history before retrying." }}
     </n-alert>
 
     <div v-if="tracking.inventory?.status === 'ready'" class="tracked-summary" aria-label="Inventory summary">

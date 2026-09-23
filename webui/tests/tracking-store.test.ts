@@ -177,7 +177,32 @@ describe("tracking store", () => {
     await store.load();
     expect(store.job?.status).toBe(status);
     expect(store.applyError).toBe("");
-    if (status === "failure") expect(store.error).toBe("Compose failed");
+    expect(store.error).toBe("");
+    if (status === "failure") expect(store.job?.error).toBe("Compose failed");
+  });
+
+  it("ignores an older failed check when another load recovers the same job", async () => {
+    globalThis.sessionStorage.setItem("trackingRepairJobId", "job-test");
+    const store = useTrackingStore();
+    let rejectOlderCheck!: (reason: Error) => void;
+    let resolveNewerCheck!: (job: ReturnType<typeof applyJobResponse>) => void;
+    vi.spyOn(webApi, "applyJob")
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectOlderCheck = reject; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveNewerCheck = resolve; }));
+    vi.spyOn(webApi, "trackedContainers").mockResolvedValue({
+      status: "ready", count: 0, items: [], wud_status: null, warnings: [],
+    });
+
+    const olderLoad = store.load();
+    const newerLoad = store.load();
+    rejectOlderCheck(new Error("Check unavailable"));
+    await olderLoad;
+    resolveNewerCheck(applyJobResponse({ status: "success" }));
+    await newerLoad;
+
+    expect(store.job?.status).toBe("success");
+    expect(store.error).toBe("");
+    expect(store.rememberedJobId).toBe("");
   });
 
   it("ignores a delayed response for an older job after a new job starts", async () => {
