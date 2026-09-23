@@ -67,7 +67,7 @@ def _tracking_fixture(
 def test_inventory_includes_compose_service_without_wud(
     tmp_path: Path, monkeypatch
 ) -> None:
-    client, _fake_root, _compose_path = _tracking_fixture(tmp_path)
+    client, _fake_root, compose_path = _tracking_fixture(tmp_path)
     monkeypatch.setattr(
         web_wud_api,
         "get_snapshot",
@@ -84,6 +84,7 @@ def test_inventory_includes_compose_service_without_wud(
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["service_key"] == "bindery/bindery"
+    assert item["compose_path"] == str(compose_path)
     assert item["wud"] is None
     assert item["wud_match_state"] == "untracked"
     assert item["tracking_health"] == "frozen"
@@ -370,7 +371,7 @@ def test_inventory_matches_exact_compose_path_despite_duplicate_project_service(
 def test_inventory_includes_service_when_compose_json_falls_back(
     tmp_path: Path
 ) -> None:
-    client, fake_root, _compose_path = _tracking_fixture(tmp_path)
+    client, fake_root, compose_path = _tracking_fixture(tmp_path)
     (fake_root / "stacks" / "bindery" / "config_json_fail").touch()
 
     response = client.get("/api/v1/tracked-containers")
@@ -379,6 +380,7 @@ def test_inventory_includes_service_when_compose_json_falls_back(
     assert response.json()["count"] == 1
     item = response.json()["items"][0]
     assert item["service_key"] == "bindery/bindery"
+    assert item["compose_path"] == str(compose_path)
     assert item["tracking_health"] == "image-unresolved"
     assert item["wud_match_state"] == "unknown"
 

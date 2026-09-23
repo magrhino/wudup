@@ -243,7 +243,7 @@ test("container sample explains exact tags without implying a WUD outage", async
   const details = page.getByLabel("Selected container details");
   await expect(details.getByText("Review tracking")).toBeVisible();
   await expect(details.getByText("Tracks this exact tag; same-tag updates depend on WUD digest watching.")).toBeVisible();
-  await details.getByText("How this filter works", { exact: true }).click();
+  await details.getByText("More examples and tag tests", { exact: true }).click();
   await expect(details.getByText("Matches only the tag “latest”", { exact: false })).toBeVisible();
   await expect(details.getByText("This is already the current filter; there is no label change to preview.")).toBeVisible();
   await expect(details.getByRole("button", { name: "Preview repair" })).toBeDisabled();

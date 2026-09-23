@@ -38,7 +38,10 @@ export const useTrackingStore = defineStore("tracking", () => {
   const planning = ref(false);
   const applying = ref(false);
   const error = ref("");
+  const applyError = ref("");
+  const applyErrorJobId = ref("");
   const rememberedJobId = ref(storedTrackingJobId());
+  let loadVersion = 0;
 
   function forgetJob(): void {
     rememberedJobId.value = "";
@@ -62,39 +65,51 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
   }
 
-  async function load(): Promise<void> {
-    loading.value = true;
-    error.value = "";
-    if (rememberedJobId.value && !applying.value) {
-      try {
-        job.value = await webApi.applyJob(rememberedJobId.value);
-        rememberJob(job.value);
-        if (job.value.status === "failure") {
-          error.value = job.value.error || `Tracking repair job ${job.value.job_id} failed.`;
-        }
-      } catch (exc) {
-        const missingJobId = rememberedJobId.value;
-        if (exc instanceof ApiError && exc.status === 404) {
-          forgetJob();
-          job.value = null;
-          error.value = `Tracking repair job ${missingJobId} is no longer available. Review run history before retrying.`;
-        } else {
-          error.value = `Could not check tracking repair job ${missingJobId}: ${errorMessage(exc)}`;
-        }
+  async function refreshRememberedJob(checkedJobId: string, version: number): Promise<void> {
+    if (!checkedJobId || applying.value) return;
+    try {
+      const checkedJob = await webApi.applyJob(checkedJobId);
+      if (version !== loadVersion || rememberedJobId.value !== checkedJobId || applying.value) return;
+      job.value = checkedJob;
+      rememberJob(checkedJob);
+      if (applyErrorJobId.value === checkedJobId) {
+        applyError.value = "";
+        applyErrorJobId.value = "";
+      }
+    } catch (exc) {
+      if (version !== loadVersion || rememberedJobId.value !== checkedJobId || applying.value) return;
+      if (exc instanceof ApiError && exc.status === 404) {
+        forgetJob();
+        job.value = null;
+        error.value = `Tracking repair job ${checkedJobId} is no longer available. Review run history before retrying.`;
+      } else {
+        error.value = `Could not check tracking repair job ${checkedJobId}: ${errorMessage(exc)}`;
       }
     }
+  }
+
+  async function load(): Promise<void> {
+    const version = ++loadVersion;
+    loading.value = true;
+    error.value = "";
+    await refreshRememberedJob(rememberedJobId.value, version);
     try {
-      inventory.value = await webApi.trackedContainers();
+      const currentInventory = await webApi.trackedContainers();
+      if (version === loadVersion) inventory.value = currentInventory;
     } catch (exc) {
-      error.value = [error.value, errorMessage(exc)].filter(Boolean).join(" ");
+      if (version === loadVersion) {
+        error.value = [error.value, errorMessage(exc)].filter(Boolean).join(" ");
+      }
     } finally {
-      loading.value = false;
+      if (version === loadVersion) loading.value = false;
     }
   }
 
   async function preview(targetId: string, regex: string): Promise<void> {
     planning.value = true;
     error.value = "";
+    applyError.value = "";
+    applyErrorJobId.value = "";
     plan.value = null;
     try {
       plan.value = await webApi.createTrackingRepairPlan(
@@ -119,10 +134,13 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
     applying.value = true;
     error.value = "";
+    applyError.value = "";
+    applyErrorJobId.value = "";
     const selected = plan.value;
     plan.value = null;
+    let current: ApplyJobResponse | null = null;
     try {
-      let current = await webApi.applyTrackingRepair(
+      current = await webApi.applyTrackingRepair(
         selected,
         await useAuthStore().ensureCsrf(),
       );
@@ -141,16 +159,18 @@ export const useTrackingStore = defineStore("tracking", () => {
       if (current.status === "success") {
         await load();
       } else if (current.status === "failure") {
-        error.value = current.error || "Tracking repair failed. Review the job before retrying.";
+        applyErrorJobId.value = current.job_id;
+        applyError.value = current.error || "Tracking repair failed. Review the job before retrying.";
       }
     } catch (exc) {
-      error.value = rememberedJobId.value
-        ? `Could not check tracking repair job ${rememberedJobId.value}: ${errorMessage(exc)}`
-        : errorMessage(exc);
+      applyErrorJobId.value = current?.job_id ?? "";
+      applyError.value = current
+        ? `Could not check tracking repair job ${current.job_id}: ${errorMessage(exc)}`
+        : `Could not start tracking repair: ${errorMessage(exc)}`;
     } finally {
       applying.value = false;
     }
   }
 
-  return { inventory, plan, job, rememberedJobId, loading, planning, applying, error, load, preview, clearPlan, apply };
+  return { inventory, plan, job, rememberedJobId, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
 });

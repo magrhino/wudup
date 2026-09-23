@@ -125,7 +125,8 @@ scripts, and WebUI pending behavior is API-first.
 The Containers page lists discovered Compose services even when WUD observations
 are unavailable. An unknown WUD status does not mean a service is untracked.
 Select a service to compare its installed tag, current `wud.tag.include` filter,
-and any candidate WUD has observed.
+and any candidate WUD has observed. Inspect also shows the Compose file that
+defines the service, including when its image cannot be resolved.
 
 An exact filter such as `^latest$` watches only that tag; detecting a new image
 published under the same tag depends on WUD digest watching. A version filter
@@ -134,7 +135,8 @@ not automatically broaden a single-number channel such as `16` to `^\d+$`,
 which would also include other major-version tags. The on-page tester checks
 tag names, not registry availability or whether digest watching is configured.
 Changing a filter requires a label-only preview and explicit approval before
-WUDup recreates that service. WUDup coordinates its own Compose writers; do not
+WUDup recreates that service. Repair progress and results stay beside the
+selected service after Apply. WUDup coordinates its own Compose writers; do not
 edit the same Compose file manually while a WUDup rewrite or repair is running.
 
 ## WUD API Authentication

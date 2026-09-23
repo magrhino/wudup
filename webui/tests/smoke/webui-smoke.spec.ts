@@ -151,6 +151,7 @@ function trackedContainersResponse() {
     status: "ready", count: 1, warnings: [], wud_status: wudApiStatus(),
     items: [{
       target_id: "target-bazarr", service_key: "media/bazarr", stack: "media", service: "bazarr",
+      compose_path: "/stacks/media/compose.yml",
       image: `ghcr.io/example/${"long-repository-name-".repeat(6)}:v1.6.0-ls357`,
       current_tag: "v1.6.0-ls357", runtime_state: "running",
       tracking_regex: String.raw`^v1\.6\.0-ls357$`, tracking_health: "frozen",
@@ -1165,27 +1166,84 @@ for (const width of [1280, 815, 390]) {
     const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
     expect(await noOverflow()).toBe(true);
     await inspect.click();
-    const examples = page.getByRole("table", { name: "Illustrative tag matches" });
-    await expect(examples.getByRole("row").filter({ hasText: "v1.6.1-ls357" })).toContainText("Matches");
-    await expect(examples.getByRole("row").filter({ hasText: "Without the suffix" })).toContainText("Excluded");
-    await expect(page.getByRole("textbox", { name: "Tag to test against proposed filter" })).toHaveAttribute("placeholder", "e.g. v1.6.1-ls357");
+    await expect(page.getByText("/stacks/media/compose.yml")).toBeVisible();
+    if (width === 390) {
+      const tapHeights = await page.locator(".tracked-links a, .tracked-links summary")
+        .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+      expect(tapHeights.every((height) => height >= 44)).toBe(true);
+      const previewWidth = await page.getByRole("button", { name: "Preview repair" })
+        .evaluate((element) => element.getBoundingClientRect().width);
+      expect(previewWidth).toBeGreaterThan(250);
+    }
     const detail = page.locator(".tracked-pattern-details");
     await expect(detail).not.toHaveAttribute("open");
     await detail.locator("summary").focus();
     await page.keyboard.press("Enter");
     await expect(detail).toHaveAttribute("open");
+    const examples = page.getByRole("table", { name: "Illustrative tag matches" });
+    await expect(examples.getByRole("row").filter({ hasText: "v1.6.1-ls357" })).toContainText("Matches");
+    await expect(examples.getByRole("row").filter({ hasText: "Without the suffix" })).toContainText("Excluded");
+    await expect(page.getByRole("textbox", { name: "Tag to test against proposed filter" })).toHaveAttribute("placeholder", "e.g. v1.6.1-ls357");
     await expect(detail).toContainText("followed by");
     await page.keyboard.press("Enter");
     await expect(detail).not.toHaveAttribute("open");
     expect(await noOverflow()).toBe(true);
     await page.locator(".tracked-pattern-guide").screenshot({ path: testInfo.outputPath("tracking-examples.png") });
     await page.getByRole("textbox", { name: "Proposed WUD tag regex" }).fill(String.raw`^v1\.6\.\d+-ls357$`);
+    await detail.locator("summary").click();
     await expect(examples.getByRole("row").filter({ hasText: "v2.0.0-ls357" })).toContainText("Excluded");
     await page.getByRole("textbox", { name: "Proposed WUD tag regex" }).fill(`^${"long-fixed-prefix-".repeat(6)}\\d+$`);
     expect(await noOverflow()).toBe(true);
     expect(state.calls.some((call) => call.path === "/api/v1/tracking-repairs/apply")).toBe(false);
   });
 }
+
+test("mobile tracking repair keeps focus and progress beside the service", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = createState({ authenticated: true, mutationsEnabled: true });
+  await installApiFixtures(page, state);
+  const plan = {
+    plan_id: "tracking-plan", source_hash: "source", rendered_hash: "rendered",
+    target_id: "target-bazarr", service_key: "media/bazarr", stack: "media",
+    service: "bazarr", image: "repo/bazarr:v1.6.0-ls357",
+    current_regex: String.raw`^v1\.6\.0-ls357$`,
+    proposed_regex: String.raw`^v\d+\.\d+\.\d+-ls\d+$`,
+    compose_diff: "wud.tag.include:\n- (set) old\n+ (set) new",
+    will_recreate: true, can_apply: true, issues: [],
+  };
+  const trackingJob = (status: string) => ({
+    ...jobResponse(status), job_id: "job-tracking",
+    progress: [{ message: "Recreating bazarr" }],
+  });
+  let finishPoll!: () => void;
+  const pollGate = new Promise<void>((resolve) => { finishPoll = resolve; });
+  await page.route("**/api/v1/tracking-repairs", (route) => json(route, plan));
+  await page.route("**/api/v1/tracking-repairs/apply", (route) => json(route, trackingJob("running")));
+  await page.route("**/api/v1/apply-jobs/job-tracking", async (route) => {
+    await pollGate;
+    await json(route, trackingJob("success"));
+  });
+
+  await page.goto("/#/containers");
+  await page.getByRole("button", { name: "Inspect bazarr" }).click();
+  await page.getByRole("button", { name: "Preview repair" }).click();
+  await page.getByRole("checkbox", { name: /I reviewed the diff/ }).check();
+  await page.getByRole("button", { name: "Apply tracking repair" }).click();
+
+  const status = page.getByLabel("Tracking repair status");
+  try {
+    await expect(status).toBeFocused();
+    await expect(status).toContainText("still running");
+    await expect(page.getByLabel("Tracking repair preview")).toHaveCount(0);
+    await expect.poll(() => status.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top >= 60 && bounds.bottom <= window.innerHeight;
+    })).toBe(true);
+  } finally {
+    finishPoll();
+  }
+  await expect(status).toContainText("Tracking repaired for bazarr");
+});
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`release review at ${viewport.width}px`, () => {

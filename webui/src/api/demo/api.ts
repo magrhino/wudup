@@ -102,6 +102,7 @@ export function createDemoWebApi(): WebApi {
             service_key: item.service_key,
             stack: item.stack,
             service: item.service,
+            compose_path: `${item.directory.replace(/\/$/, "")}/${item.compose_file}`,
             image: item.image,
             current_tag: item.current_tag,
             runtime_state: item.runtime_state,
