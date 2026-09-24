@@ -1452,6 +1452,7 @@ class SecurityScanJobResponse(BaseModel):
 
 class RunVerificationItem(BaseModel):
     line_no: int
+    event_id: int | None = None
     service_key: str = ""
     stack_name: str = ""
     service_name: str = ""
@@ -1471,6 +1472,11 @@ class RunVerificationSummary(BaseModel):
     verified_count: int = 0
     needs_review_count: int = 0
     items: list[RunVerificationItem] = Field(default_factory=list)
+
+
+class RunHistorySummary(RunSummary):
+    verification: RunVerificationSummary = Field(default_factory=RunVerificationSummary)
+    verification_omitted_count: int = 0
 
 
 class RunDetail(RunSummary):

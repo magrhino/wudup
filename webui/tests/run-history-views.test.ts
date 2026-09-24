@@ -222,14 +222,14 @@ describe("RunsView", () => {
 
     const rows = wrapper.findAll('[role="row"]');
     expect(rows[0].text()).toContain("CLI (dry run)");
-    expect(rows[0].text()).toContain("5");
-    expect(rows[0].text()).toContain("alpha, beta, service, +1 more");
-    expect(rows[0].text()).toContain("2026-05-28T12:10:00+00:00");
+    expect(rows[0].text()).toContain("4 services across 3 stacks");
+    expect(rows[0].text()).toContain("Dry run · no changes applied");
+    expect(rows[0].find("time").attributes("title")).toBe("2026-05-28T12:10:00+00:00");
     expect(rows[1].text()).toContain("CLI");
     expect(rows[1].text()).not.toContain("dry run");
     expect(rows[2].text()).toContain("Apply");
     expect(rows[2].text()).toContain("2");
-    expect(rows[2].text()).toContain("api, worker");
+    expect(rows[2].text()).toContain("media · 2 services");
 
     for (const label of [
       "Auto update",
@@ -283,11 +283,11 @@ describe("RunsView", () => {
     expect(wrapper.findAll(".mobile-card")).toHaveLength(2);
     expect(wrapper.text()).toContain("#21 running");
     expect(wrapper.text()).toContain("CLI (dry run)");
-    expect(wrapper.text()).toContain("1 (api)");
-    expect(wrapper.text()).toContain("Running");
+    expect(wrapper.text()).toContain("api · 1.0 → 1.1");
+    expect(wrapper.text()).toContain("Started");
     expect(wrapper.text()).toContain("#22 success");
     expect(wrapper.text()).toContain("Apply");
-    expect(wrapper.text()).toContain("2026-05-28T12:05:00+00:00");
+    expect(wrapper.findAll("time")[1].attributes("title")).toBe("2026-05-28T12:05:00+00:00");
   });
 
   it("renders the mobile empty state when there are no runs", async () => {

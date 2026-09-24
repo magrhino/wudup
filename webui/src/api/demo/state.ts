@@ -1449,7 +1449,10 @@ export class DemoApiState {
   }
 
   runSummaries(): RunSummary[] {
-    return clone(this.runs);
+    return clone(this.runs.map(run => ({
+      ...run,
+      verification: this.runDetails.get(run.id)?.verification ?? null,
+    })));
   }
 
   runDetail(runId: number): RunDetail {
