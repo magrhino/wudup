@@ -247,7 +247,7 @@ test("container sample explains exact tags without implying a WUD outage", async
   await expect(details.getByText("Matches only the tag “latest”", { exact: false })).toBeVisible();
   await expect(details.getByText("This is already the current filter; there is no label change to preview.")).toBeVisible();
   await expect(details.getByRole("button", { name: "Preview repair" })).toBeDisabled();
-  await details.getByRole("textbox", { name: "Tag to test against proposed filter" }).fill("latest-trivy");
+  await details.getByRole("textbox", { name: "Test another tag (optional)", exact: true }).fill("latest-trivy");
   await expect(details.getByText("This tag does not match the proposed filter.")).toBeVisible();
 });
 

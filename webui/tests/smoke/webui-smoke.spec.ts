@@ -1183,7 +1183,7 @@ for (const width of [1280, 815, 390]) {
     const examples = page.getByRole("table", { name: "Illustrative tag matches" });
     await expect(examples.getByRole("row").filter({ hasText: "v1.6.1-ls357" })).toContainText("Matches");
     await expect(examples.getByRole("row").filter({ hasText: "Without the suffix" })).toContainText("Excluded");
-    await expect(page.getByRole("textbox", { name: "Tag to test against proposed filter" })).toHaveAttribute("placeholder", "e.g. v1.6.1-ls357");
+    await expect(page.getByRole("textbox", { name: "Test another tag (optional)", exact: true })).toHaveAttribute("placeholder", "e.g. v1.6.1-ls357");
     await expect(detail).toContainText("followed by");
     await page.keyboard.press("Enter");
     await expect(detail).not.toHaveAttribute("open");

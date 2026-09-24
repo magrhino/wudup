@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { AlertTriangle, RefreshCw, Search } from "@lucide/vue";
+import { AlertTriangle, CircleCheck, RefreshCw, Search } from "@lucide/vue";
 import { NAlert, NButton, NCheckbox, NInput, NSelect, NTag } from "naive-ui";
 import { RouterLink, useRoute } from "vue-router";
 
@@ -83,6 +83,7 @@ const canPreview = computed(() =>
 );
 const sameAsCurrent = computed(() => Boolean(editor.value.trim()) && editor.value.trim() === selected.value?.tracking_regex);
 const patternGuide = computed(() => explainTrackingPattern(editor.value.trim(), selected.value?.current_tag));
+const sampleMatch = computed(() => patternGuide.value?.matches(sampleTag.value) ?? null);
 const samplePlaceholder = computed(() => {
   const example = patternGuide.value?.examples.find((item) => item.matches)?.tag || selected.value?.current_tag;
   return example ? `e.g. ${example}` : "Enter a tag to test";
@@ -304,10 +305,15 @@ async function apply(): Promise<void> {
                 </tr></tbody>
               </table>
               <label for="tracking-tag-sample">Test another tag (optional)</label>
-              <n-input id="tracking-tag-sample" v-model:value="sampleTag" :placeholder="samplePlaceholder" :input-props="{ 'aria-label': 'Tag to test against proposed filter', maxlength: 128 }" />
-              <p v-if="sampleTag" role="status">
-                {{ patternGuide.matches(sampleTag) === null ? "Enter a valid Docker tag (letters, numbers, dots, dashes, or underscores)." : patternGuide.matches(sampleTag) ? "This tag matches the proposed filter." : "This tag does not match the proposed filter." }}
-              </p>
+              <n-input v-model:value="sampleTag" :placeholder="samplePlaceholder" :input-props="{ id: 'tracking-tag-sample', 'aria-describedby': 'tracking-tag-result', maxlength: 128 }" />
+              <div id="tracking-tag-result" role="status" aria-atomic="true">
+                <p v-if="sampleTag" class="tracked-sample-result" :class="sampleMatch === true ? 'is-match' : 'is-warning'">
+                  <CircleCheck v-if="sampleMatch === true" :size="18" aria-hidden="true" />
+                  <AlertTriangle v-else :size="18" aria-hidden="true" />
+                  <strong>{{ sampleMatch === null ? "Enter a valid Docker tag (letters, numbers, dots, dashes, or underscores)." : sampleMatch ? "This tag matches the proposed filter." : "This tag does not match the proposed filter." }}</strong>
+                </p>
+                <span v-else>Enter a tag to check whether it matches. The result updates as you type.</span>
+              </div>
               <small>Only tags already shown by WUD are observed. This check does not fetch repository tags or confirm a tag exists.</small>
             </details>
           </div>
@@ -441,6 +447,10 @@ async function apply(): Promise<void> {
 .tracked-pattern-guide code { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .tracked-pattern-guide small { color: var(--color-muted-text); }
 .tracked-pattern-guide .n-input { width: min(100%, 420px); }
+.tracked-sample-result { display: flex; align-items: flex-start; gap: 8px; margin: 0; }
+.tracked-sample-result svg { flex-shrink: 0; margin-top: 3px; }
+.tracked-sample-result.is-match { color: var(--color-operational-teal); }
+.tracked-sample-result.is-warning { color: var(--color-warning-fg); }
 .tracked-examples { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: var(--text-metadata-size); }
 .tracked-examples caption { padding-bottom: 8px; text-align: left; color: var(--color-muted-text); }
 .tracked-examples th, .tracked-examples td { padding: 6px 0; border-bottom: 1px solid var(--color-border); vertical-align: top; }
