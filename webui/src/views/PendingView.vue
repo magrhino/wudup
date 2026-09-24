@@ -1124,6 +1124,7 @@ onBeforeUnmount(() => {
       :release-notes="updates.releaseNotes?.items ?? []"
       :release-notes-loading="updates.releaseNotesLoading"
       :release-notes-error="updates.releaseNotesError"
+      :security-scans="updates.currentSecurityScanItems"
       :plan-tag-stream-updates="planTagStreamUpdates"
       :plan-metadata-warning="planMetadataWarning"
       :plan-status-label="planStatusLabel"
