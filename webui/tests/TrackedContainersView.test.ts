@@ -116,11 +116,34 @@ describe("TrackedContainersView", () => {
     expect(wrapper.get('.tracked-examples').text()).toContain("latest");
     expect(wrapper.text()).toContain("not fetched from the registry");
 
-    const sample = wrapper.get('input[aria-label="Tag to test against proposed filter"]');
+    const sample = wrapper.get('input#tracking-tag-sample');
+    const result = wrapper.get('#tracking-tag-result');
+    expect(wrapper.get('label[for="tracking-tag-sample"]').text()).toBe("Test another tag (optional)");
+    expect(sample.attributes("aria-label")).toBeUndefined();
+    expect(sample.attributes("aria-describedby")).toBe("tracking-tag-result");
+    expect(result.attributes("role")).toBe("status");
+    expect(result.text()).toContain("The result updates as you type.");
+    // Only input events: no blur, change, preview, or submit is needed.
+    for (const [tag, message, state] of [
+      ["v1.37-rc1", "This tag does not match the proposed filter.", "is-warning"],
+      ["v1.37", "This tag matches the proposed filter.", "is-match"],
+      ["invalid/tag", "Enter a valid Docker tag", "is-warning"],
+    ] as const) {
+      (sample.element as HTMLInputElement).value = tag;
+      await sample.trigger("input");
+      expect(result.text()).toContain(message);
+      expect(result.get('.tracked-sample-result').classes()).toContain(state);
+    }
     await sample.setValue("v1.37");
-    expect(wrapper.text()).toContain("This tag matches the proposed filter.");
-    await sample.setValue("v1.37-rc1");
-    expect(wrapper.text()).toContain("This tag does not match the proposed filter.");
+    const proposedFilter = wrapper.get('input[aria-label="Proposed WUD tag regex"]');
+    await proposedFilter.setValue(String.raw`^v1\.36\.\d+$`);
+    expect(result.text()).toContain("This tag does not match the proposed filter.");
+    await proposedFilter.setValue(item.suggested_regex);
+    expect(result.text()).toContain("This tag matches the proposed filter.");
+    await sample.setValue("");
+    expect(result.text()).toContain("The result updates as you type.");
+    expect(result.find('.tracked-sample-result').exists()).toBe(false);
+    expect(preview).not.toHaveBeenCalled();
 
     tracking.inventory.items[0] = {
       ...item,
