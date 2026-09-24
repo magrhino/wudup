@@ -504,7 +504,8 @@ describe("pending view fallback and release notes", () => {
     expect(dialog.text()).toContain(
       "Check your WUD configuration, then run a successful WUD scan.",
     );
-    expect(dialog.text()).toContain("Plan issues0");
+    expect(dialog.find('[aria-label="Planned changes summary"]').text()).toContain("app · 1.0 → 1.1");
+    expect(dialog.text()).not.toContain("0 plan issues");
   });
 
   it("falls back to pending file order when grouping is unavailable", () => {

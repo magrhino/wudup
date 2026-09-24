@@ -27,9 +27,20 @@ def verification_from_run_records(
     """Build per-line verification from persisted audit rows."""
 
     event_list = list(events)
+    updates = list(pending_updates)
+    matched_events = [_matching_event(update, event_list) for update in updates]
+    identities_by_event: dict[int, set[tuple[str, str]]] = {}
+    for update, event in zip(updates, matched_events):
+        if event is not None:
+            identities_by_event.setdefault(id(event), set()).add(
+                (update.stack_name, update.service_name or update.image)
+            )
     items = [
-        _verification_item(update, _matching_event(update, event_list))
-        for update in pending_updates
+        _verification_item(
+            update,
+            event if event is not None and len(identities_by_event[id(event)]) == 1 else None,
+        )
+        for update, event in zip(updates, matched_events)
     ]
     needs_review_count = sum(1 for item in items if item.follow_up_needed)
     return RunVerificationSummary(
@@ -55,9 +66,10 @@ def _verification_item(
         health_status,
         wud_status,
     )
-    target_image = event.target_image if event and event.target_image else update.image
+    target_image = event.target_image if event else ""
     return RunVerificationItem(
         line_no=update.line_no,
+        event_id=event.id if event else None,
         service_key=update.service_key,
         stack_name=update.stack_name,
         service_name=update.service_name,
@@ -82,6 +94,12 @@ def _matching_event(
     update: PendingUpdateRecord,
     events: list[RunEventRecord],
 ) -> RunEventRecord | None:
+    # Legacy rows may omit identity fields, but known identities must never conflict.
+    events = [
+        event for event in events
+        if not (update.stack_name and event.stack_name and update.stack_name != event.stack_name)
+        and not (update.service_name and event.service_name and update.service_name != event.service_name)
+    ]
     for event in events:
         if (
             event.stack_name
@@ -90,13 +108,11 @@ def _matching_event(
             and event.service_name == update.service_name
         ):
             return event
-    for event in events:
-        if event.service_name and event.service_name == update.service_name:
-            return event
-    for event in events:
-        if event.image and event.image == update.image:
-            return event
-    return None
+    matches = [event for event in events if event.service_name and event.service_name == update.service_name]
+    if matches:
+        return matches[0] if len(matches) == 1 else None
+    matches = [event for event in events if event.image and event.image == update.image]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _image_status(

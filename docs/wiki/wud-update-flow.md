@@ -58,7 +58,18 @@ On Pending, select stack updates, then choose **Review selected**. The review
 bar stays available while scrolling and shows the eligible update count. Each
 stack also has a **Review … plan** action. Review changes nothing; **Apply** stays
 inside the plan dialog, subject to read-only mode, readiness and fresh-plan checks.
-The dialog scrolls its contents separately from Close and Apply.
+The dialog scrolls its contents separately from Close and Apply. The plan summary
+shows the proposed image transition for one service, or service and stack totals
+for larger selections. Expand **Inspect image change** (or **Inspect all service
+changes**) to compare exact references grouped by stack.
+
+Run detail leads with the same service/stack scope and separate image and health
+evidence. History reuses a compact result with relative time; hover the time for
+the exact timestamp, or open **Exact timestamps** in run detail with touch or
+keyboard to see the recorded start and finish times. Failed, skipped, and missing checks remain explicit, and
+command success alone does not imply verification. Dry runs are labeled as
+unapplied plans. The run list includes the same recorded verification as run
+detail, without initiating new Docker or health checks.
 
 **Queue details and actions** explains count scopes and contains rescans and
 selected-entry removal. Search narrows the visible queue; hidden selections still

@@ -694,7 +694,11 @@ def _fixture_payload(context: SimpleNamespace) -> dict[str, Any]:
     request = context.request
     settings = context.settings
     retag_targets = _dump(web_retags.retag_targets_response(settings))
-    runs = [_normalize_run_record(_dump(run)) for run in web_runs.api_runs(request)]
+    # The static adapter reuses verification from the retained run-detail fixtures.
+    runs = [
+        _normalize_run_record(run.model_dump(mode="json", exclude={"verification"}))
+        for run in web_runs.api_runs(request)
+    ]
     cached_doctor = web_diagnostics.web_doctor_result(settings, request)
     original_web_doctor_result = web_diagnostics.web_doctor_result
     web_diagnostics.web_doctor_result = lambda *_args, **_kwargs: cached_doctor
@@ -953,6 +957,9 @@ def _normalize_run_record(run: dict[str, Any]) -> dict[str, Any]:
     for pending in run.get("pending_updates", []):
         pending["created_at"] = started_at
         pending["updated_at"] = finished_at
+    # Keep the retained fixtures compatible with APIs predating event correlation.
+    for item in run.get("verification", {}).get("items", []):
+        item.pop("event_id", None)
     return run
 
 

@@ -553,7 +553,7 @@ def create_app(
         "/runs",
         web_runs.api_runs,
         methods=["GET"],
-        response_model=list[web_models.RunSummary],
+        response_model=list[web_models.RunHistorySummary],
     )
     router.add_api_route(
         "/runs/{run_id}",

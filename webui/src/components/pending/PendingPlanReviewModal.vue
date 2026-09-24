@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { AlertTriangle, Check, CheckCircle2, Play, Trash2, XCircle } from "@lucide/vue";
 import { NAlert, NButton, NTag } from "naive-ui";
+import { computed } from "vue";
+import UpdateScopeSummary from "../UpdateScopeSummary.vue";
+import { planChanges } from "../../utils/updateSummary";
 
 import type {
   ApplyPreflightCheck,
@@ -36,7 +39,6 @@ import { tagStreamLabelApprovalIssueKey } from "../../views/pending/usePendingPl
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
 import PreflightFooterActions from "../preflight/PreflightFooterActions.vue";
-import PreflightMetricsGrid from "../preflight/PreflightMetricsGrid.vue";
 import PreflightModalShell from "../preflight/PreflightModalShell.vue";
 import PreflightNoticeList from "../preflight/PreflightNoticeList.vue";
 
@@ -109,6 +111,8 @@ const emit = defineEmits<{
   (event: "open-cleanup"): void;
 }>();
 
+const changes = computed(() => planChanges(props.plan));
+
 function releaseNoteProps(lineNo: number) {
   const note = props.releaseNotes.find((item) => item.line_no === lineNo) ?? null;
   const lookupError = note ? "" : props.releaseNotesError;
@@ -146,19 +150,19 @@ function tagStreamRulePreview(issue: PlanIssue): string {
     title-id="preflight-modal-title"
     :title="preflightTitle"
     :summary="preflightSummary"
-    :impact-label="preflightServiceImpactLabel"
     :status-label="planStatusLabel === preflightTitle ? '' : planStatusLabel"
     :status-type="planAlertType"
     @close="emit('close')"
   >
-    <PreflightMetricsGrid
-      :items="[
-        { label: 'Targets', value: plan.summary.target_count },
-        { label: 'Matched', value: plan.summary.matched_target_count },
-        { label: 'Stacks', value: plan.summary.stack_count },
-        { label: 'Plan issues', value: plan.summary.issue_count },
-      ]"
-    />
+    <section class="preflight-block" aria-label="Planned changes summary">
+      <UpdateScopeSummary :changes="changes" fallback="No matched image changes" />
+      <p v-if="preflightServiceImpactLabel" class="preflight-summary-text">Service impact: <span class="preflight-impact-text">{{ preflightServiceImpactLabel }}</span></p>
+      <p class="preflight-summary-text">Review only. Nothing has been applied.</p>
+      <p v-if="plan.summary.issue_count || plan.summary.skipped_count" class="preflight-summary-text">
+        {{ pluralize(plan.summary.issue_count, 'plan issue') }} ·
+        {{ plan.summary.skipped_count }} skipped. Review the details below before applying.
+      </p>
+    </section>
 
       <section
         v-if="applyPreflight"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi import HTTPException
 from tests.web_test_helpers import (
     _client,
@@ -164,6 +165,8 @@ def test_runs_endpoints_read_existing_sqlite_state(tmp_path: Path) -> None:
     assert detail["pending_updates"][0]["image"] == "nginx:1.25"
     assert detail["events"][0]["service_name"] == "web"
     assert detail["verification"] == EMPTY_VERIFICATION
+    listed = client.get("/api/v1/runs").json()
+    assert next(run for run in listed if run["id"] == detail["id"])["verification"] == EMPTY_VERIFICATION
 
 
 def test_run_detail_derives_persistent_verification_summary(tmp_path: Path) -> None:
@@ -272,6 +275,8 @@ def test_run_detail_derives_persistent_verification_summary(tmp_path: Path) -> N
 
     assert response.status_code == 200
     verification = response.json()["verification"]
+    listed = client.get("/api/v1/runs").json()
+    assert next(run for run in listed if run["id"] == run_id)["verification"] == verification
     assert verification["status"] == "needs_review"
     assert verification["total_count"] == 6
     assert verification["verified_count"] == 2
@@ -291,6 +296,115 @@ def test_run_detail_derives_persistent_verification_summary(tmp_path: Path) -> N
     assert items[4]["health_status"] == "service_disappeared"
     assert items[5]["wud_status"] == "stale_removed"
     assert items[6]["wud_status"] == "restored"
+
+
+@pytest.mark.parametrize(
+    ("pending_stack", "pending_service", "event_identities", "expected_health", "sibling_stack"),
+    [
+        ("media", "db", [("home", "db")], "unknown", ""),
+        ("media", "db", [("home", "other")], "unknown", ""),
+        ("media", "db", [("media", "other")], "unknown", ""),
+        ("media", "db", [("home", "db"), ("media", "db")], "passed", ""),
+        ("media", "db", [("", "db")], "passed", ""),
+        ("media", "db", [("", "")], "passed", ""),
+        ("", "db", [("home", "db"), ("media", "db")], "unknown", ""),
+        ("", "", [("home", "db"), ("media", "other")], "unknown", ""),
+        ("home", "db", [("", "db")], "unknown", "media"),
+        ("home", "db", [("", "")], "unknown", "media"),
+        ("home", "db", [("", "db")], "passed", "home"),
+    ],
+)
+def test_run_verification_keeps_evidence_with_its_service(
+    tmp_path: Path,
+    pending_stack: str,
+    pending_service: str,
+    event_identities: list[tuple[str, str]],
+    expected_health: str,
+    sibling_stack: str,
+) -> None:
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        init_db(conn)
+        run_id = insert_update_run(
+            conn,
+            started_at="2026-05-27T12:00:00+00:00",
+            status="success",
+            dry_run=False,
+            mode="stop",
+            wud_file="/out/images.todo",
+            log_file="",
+        )
+        insert_pending_update(
+            conn, run_id=run_id, line_no=1, raw="postgres:16", image="postgres:16",
+            stack_name=pending_stack, service_name=pending_service,
+            status="resolved", status_reason="updated",
+        )
+        if sibling_stack:
+            insert_pending_update(
+                conn, run_id=run_id, line_no=2, raw="postgres:16", image="postgres:16",
+                stack_name=sibling_stack, service_name=pending_service,
+                status="resolved", status_reason="updated",
+            )
+        for stack, service in event_identities:
+            insert_update_event(
+                conn, run_id=run_id, stack_name=stack, service_name=service,
+                image="postgres:16", target_image="postgres:17", status="success",
+                metadata_json='{"reason":"updated"}',
+            )
+
+    detail_response = client.get(f"/api/v1/runs/{run_id}")
+    history_response = client.get("/api/v1/runs")
+    assert detail_response.status_code == history_response.status_code == 200
+    verification = detail_response.json()["verification"]
+    assert history_response.json()[0]["verification"] == verification
+    assert all(item["health_status"] == expected_health for item in verification["items"])
+    item = verification["items"][0]
+    assert item["health_status"] == expected_health
+    if expected_health == "passed":
+        matched_event = next(event for event in detail_response.json()["events"] if event["id"] == item["event_id"])
+        assert matched_event["stack_name"] in ("", pending_stack)
+        assert matched_event["service_name"] in ("", pending_service)
+    else:
+        assert item["event_id"] is None
+    assert item["image_status"] == ("new_image_running" if expected_health == "passed" else "unknown")
+    assert item["target_image"] == ("postgres:17" if expected_health == "passed" else "")
+    assert item["follow_up_needed"] is (expected_health == "unknown")
+
+
+@pytest.mark.parametrize("record_empty_target_event", [False, True])
+def test_run_verification_leaves_unrecorded_target_unknown(
+    tmp_path: Path,
+    record_empty_target_event: bool,
+) -> None:
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        init_db(conn)
+        run_id = insert_update_run(
+            conn, started_at="2026-05-27T12:00:00+00:00", status="failure",
+            dry_run=False, mode="stop", wud_file="/out/images.todo", log_file="",
+        )
+        insert_pending_update(
+            conn, run_id=run_id, line_no=1,
+            raw="repo/app:1.0 tag=1.1", image="repo/app:1.0", desired_tag="1.1",
+            target_digest="sha256:requested", stack_name="home", service_name="app",
+            status="failed", status_reason="preflight-failed",
+        )
+        if record_empty_target_event:
+            insert_update_event(
+                conn, run_id=run_id, stack_name="home", service_name="app",
+                image="repo/app:1.0", target_image="", status="failure",
+            )
+
+    detail_response = client.get(f"/api/v1/runs/{run_id}")
+    history_response = client.get("/api/v1/runs")
+    assert detail_response.status_code == history_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["pending_updates"][0]["desired_tag"] == "1.1"
+    assert detail["pending_updates"][0]["target_digest"] == "sha256:requested"
+    assert history_response.json()[0]["verification"] == detail["verification"]
+    item = detail["verification"]["items"][0]
+    assert item["image"] == "repo/app:1.0"
+    assert item["target_image"] == ""
 
 
 def test_run_detail_skips_verification_for_non_updater_audit_modes(
@@ -336,6 +450,8 @@ def test_run_detail_skips_verification_for_non_updater_audit_modes(
     detail = response.json()
     assert detail["mode"] == "web-pending-cleanup"
     assert detail["verification"] == EMPTY_VERIFICATION
+    listed = client.get("/api/v1/runs").json()
+    assert next(run for run in listed if run["id"] == detail["id"])["verification"] == EMPTY_VERIFICATION
 
 
 def test_runs_endpoints_serialize_digest_provenance(tmp_path: Path) -> None:

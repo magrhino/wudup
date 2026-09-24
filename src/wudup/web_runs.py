@@ -27,6 +27,7 @@ from .web_models import (
     PendingUpdateRecord,
     RunDetail,
     RunEventRecord,
+    RunHistorySummary,
     RunLogResponse,
     RunSummary,
     RunVerificationSummary,
@@ -44,7 +45,7 @@ DEFAULT_LOG_TAIL_BYTES = 262_144
 MAX_LOG_TAIL_BYTES = 1_048_576
 
 
-def api_runs(request: Request) -> list[RunSummary]:
+def api_runs(request: Request) -> list[RunHistorySummary]:
     settings = _settings(request)
     try:
         with closing(_connect_readonly_db(settings)) as conn:
@@ -60,6 +61,7 @@ def api_runs(request: Request) -> list[RunSummary]:
 
             run_ids = [row["id"] for row in rows]
             events_by_run: dict[int, list[RunEventRecord]] = {}
+            pending_by_run: dict[int, list[PendingUpdateRecord]] = {}
             if run_ids:
                 placeholders = ",".join("?" for _ in run_ids)
                 event_rows = conn.execute(
@@ -74,6 +76,17 @@ def api_runs(request: Request) -> list[RunSummary]:
                 for e in event_rows:
                     event = _event_from_row(e)
                     events_by_run.setdefault(event.run_id, []).append(event)
+                pending_rows = conn.execute(
+                    f"""
+                    SELECT * FROM pending_updates
+                    WHERE run_id IN ({placeholders})
+                    ORDER BY line_no, id
+                    """,
+                    tuple(run_ids),
+                ).fetchall()
+                for pending_row in pending_rows:
+                    pending = _pending_update_from_row(pending_row)
+                    pending_by_run.setdefault(pending.run_id, []).append(pending)
     except ReadOnlyDatabaseMissing:
         return []
     except (OSError, sqlite3.Error, DatabaseError) as exc:
@@ -81,13 +94,17 @@ def api_runs(request: Request) -> list[RunSummary]:
             status_code=500,
             detail=_safe_exception_detail(settings, "could not read database", exc),
         ) from exc
-    return [
-        _sanitize_run_summary(
-            settings,
-            _run_summary_from_row(row, events=events_by_run.get(row["id"], [])),
-        )
-        for row in rows
-    ]
+    summaries = []
+    for row in rows:
+        events = events_by_run.get(row["id"], [])
+        summary = _run_summary_from_row(row, events=events)
+        summaries.append(RunHistorySummary(
+            **_sanitize_run_summary(settings, summary).model_dump(),
+            verification=_verification_for_run(
+                summary, pending_by_run.get(row["id"], []), events,
+            ),
+        ))
+    return summaries
 
 
 def api_run_detail(run_id: int, request: Request) -> RunDetail:

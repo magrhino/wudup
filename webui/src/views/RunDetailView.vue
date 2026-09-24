@@ -2,11 +2,12 @@
 import { computed, onMounted, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { FileText } from "@lucide/vue";
-import { NAlert, NEmpty, NGi, NGrid } from "naive-ui";
+import { NAlert, NEmpty } from "naive-ui";
 
 import type { RunEventRecord } from "../api/client";
 import { useRouteRefresh } from "../components/app/routeRefresh";
 import RunVerificationPanel from "../components/RunVerificationPanel.vue";
+import RunResultSummary from "../components/RunResultSummary.vue";
 import RunRollbackPlanPanel from "../components/RunRollbackPlanPanel.vue";
 import { useRunsStore } from "../stores/runs";
 import {
@@ -74,11 +75,9 @@ function shortEventDigest(value: string): string {
       {{ runs.error }}
     </n-alert>
 
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Run detail</p>
-        <h2>#{{ runId }}</h2>
-      </div>
+    <div class="section-heading run-result-heading">
+      <RunResultSummary v-if="run" :run="run" />
+      <h2 v-else>Run #{{ runId }}</h2>
       <RouterLink v-if="run?.log_file" :to="`/runs/${runId}/log`" class="icon-link">
         <FileText :size="17" />
         View log
@@ -86,32 +85,9 @@ function shortEventDigest(value: string): string {
     </div>
 
     <div v-if="run" class="content-stack">
-      <n-grid responsive="self" cols="1 560:2 920:4" :x-gap="12" :y-gap="12">
-        <n-gi>
-          <article class="metric-card">
-            <span>Status</span>
-            <strong>{{ run.status }}</strong>
-          </article>
-        </n-gi>
-        <n-gi>
-          <article class="metric-card">
-            <span>Mode</span>
-            <strong>{{ run.mode }}</strong>
-          </article>
-        </n-gi>
-        <n-gi>
-          <article class="metric-card">
-            <span>Dry run</span>
-            <strong>{{ run.dry_run ? "Yes" : "No" }}</strong>
-          </article>
-        </n-gi>
-        <n-gi>
-          <article class="metric-card">
-            <span>Updates</span>
-            <strong>{{ run.pending_updates.length }}</strong>
-          </article>
-        </n-gi>
-      </n-grid>
+      <p class="run-context">
+        Status: {{ run.status }} · Mode: {{ run.mode }} · Dry run: {{ run.dry_run ? "Yes" : "No" }} · Updates: {{ run.pending_updates.length }}
+      </p>
 
       <RunVerificationPanel
         :verification="run.verification"
@@ -197,6 +173,10 @@ function shortEventDigest(value: string): string {
 </template>
 
 <style scoped>
+.run-result-heading { align-items: flex-start; }
+.run-result-heading > .run-result-summary { flex: 1; border-top: 0; padding-top: 0; }
+.run-result-heading > .icon-link { flex-shrink: 0; }
+.run-context { margin: 0; color: var(--color-muted-text); font-size: var(--text-metadata-size); }
 .run-metadata-block {
   min-height: 0;
   max-height: 18rem;

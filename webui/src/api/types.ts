@@ -1267,6 +1267,7 @@ export interface RunSummary {
   log_file: string;
   metadata: Record<string, unknown>;
   events: RunEventRecord[];
+  verification?: RunVerificationSummary | null;
 }
 
 export interface PendingUpdateRecord {
@@ -1315,6 +1316,7 @@ export type RunVerificationWudStatus =
 
 export interface RunVerificationItem {
   line_no: number;
+  event_id?: number | null;
   service_key: string;
   stack_name: string;
   service_name: string;
