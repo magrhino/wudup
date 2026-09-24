@@ -1268,6 +1268,7 @@ export interface RunSummary {
   metadata: Record<string, unknown>;
   events: RunEventRecord[];
   verification?: RunVerificationSummary | null;
+  verification_omitted_count?: number;
 }
 
 export interface PendingUpdateRecord {

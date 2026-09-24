@@ -21,7 +21,7 @@ function isImageUpdate(run: RunSummary): boolean {
 }
 
 export function runChanges(run: RunSummary): ImageChange[] {
-  if (!isImageUpdate(run)) return [];
+  if (!isImageUpdate(run) || run.verification_omitted_count) return [];
   const items = run.verification?.items ?? [];
   const matchedItems = new Map(items.filter(item => item.event_id != null).map(item => [item.event_id, item]));
   const eventIds = new Set(run.events.map(event => event.id));
@@ -43,9 +43,12 @@ function imageParts(image: string): { repo: string; version: string } {
   const [reference = "", digest] = image.split("@");
   const colon = reference.lastIndexOf(":");
   const tagged = colon > reference.lastIndexOf("/");
+  let version = "tag not recorded";
+  if (digest) version = displayDigest(digest);
+  else if (tagged) version = reference.slice(colon + 1);
   return {
     repo: tagged ? reference.slice(0, colon) : reference,
-    version: digest ? displayDigest(digest) : tagged ? reference.slice(colon + 1) : "tag not recorded",
+    version,
   };
 }
 
@@ -100,10 +103,33 @@ function verificationGroups(run: RunSummary): (RunVerificationItem | null)[][] {
   return [...groups.values()];
 }
 
+function attentionText(label: string, total: number, failed: number, unknown: number): string {
+  if (total === 1) return `${label} needs attention`;
+  let text = `${label} needs attention · ${failed}/${total}`;
+  if (unknown) text += ` · ${unknown} unknown`;
+  return text;
+}
+
+function imageSignal(total: number, known: number, failed: number): ResultSignal {
+  if (failed) return { text: attentionText("Image", total, failed, total - known - failed), tone: "warning" };
+  if (known === total) return { text: total === 1 ? "Image verified" : `Images verified · ${known}/${total}`, tone: "success" };
+  return { text: `Image evidence incomplete · ${known}/${total} verified`, tone: "warning" };
+}
+
+function healthSignal(total: number, passed: number, failed: number, skipped: number, skippedEvidence: number): ResultSignal {
+  const skippedSuffix = skippedEvidence ? ` · ${skippedEvidence} skipped` : "";
+  if (failed) return { text: attentionText("Health", total, failed, total - passed - failed - skipped) + skippedSuffix, tone: "warning" };
+  if (passed === total) return { text: "Health checks passed", tone: "success" };
+  if (skipped === total) return { text: "Health checks skipped", tone: "default" };
+  if (passed + skipped === total) return { text: `Health checks · ${passed} passed · ${skipped} skipped`, tone: "default" };
+  return { text: `Health evidence incomplete · ${passed}/${total} passed${skippedSuffix}`, tone: "warning" };
+}
+
 export function resultSignals(run: RunSummary): ResultSignal[] {
   if (!isImageUpdate(run)) return [{ text: `Action ${run.status}`, tone: run.status === "success" ? "default" : "warning" }];
   if (run.dry_run) return [{ text: "Dry run · no changes applied", tone: "default" }];
   if (!run.finished_at) return [{ text: "Run in progress · verification pending", tone: "default" }];
+  if (run.verification_omitted_count) return [{ text: `${run.verification_omitted_count} update records · open run for verification`, tone: "warning" }];
   const items = run.verification?.items ?? [];
   if (!items.length) return [{ text: "Verification not recorded", tone: "default" }];
   const groups = verificationGroups(run);
@@ -114,25 +140,10 @@ export function resultSignals(run: RunSummary): ResultSignal[] {
   const healthFailed = groups.filter(group => group.some(item => item && ["failed", "timed_out", "service_disappeared"].includes(item.health_status))).length;
   const healthSkipped = groups.filter(group => group.some(item => item?.health_status === "skipped")
     && group.every(item => item && ["passed", "skipped"].includes(item.health_status))).length;
-  const imageUnknown = total - imageKnown - imageFailed;
-  const healthUnknown = total - healthPassed - healthFailed - healthSkipped;
   const skippedEvidence = groups.filter(group => group.some(item => item?.health_status === "skipped")).length;
-  const skippedSuffix = skippedEvidence ? ` · ${skippedEvidence} skipped` : "";
   const signals: ResultSignal[] = [
-    {
-      text: imageFailed ? (total === 1 ? "Image needs attention" : `Image needs attention · ${imageFailed}/${total}${imageUnknown ? ` · ${imageUnknown} unknown` : ''}`)
-        : imageKnown === total ? (total === 1 ? "Image verified" : `Images verified · ${imageKnown}/${total}`)
-        : `Image evidence incomplete · ${imageKnown}/${total} verified`,
-      tone: imageKnown === total ? "success" : "warning",
-    },
-    {
-      text: healthFailed ? `${total === 1 ? "Health needs attention" : `Health needs attention · ${healthFailed}/${total}${healthUnknown ? ` · ${healthUnknown} unknown` : ''}`}${skippedSuffix}`
-        : healthPassed === total ? "Health checks passed"
-        : healthSkipped === total ? "Health checks skipped"
-        : healthPassed + healthSkipped === total ? `Health checks · ${healthPassed} passed · ${healthSkipped} skipped`
-        : `Health evidence incomplete · ${healthPassed}/${total} passed${skippedSuffix}`,
-      tone: healthPassed === total ? "success" : healthPassed + healthSkipped === total ? "default" : "warning",
-    },
+    imageSignal(total, imageKnown, imageFailed),
+    healthSignal(total, healthPassed, healthFailed, healthSkipped, skippedEvidence),
   ];
   if (items.some(item => item.follow_up_needed)) signals.push({ text: "Follow-up needed", tone: "warning" });
   return signals;

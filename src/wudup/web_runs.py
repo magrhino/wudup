@@ -41,6 +41,7 @@ from .web_request_context import request_settings as _settings
 from .web_run_verification import verification_from_run_records
 
 DEFAULT_RUN_LIMIT = 50
+MAX_HISTORY_VERIFICATION_ITEMS = 200
 DEFAULT_LOG_TAIL_BYTES = 262_144
 MAX_LOG_TAIL_BYTES = 1_048_576
 
@@ -61,7 +62,6 @@ def api_runs(request: Request) -> list[RunHistorySummary]:
 
             run_ids = [row["id"] for row in rows]
             events_by_run: dict[int, list[RunEventRecord]] = {}
-            pending_by_run: dict[int, list[PendingUpdateRecord]] = {}
             if run_ids:
                 placeholders = ",".join("?" for _ in run_ids)
                 event_rows = conn.execute(
@@ -76,17 +76,7 @@ def api_runs(request: Request) -> list[RunHistorySummary]:
                 for e in event_rows:
                     event = _event_from_row(e)
                     events_by_run.setdefault(event.run_id, []).append(event)
-                pending_rows = conn.execute(
-                    f"""
-                    SELECT * FROM pending_updates
-                    WHERE run_id IN ({placeholders})
-                    ORDER BY line_no, id
-                    """,
-                    tuple(run_ids),
-                ).fetchall()
-                for pending_row in pending_rows:
-                    pending = _pending_update_from_row(pending_row)
-                    pending_by_run.setdefault(pending.run_id, []).append(pending)
+            pending_counts, pending_by_run = _history_pending_updates(conn, rows)
     except ReadOnlyDatabaseMissing:
         return []
     except (OSError, sqlite3.Error, DatabaseError) as exc:
@@ -98,13 +88,55 @@ def api_runs(request: Request) -> list[RunHistorySummary]:
     for row in rows:
         events = events_by_run.get(row["id"], [])
         summary = _run_summary_from_row(row, events=events)
+        pending_count = pending_counts.get(row["id"], 0)
+        omitted_count = 0
+        if pending_count > MAX_HISTORY_VERIFICATION_ITEMS:
+            # Never derive success from a subset: omitted identities may make legacy matches ambiguous.
+            omitted_count = pending_count
+            verification = RunVerificationSummary(
+                status="needs_review", total_count=pending_count, needs_review_count=pending_count,
+            )
+        else:
+            verification = _verification_for_run(summary, pending_by_run.get(row["id"], []), events)
         summaries.append(RunHistorySummary(
             **_sanitize_run_summary(settings, summary).model_dump(),
-            verification=_verification_for_run(
-                summary, pending_by_run.get(row["id"], []), events,
-            ),
+            verification=verification,
+            verification_omitted_count=omitted_count,
         ))
     return summaries
+
+
+def _history_pending_updates(
+    conn: sqlite3.Connection, rows: list[sqlite3.Row],
+) -> tuple[dict[int, int], dict[int, list[PendingUpdateRecord]]]:
+    run_ids = [row["id"] for row in rows if not row["dry_run"] and row["mode"] in VALID_UPDATE_MODES]
+    pending_by_run: dict[int, list[PendingUpdateRecord]] = {}
+    if not run_ids:
+        return {}, pending_by_run
+    placeholders = ",".join("?" for _ in run_ids)
+    # Count and read in one statement so a growing run cannot exceed the cap between queries.
+    pending_rows = conn.execute(
+        f"""
+        WITH counts AS (
+            SELECT run_id, COUNT(*) AS total FROM pending_updates
+            WHERE run_id IN ({placeholders})
+            GROUP BY run_id
+        )
+        SELECT counts.run_id AS counted_run_id, counts.total, pending.*
+        FROM counts
+        LEFT JOIN pending_updates AS pending
+            ON pending.run_id = counts.run_id AND counts.total <= ?
+        ORDER BY counts.run_id, pending.line_no, pending.id
+        """,
+        (*run_ids, MAX_HISTORY_VERIFICATION_ITEMS),
+    ).fetchall()
+    pending_counts: dict[int, int] = {}
+    for row in pending_rows:
+        pending_counts[row["counted_run_id"]] = row["total"]
+        if row["id"] is not None:
+            pending = _pending_update_from_row(row)
+            pending_by_run.setdefault(pending.run_id, []).append(pending)
+    return pending_counts, pending_by_run
 
 
 def api_run_detail(run_id: int, request: Request) -> RunDetail:

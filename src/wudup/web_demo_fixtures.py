@@ -694,9 +694,9 @@ def _fixture_payload(context: SimpleNamespace) -> dict[str, Any]:
     request = context.request
     settings = context.settings
     retag_targets = _dump(web_retags.retag_targets_response(settings))
-    # The static adapter reuses verification from the retained run-detail fixtures.
+    # The static adapter reuses complete verification from the retained run-detail fixtures.
     runs = [
-        _normalize_run_record(run.model_dump(mode="json", exclude={"verification"}))
+        _normalize_run_record(run.model_dump(mode="json", exclude={"verification", "verification_omitted_count"}))
         for run in web_runs.api_runs(request)
     ]
     cached_doctor = web_diagnostics.web_doctor_result(settings, request)

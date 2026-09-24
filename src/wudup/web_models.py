@@ -1476,6 +1476,7 @@ class RunVerificationSummary(BaseModel):
 
 class RunHistorySummary(RunSummary):
     verification: RunVerificationSummary = Field(default_factory=RunVerificationSummary)
+    verification_omitted_count: int = 0
 
 
 class RunDetail(RunSummary):

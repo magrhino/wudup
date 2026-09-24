@@ -203,6 +203,20 @@ describe("update summaries", () => {
     compact.unmount();
   });
 
+  it("keeps omitted History evidence explicit without claiming a partial scope was verified", () => {
+    const value = run();
+    value.verification_omitted_count = 10000;
+    // Even affirmative evidence supplied by an older cache cannot override the omission marker.
+    expect(runChanges(value)).toEqual([]);
+    expect(resultSignals(value)).toEqual([{ text: "10000 update records · open run for verification", tone: "warning" }]);
+    const wrapper = mountWithApp({ components: { RunResultSummary }, setup: () => ({ value }), template: '<RunResultSummary :run="value" compact />' });
+    expect(wrapper.get(".scope-title").text()).toContain(`Run #${value.id}`);
+    expect(wrapper.text()).toContain("10000 update records");
+    expect(wrapper.text()).not.toContain("Image verified");
+    expect(wrapper.text()).not.toContain("Health checks passed");
+    wrapper.unmount();
+  });
+
   it("exposes exact start and finish times in a native run-detail disclosure", () => {
     const value = run();
     const wrapper = mountWithApp({ components: { RunResultSummary }, setup: () => ({ value }), template: '<RunResultSummary :run="value" />' });

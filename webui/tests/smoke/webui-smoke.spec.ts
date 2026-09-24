@@ -933,7 +933,12 @@ test("mutation-enabled pending flow applies and links to run details", async ({
   ).toBe(true);
 
   await applyPanel.getByRole("link", { name: "Details" }).click();
-  await expect(page.getByRole("heading", { name: "#7" })).toBeVisible();
+  await expect(page).toHaveURL(/#\/runs\/7$/);
+  const resultSummary = page.getByRole("region", { name: "Update result summary" });
+  await expect(resultSummary.getByRole("heading", { name: "app · 1.0 → 1.1" })).toBeVisible();
+  await expect(resultSummary.getByText("Recorded image targets · Run #7")).toBeVisible();
+  await expect(resultSummary.getByText("Image verified", { exact: true })).toBeVisible();
+  await expect(resultSummary.getByText("Health checks passed", { exact: true })).toBeVisible();
   await expect(page.getByText("Pending records")).toBeVisible();
 
   await page.getByRole("link", { name: "View log" }).click();

@@ -154,6 +154,8 @@ def _health_status(event: RunEventRecord | None) -> RunVerificationHealthStatus:
         if reason == "already-current":
             return "skipped"
         if reason == "updated":
+            if _event_metadata_string(event, "runtime_state_after") == "not-running":
+                return "skipped"
             return "passed"
         return "unknown"
     if reason == "health-failed":

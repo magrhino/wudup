@@ -371,6 +371,80 @@ def test_run_verification_keeps_evidence_with_its_service(
     assert item["follow_up_needed"] is (expected_health == "unknown")
 
 
+@pytest.mark.parametrize("runtime_after,expected_health", [("not-running", "skipped"), ("running", "passed"), ("", "passed")])
+def test_run_verification_preserves_stopped_service_health_evidence(
+    tmp_path: Path, runtime_after: str, expected_health: str,
+) -> None:
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        init_db(conn)
+        run_id = insert_update_run(conn, status="success", dry_run=False, mode="stop", wud_file="", log_file="")
+        for line_no, service in enumerate(("stopped", "running"), start=1):
+            insert_pending_update(
+                conn, run_id=run_id, line_no=line_no, raw="app:1", image="app:1",
+                stack_name="home", service_name=service, status="resolved", status_reason="updated",
+            )
+            metadata = {"reason": "updated", "stopped_services_before": ["stopped"], "stopped_services_after": ["stopped"]}
+            if service == "stopped" and runtime_after:
+                metadata.update(runtime_state_before="not-running", runtime_state_after=runtime_after)
+            insert_update_event(
+                conn, run_id=run_id, stack_name="home", service_name=service,
+                image="app:1", target_image="app:2", status="success", metadata_json=json.dumps(metadata),
+            )
+    detail = client.get(f"/api/v1/runs/{run_id}").json()
+    history = client.get("/api/v1/runs").json()[0]
+    assert history["verification"] == detail["verification"]
+    assert [item["health_status"] for item in detail["verification"]["items"]] == [expected_health, "passed"]
+
+
+@pytest.mark.parametrize("record_count", [200, 201, 10000])
+def test_history_bounds_verification_reads_and_preserves_full_run_detail(
+    tmp_path: Path, monkeypatch, record_count: int,
+) -> None:
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        init_db(conn)
+        run_id = insert_update_run(conn, status="failure", dry_run=False, mode="stop", wud_file="", log_file="")
+        with conn:
+            conn.executemany(
+                "INSERT INTO pending_updates (run_id,line_no,raw,image,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+                [(run_id, line, "app:1", "app:1", "pending", "", "") for line in range(record_count)],
+            )
+        small_id = insert_update_run(conn, status="success", dry_run=False, mode="stop", wud_file="", log_file="")
+        insert_pending_update(conn, run_id=small_id, line_no=1, raw="small:1", image="small:1")
+
+    converted_run_ids = []
+    original = runs_module._pending_update_from_row
+
+    def track_pending_read(row):
+        converted_run_ids.append(row["run_id"])
+        return original(row)
+
+    monkeypatch.setattr(runs_module, "_pending_update_from_row", track_pending_read)
+    response = client.get("/api/v1/runs")
+    assert response.status_code == 200
+    listed = {run["id"]: run for run in response.json()}
+    history = listed[run_id]
+    assert listed[small_id]["verification_omitted_count"] == 0
+    assert len(listed[small_id]["verification"]["items"]) == 1
+    assert history["verification"]["total_count"] == record_count
+    if record_count > runs_module.MAX_HISTORY_VERIFICATION_ITEMS:
+        assert converted_run_ids == [small_id]
+        assert history["verification_omitted_count"] == record_count
+        assert history["verification"] == {
+            "status": "needs_review", "total_count": record_count,
+            "verified_count": 0, "needs_review_count": record_count, "items": [],
+        }
+        assert len(response.content) < 2000
+    else:
+        assert history["verification_omitted_count"] == 0
+        assert len(history["verification"]["items"]) == record_count
+
+    detail_response = client.get(f"/api/v1/runs/{run_id}")
+    assert detail_response.status_code == 200
+    assert len(detail_response.json()["verification"]["items"]) == record_count
+
+
 @pytest.mark.parametrize("record_empty_target_event", [False, True])
 def test_run_verification_leaves_unrecorded_target_unknown(
     tmp_path: Path,

@@ -68,8 +68,11 @@ evidence. History reuses a compact result with relative time; hover the time for
 the exact timestamp, or open **Exact timestamps** in run detail with touch or
 keyboard to see the recorded start and finish times. Failed, skipped, and missing checks remain explicit, and
 command success alone does not imply verification. Dry runs are labeled as
-unapplied plans. The run list includes the same recorded verification as run
-detail, without initiating new Docker or health checks.
+unapplied plans. Preserved stopped services show skipped health checks.
+History includes recorded verification for runs with up to 200 update records.
+For larger runs it shows the exact record count and asks you to open the run for
+verification, without claiming that a partial set was verified. Full run detail
+retains all records. These reads do not initiate new Docker or health checks.
 
 **Queue details and actions** explains count scopes and contains rescans and
 selected-entry removal. Search narrows the visible queue; hidden selections still
