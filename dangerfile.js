@@ -236,6 +236,7 @@ function runReviewPromptRules() {
 
   const publicConfigFiles = changedMatching([
     "AGENTS.md",
+    ".github/AGENTS.md",
     ".github/CODEOWNERS",
     ".github/workflows/**",
     "dangerfile.js",

@@ -26,19 +26,8 @@ Repo-local routing/context only for WUDup. Global instructions control default b
 | `install.sh` | Idempotent installer that chmods scripts and creates host symlinks for CLI commands and WUD scripts. | `install.sh`, then README install section. | Preserve refusal to replace non-symlink targets and existing env overrides. | Changing default target layout unless the task asks for installer behavior changes. |
 | `Dockerfile`, `entrypoint.sh`, `docs/examples/docker-compose.example.yml`, `docs/examples/docker-compose.webui.yml`, `docs/examples/docker-compose.hardened.yml`, `docs/examples/docker-compose.truenas.yml`, `docs/examples/docker-compose.build.yml`, `.dockerignore` | Container packaging for running the updater helpers with Docker CLI access, the long-running WebUI container, and optional TrueNAS API reachability. | `README.md`, `docs/DEPLOYMENT.md`, `entrypoint.sh`, `bin/updates`, `bin/docker-update-from-wud`, `src/wudup/web.py` for WebUI examples. | Keep the default command non-mutating, keep WebUI examples read-only unless mutation work is explicit, preserve command dispatch, keep Docker socket or socket-proxy access and host stack mounts explicit, and keep TrueNAS API keys secret-file based in examples. | Replacing WUD's separate `/wud` script mount, enabling WebUI mutations by default, or baking version-specific TrueNAS clients into the default image. |
 | `tests/` | Local test runner, focused shell tests, Python tests, fake command implementations, WebUI backend tests, and Docker E2E harnesses. | `tests/run-all.sh`, then the focused test for the behavior being changed. | Keep tests temp-dir based; fake Docker for default tests; reserve real Docker mutations for explicit Docker-gated harnesses; keep Python dev dependencies explicit in `pyproject.toml`. | Adding dependencies or broad fixtures when a small shell fake, unittest, or Docker-gated E2E fixture is enough. |
-| `.github/workflows/ci.yml` | Cost-conscious CI for PRs to `main`, pushes to `main`, optional macOS/Docker checks, Docker E2E, and workflow linting. | `tests/run-all.sh`, `tests/container-build.sh`, `tests/e2e-docker-compose.sh`, workflow file. | Keep default CI Linux-only; keep macOS gated by `ci:macos` or manual dispatch; keep Docker build gated by `ci:docker`, manual dispatch, or image-impacting path changes; keep Docker E2E separate and gated by `ci:e2e`, manual dispatch, or image-impacting path changes. Ensure new Compose examples are covered by container-build config validation. | Scheduled workflows, broad matrices, caches, artifacts, or always-on macOS/Docker jobs unless explicitly requested. |
-| `.github/dependabot.yml`, `renovate.json` | Dependency update automation. Dependabot owns pip, npm, and GitHub Actions; Renovate owns Dockerfile image tags. | Existing updater configs and `Dockerfile` when image updates are involved. | Keep managers split so Renovate handles only Dockerfile image tags; preserve stable-only Docker update behavior. | Enabling overlapping Docker managers or broad Renovate managers without explicitly disabling duplicates. |
-| `.github/workflows/dependency-automerge*.yml` | Verified dependency bot classification and automatic merging. | Both workflows, `.github/workflows/security.yml`, `SECURITY.md`, and `tests/test_dependency_automerge_workflows.py`. | Preserve bot provenance, current-head workflow gates, required checks, and atomic merges; privileged workflows must not execute PR code. Run the focused unittest included in `tests/run-all.sh --python`. | Auto-approving exceptions or bypassing failed, pending, missing, or skipped core checks. |
-| `.github/workflows/webui-demo-pages.yml` | Static GitHub Pages deployment for the public fixture-backed WebUI demo. | `webui/package.json`, `webui/vite.config.ts`, `docs/DEVELOPMENT.md`, workflow file. | Build only static assets with demo mode; keep Pages permissions narrow; never deploy FastAPI, fake Docker, SQLite, dev auth bypass, or real mutation backends. | Server-side demo hosting, secrets, custom domains, or Pages environment assumptions unless requested. |
-| `.github/workflows/security.yml`, `.github/CODEOWNERS`, `.github/zizmor.yml` | Security scanning suite, sensitive-path ownership, and GitHub Actions audit policy. | Existing workflow/release workflow rows plus the security files. | Keep PR-blocking jobs high-signal; skip GHAS-backed scans while the repo is private; keep Scorecard advisory; preserve readable Action version tags unless policy changes. | Repo-setting assumptions that cannot be enforced from files alone. |
-| `dangerfile.js`, `.github/workflows/danger.yml` | Danger JS maintainability review prompts for PRs. | Recent review comments or recurring post-review fixes, then `dangerfile.js` and the workflow file. | Keep rules warning-first, repo-specific, and tied to changed files or PR body acknowledgements; avoid `pull_request_target`; keep generated/vendor/lockfile paths out of large-file heuristics. | Broad style linting, flaky semantic guesses, or rules that duplicate normal test execution. |
 | `scripts/check_maintainability.py`, `maintainability-policy.json` | Draft committed-blob size ratchet and its sole threshold/category/exception policy. | `docs/DEVELOPMENT.md` maintainability section and focused synthetic Git tests. | Keep baseline pending until predecessor integration; use explicit report-only inventory meanwhile. | Initial ceilings from unmerged branches, automatic exceptions, or CI activation before baseline review. |
-| `sonar-project.properties` | SonarCloud project analysis settings and quality-gate scope. | `.github/instructions/sonarqube_mcp.instructions.md`, SonarQube MCP gate/issues for the affected PR, and touched code/tests. | Keep project key and organization aligned with MCP project discovery; keep CPD exclusions limited to test harness paths unless a source exclusion is explicitly justified. | Broad source, security, or coverage exclusions that hide production issues. |
-| `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/*.yml` | GitHub PR and issue intake templates. | Existing template file, README, and docs terms relevant to the changed question. | Keep prompts concise, repo-specific, actionable, and free of secrets or machine-specific paths. | Workflow changes unless the task targets CI behavior. |
-| `.github/workflows/release-please.yml`, `release-please-config.json`, `.release-please-manifest.json` | Release Please automation that opens release PRs, bumps Python version files and changelog entries, and creates `vX.Y.Z` GitHub releases/tags. | Release Please config and manifest, `.github/workflows/release.yml`, `pyproject.toml`, `src/wudup/__init__.py`, `CHANGELOG.md`. | Keep tag names compatible with `vX.Y.Z`; use the configured Release Please token secret so release-created tags trigger publishing workflows. | Manual manifest edits after bootstrap unless repairing release automation state. |
-| `.github/workflows/release.yml`, `.github/workflows/release-validation.yml`, `.github/scripts/publish-release-image.sh` | Release validation, staged image scanning, GHCR promotion, and GitHub Release publishing. | `SECURITY.md` release image policy, `Dockerfile`, `tests/test-publish-release-image.sh`, workflow files. | Keep stable `vX.Y.Z` tags; scan both amd64/arm64 images in both variants by immutable digest before promoting any production tags. | Extra registries, prerelease tags, or package publishing outside GHCR unless requested. |
 | `SECURITY.md`, `README.md`, `docs/` | User-facing security policy, overview, deployment reference, examples, and feature explainers. | For security policy changes, `docs/DEPLOYMENT.md`, `.github/ISSUE_TEMPLATE/config.yml`, and security workflow docs; otherwise scripts being described, plus `docs/README.md` for docs routing. | Keep concise, accurate, and free of secrets or machine-specific paths. Keep root README as the short entrypoint, `SECURITY.md` as the private reporting policy, and detailed references under `docs/`. | Operational assumptions not present in code. |
-| `CHANGELOG.md` | Release-time record of notable versioned changes. | `CHANGELOG.md`, recent commits since the previous tag, and changed user-facing docs. | Author versioned `## [vX.Y.Z] — YYYY-MM-DD` sections only during explicit release prep. | Ordinary feature, docs, or maintenance work outside release prep. |
 | `template.env` | Example host and optional WUD environment configuration. | `template.env`, then the script consuming the changed variable. | Keep values example-only, environment-driven, and free of real secrets or machine-specific paths. | Adding new knobs not supported by scripts or README examples. |
 | `.gitignore` | Ignore rules for local logs, temp files, WUD output, and desktop metadata. | `.gitignore` only. | Keep generated/runtime data out of Git. | Broad ignore patterns that could hide source files. |
 
@@ -55,6 +44,7 @@ Repo-local routing/context only for WUDup. Global instructions control default b
 - `src/wudup/AGENTS.md` owns Python backend module boundaries, WebUI backend safety, updater compatibility, and focused Python test guidance.
 - `webui/AGENTS.md` owns frontend state, typed API client, components/views, static demo, and frontend validation guidance.
 - `webui/src/api/demo/AGENTS.md` owns the static public demo API and fixture contract.
+- `.github/AGENTS.md` owns CI workflows, security scanning, dependency bots, Danger, Sonar, GitHub templates, and release automation; read it before editing anything under `.github/` or the root files `renovate.json`, `release-please-config.json`, `.release-please-manifest.json`, `dangerfile.js`, `sonar-project.properties`, or `CHANGELOG.md`.
 - Prefer the closest scoped file over expanding root; nested guidance should replace duplicated root detail.
 - Each `AGENTS.md` has a sibling one-line `CLAUDE.md` (`@AGENTS.md`) so Claude Code loads it; add the same shim when creating a new scoped `AGENTS.md`.
 
@@ -75,10 +65,6 @@ Use the shell already used by the target script.
 | POSIX syntax check | `sh -n wud/on-update.sh wud/append-updates.sh` |
 | updater dry run | `bin/docker-update-from-wud --base "$DOCKER_BASE" --file "$WUD_OUT_FILE" --dry-run` |
 | host status dry run | `bin/updates --dry-run` |
-| GitHub Actions lint | `actionlint` |
-| GitHub Actions security scan | `zizmor --config .github/zizmor.yml --min-severity high --min-confidence medium .github/workflows` |
-| Renovate config JSON check | `python3 -m json.tool renovate.json` |
-| Release Please config JSON check | `python3 -m json.tool release-please-config.json` and `python3 -m json.tool .release-please-manifest.json` |
 | full local test suite | `tests/run-all.sh` |
 | updater behavior tests | `tests/test-docker-update-from-wud.sh` |
 | WUD append tests | `tests/test-wud-append-updates.sh` |
@@ -99,7 +85,6 @@ Use the shell already used by the target script.
 | update pip lockfile | `make lock` |
 | Live digest verification probe | `tests/live-digest-verification.py alpine:3.20 quay.io/prometheus/busybox:latest` |
 | WebUI validation and local dev | See `webui/AGENTS.md`. |
-| Dangerfile syntax check | `node --check dangerfile.js` |
 | maintainability checker tests | `python -m pytest tests/test_python_maintainability*.py` and `python -m py_compile scripts/check_maintainability.py` |
 | format check | Not configured. |
 
@@ -116,23 +101,15 @@ Use the shell already used by the target script.
 - Rich terminal rendering change: create or update focused tests that exercise the Rich-enabled path for the touched surface, using mocks when local Rich is unavailable; run `python3 -m unittest tests.test_python_terminal` plus Python syntax checks before broader suites.
 - WebUI frontend change: use `webui/AGENTS.md`; also use `src/wudup/AGENTS.md` when API contracts or auth assumptions change.
 - Local WebUI browser check: use the Playwright plugin and the low-token flow in `webui/AGENTS.md`; if the plugin is unavailable, report the fallback used.
-- GitHub Actions workflow change: run `actionlint` when available; if not installed, inspect the touched workflow YAML and report that local actionlint was not available. For release workflow changes, also inspect tag, permission, and GHCR image-tag behavior.
-- Dependency updater config change: parse touched YAML/JSON, run `git diff --check`, and run a local Renovate config validator when one is already installed. Keep Dockerfile image updates in Renovate and non-Docker ecosystems in Dependabot unless explicitly changing ownership.
-- Security workflow change: run `actionlint` when available, `git diff --check`, `tests/run-all.sh`, and the local `zizmor` command when installed; verify CodeQL, Dependency Review, and SARIF uploads in the first GitHub run after the repository is public or GHAS-backed scanning is enabled.
-- Danger maintainability rule change: run `node --check dangerfile.js`, `git diff --check`, and `actionlint` when the workflow changes. Use a real PR run to validate GitHub API/comment behavior because Danger depends on PR metadata.
-- Sonar config change: run `git diff --check`, inspect exclusions for production-source impact, and verify the next SonarQube MCP quality gate after remote analysis updates.
-- GitHub template change: validate issue-template YAML when practical, run `git diff --check`, and skip application tests unless executable examples or commands changed.
-- Release Please config change: validate `release-please-config.json` and `.release-please-manifest.json` as JSON, run `actionlint` when workflow files change, and verify tag naming stays compatible with `.github/workflows/release.yml`.
 - Cross-cutting behavior change: run `tests/run-all.sh` when practical before finishing.
 - Docs-only change: no tests required unless examples or commands were changed enough to need syntax validation.
 - Unknown command: inspect scripts/docs, then prefer extending `tests/run-all.sh` or a focused `tests/test-*.sh` instead of inventing a separate harness.
 
 ## Maintenance Notes
 
-- When adding a top-level file, script, test harness, workflow, or user-facing config surface, update the root path map and repo-wide commands/validation only when they add useful routing not already owned by a scoped `AGENTS.md`.
+- When adding a top-level file, script, test harness, or user-facing config surface, update the root path map and repo-wide commands/validation only when they add useful routing not already owned by a scoped `AGENTS.md`; workflows and CI/release config belong in `.github/AGENTS.md`.
 - Python syntax coverage uses `compileall` in `tests/run-all.sh`; no manifest update is needed when adding, removing, or renaming Python files under the checked directories.
 - When creating a new backend module or frontend surface, update the closest scoped `AGENTS.md` if ownership or validation guidance changes.
-- During release prep, draft `CHANGELOG.md` from commits since the previous tag and group entries by user-visible impact (`Added`, `Changed`, `Fixed`, `Docs`, `Removed`, or `Internal` as appropriate).
 
 ## Generated/Low-Value Paths
 
@@ -146,7 +123,7 @@ Do not read or edit unless directly required.
 
 ## Nested AGENTS Suggestions
 
-Intentional scoped guides: `src/wudup/AGENTS.md`, `webui/AGENTS.md`, and `webui/src/api/demo/AGENTS.md`.
+Intentional scoped guides: `src/wudup/AGENTS.md`, `webui/AGENTS.md`, `webui/src/api/demo/AGENTS.md`, and `.github/AGENTS.md`.
 Do not add `tests/AGENTS.md` until focused backend test files make test ownership stable enough to replace root guidance.
 
 ## Edit Discipline
