@@ -40,7 +40,7 @@ const NAMED_ENTITIES: Record<string, string> = {
 // and common named ones here; other names stay literal. Code spans and autolinks are literal.
 function decodeEntities(value: string): string {
   return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-    if (entity[0] !== "#") return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
+    if (!entity.startsWith("#")) return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
     const code = entity[1].toLowerCase() === "x"
       ? Number.parseInt(entity.slice(2), 16)
       : Number.parseInt(entity.slice(1), 10);
@@ -48,8 +48,30 @@ function decodeEntities(value: string): string {
   });
 }
 
+// Reduce raw HTML to its text in one forward pass so hostile input stays linear:
+// comments and tags are skipped, and a "<" that cannot start a tag is kept as text.
 function htmlText(raw: string): string {
-  return decodeEntities(raw.replace(/<!--[\s\S]*?(?:-->|$)/g, "").replace(/<[^>]*>/g, ""));
+  let text = "";
+  let index = 0;
+  while (index < raw.length) {
+    const open = raw.indexOf("<", index);
+    if (open === -1) {
+      text += raw.slice(index);
+      break;
+    }
+    text += raw.slice(index, open);
+    if (raw.startsWith("<!--", open)) {
+      const close = raw.indexOf("-->", open + 4);
+      index = close === -1 ? raw.length : close + 3;
+    } else if (/[a-z/!?]/i.test(raw.charAt(open + 1))) {
+      const close = raw.indexOf(">", open + 1);
+      index = close === -1 ? raw.length : close + 1;
+    } else {
+      text += "<";
+      index = open + 1;
+    }
+  }
+  return decodeEntities(text);
 }
 
 function link(token: Tokens.Generic, children: string | VNodeArrayChildren, inLink: boolean): VNodeChild {
@@ -119,25 +141,12 @@ function renderBlocks(tokens: Token[], headingLevel: number): VNodeChild[] {
       case "hr":
         blocks.push(h("hr"));
         break;
-      case "list": {
-        const list = t as Tokens.List;
-        const items = list.items.map((item) => h("li", item.task ? { class: "task" } : undefined,
-          item.loose ? renderBlocks(item.tokens, headingLevel) : renderListItem(item.tokens, headingLevel)));
-        blocks.push(list.ordered
-          ? h("ol", list.start !== "" && list.start !== 1 ? { start: list.start } : undefined, items)
-          : h("ul", items));
+      case "list":
+        blocks.push(renderList(t as Tokens.List, headingLevel));
         break;
-      }
-      case "table": {
-        const table = t as Tokens.Table;
-        const cell = (tag: "th" | "td", c: Tokens.TableCell) =>
-          h(tag, c.align ? { style: { textAlign: c.align } } : undefined, renderInline(c.tokens));
-        blocks.push(h("div", { class: "release-markdown-table" }, h("table", [
-          h("thead", h("tr", table.header.map((c) => cell("th", c)))),
-          h("tbody", table.rows.map((row) => h("tr", row.map((c) => cell("td", c))))),
-        ])));
+      case "table":
+        blocks.push(renderTable(t as Tokens.Table));
         break;
-      }
       case "html": {
         const text = htmlText(t.raw).trim();
         if (text) blocks.push(h("p", text));
@@ -148,6 +157,23 @@ function renderBlocks(tokens: Token[], headingLevel: number): VNodeChild[] {
     }
   }
   return blocks;
+}
+
+function renderList(list: Tokens.List, headingLevel: number): VNodeChild {
+  const items = list.items.map((item) => h("li", item.task ? { class: "task" } : undefined,
+    item.loose ? renderBlocks(item.tokens, headingLevel) : renderListItem(item.tokens, headingLevel)));
+  if (!list.ordered) return h("ul", items);
+  const customStart = list.start !== "" && list.start !== 1;
+  return h("ol", customStart ? { start: list.start } : undefined, items);
+}
+
+function renderTable(table: Tokens.Table): VNodeChild {
+  const cell = (tag: "th" | "td", c: Tokens.TableCell) =>
+    h(tag, c.align ? { style: { textAlign: c.align } } : undefined, renderInline(c.tokens));
+  return h("div", { class: "release-markdown-table" }, h("table", [
+    h("thead", h("tr", table.header.map((c) => cell("th", c)))),
+    h("tbody", table.rows.map((row) => h("tr", row.map((c) => cell("td", c))))),
+  ]));
 }
 
 // Tight list items hold bare inline "text" tokens mixed with nested lists.

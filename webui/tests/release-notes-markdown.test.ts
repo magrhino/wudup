@@ -100,4 +100,20 @@ describe("release notes markdown", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("shown as plain text"), failure);
     warn.mockRestore();
   });
+
+  it("reduces raw HTML to text in one linear pass", () => {
+    const wrapper = render("<div>\n<scr<script>ipt>alert(1)</script> a < b <!-- open <!-- --> kept <b\n</div>");
+    expect(wrapper.text()).toBe("ipt>alert(1) a < b  kept");
+    expect(wrapper.find("script").exists()).toBe(false);
+
+    const hostile = `<div>\n${"<".repeat(200_000)}`;
+    const started = performance.now();
+    render(hostile);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("keeps a custom ordered-list start", () => {
+    expect(render("3. c\n4. d").find("ol").attributes("start")).toBe("3");
+    expect(render("1. a").find("ol").attributes("start")).toBeUndefined();
+  });
 });
