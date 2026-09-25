@@ -14,6 +14,7 @@ import type {
   PlanIssue,
   PlanResponse,
   ReleaseNoteInfo,
+  SecurityScanInfo,
   PlanTagStreamUpdate,
   TagStreamDecision,
 } from "../../api/client";
@@ -37,6 +38,7 @@ import {
 } from "../../views/pending/utils";
 import { tagStreamLabelApprovalIssueKey } from "../../views/pending/usePendingPlanReviewState";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
+import PendingReviewSummary from "./PendingReviewSummary.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
 import PreflightFooterActions from "../preflight/PreflightFooterActions.vue";
 import PreflightModalShell from "../preflight/PreflightModalShell.vue";
@@ -87,6 +89,7 @@ const props = defineProps<{
   releaseNotes: ReleaseNoteInfo[];
   releaseNotesLoading: boolean;
   releaseNotesError: string;
+  securityScans: SecurityScanInfo[];
   planTagStreamUpdates: { stack: string; update: PlanTagStreamUpdate }[];
   planMetadataWarning: string;
   planStatusLabel: string;
@@ -112,6 +115,20 @@ const emit = defineEmits<{
 }>();
 
 const changes = computed(() => planChanges(props.plan));
+const reviewReasons = computed(() => {
+  const cleanupLines = new Set(props.cleanupItems.map(item => item.line_no));
+  return [
+    ...[...props.visiblePlanIssues, ...props.tagStreamDecisionIssues,
+      ...props.tagStreamLabelApprovalIssues, ...props.digestPinLabelApprovalIssues].map(issue => [
+      props.issueLabel(issue),
+      props.issueHint(issue),
+    ].filter(Boolean).join(" — ")),
+    ...props.cleanupItems.map(item => `${item.image}: ${props.staleDiagnosticLabel(item)}. ${props.staleDiagnosticDetail(item)}`),
+    ...props.plan.skipped.filter(item => !cleanupLines.has(item.line_no))
+      .map(item => `${item.image}: skipped. ${item.reason}`),
+    props.planMetadataWarning,
+  ].filter(Boolean);
+});
 
 function releaseNoteProps(lineNo: number) {
   const note = props.releaseNotes.find((item) => item.line_no === lineNo) ?? null;
@@ -158,12 +175,16 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       <UpdateScopeSummary :changes="changes" fallback="No matched image changes" />
       <p v-if="preflightServiceImpactLabel" class="preflight-summary-text">Service impact: <span class="preflight-impact-text">{{ preflightServiceImpactLabel }}</span></p>
       <p class="preflight-summary-text">Review only. Nothing has been applied.</p>
-      <p v-if="plan.summary.issue_count || plan.summary.skipped_count" class="preflight-summary-text">
-        {{ pluralize(plan.summary.issue_count, 'plan issue') }} ·
-        {{ plan.summary.skipped_count }} skipped. Review the details below before applying.
-      </p>
     </section>
 
+    <PendingReviewSummary
+      :plan="plan"
+      :release-notes="releaseNotes"
+      :release-notes-loading="releaseNotesLoading"
+      :release-notes-error="releaseNotesError"
+      :security-scans="securityScans"
+      :reasons="reviewReasons"
+    >
       <section
         v-if="applyPreflight"
         class="apply-readiness preflight-block"
@@ -226,6 +247,8 @@ function tagStreamRulePreview(issue: PlanIssue): string {
           </div>
         </div>
       </section>
+      <p v-else class="preflight-summary-text">Apply readiness has not been checked. Preview the plan again before applying.</p>
+    </PendingReviewSummary>
 
       <CoreUpdateTourPanel
         step="pending_preflight"

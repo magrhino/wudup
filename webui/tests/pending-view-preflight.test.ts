@@ -109,6 +109,11 @@ describe("pending view preflight safety", () => {
     expect(modal.text().split("1 failed check must be fixed before applying.")).toHaveLength(2);
     expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
     expect(modal.find(".apply-readiness").text()).toContain("Read-only mode is active.");
+    const summary = modal.find('[aria-label="Update review decision summary"]');
+    expect(summary.text()).toContain("Operational impact");
+    expect(summary.text()).toContain("Supporting evidence");
+    expect(summary.text()).toContain("Unresolved before apply");
+    expect(summary.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     expect(modal.classes()).toContain("preflight-modal-fixed-footer");
     expect(modal.element.tagName).toBe("DIV");
     expect(modal.attributes("aria-modal")).toBe("true");

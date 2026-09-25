@@ -63,6 +63,18 @@ shows the proposed image transition for one service, or service and stack totals
 for larger selections. Expand **Inspect image change** (or **Inspect all service
 changes**) to compare exact references grouped by stack.
 
+The review also summarizes **Operational impact**, **Supporting evidence**, and
+**Unresolved before apply**. Impact follows the planned pull, pause/stop,
+recreate, dependency, orphan-removal, and health-check steps, including
+stack-wide recreation. Supporting evidence distinguishes the planned digest
+from a running-image verification result. Release information is matched to
+the planned version, and scan comparisons are shown only for a matching image
+digest. Missing evidence, breaking-change notices, skipped updates, and plan
+issues retain their reasons. Longer selections expand within each section.
+These summaries do not change apply eligibility: release and scan evidence
+remains advisory, and existing readiness and fresh-plan checks still control
+Apply.
+
 Run detail leads with the same service/stack scope and separate image and health
 evidence. History reuses a compact result with relative time; hover the time for
 the exact timestamp, or open **Exact timestamps** in run detail with touch or
