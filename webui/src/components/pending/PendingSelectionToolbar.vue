@@ -44,7 +44,7 @@ const emit = defineEmits<{
   <div v-if="pendingLoaded" class="selection-tools">
     <details class="queue-tools">
       <summary class="disclosure-summary disclosure-summary-triangle">
-        Queue details and actions
+        Queue tools
       </summary>
       <div class="queue-tools-content">
         <p class="wrap-anywhere">
@@ -112,7 +112,7 @@ const emit = defineEmits<{
     </n-button>
   </div>
 
-  <section v-if="pendingLoaded" class="batch-action-bar" aria-label="Review updates">
+  <section v-if="pendingLoaded" class="batch-action-bar" :class="{ 'has-selection': selectedCount }" aria-label="Review updates">
     <div class="selection-summary" aria-live="polite">
       <strong class="wrap-anywhere">{{ selectedCount ? batchSummaryLabel : 'Select updates to review' }}</strong>
       <span v-if="selectedHiddenCount" class="wrap-anywhere">
@@ -220,6 +220,16 @@ const emit = defineEmits<{
   .batch-action-bar {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .batch-action-bar:not(.has-selection) .selection-summary {
+    display: none;
+  }
+
+  .batch-action-bar:not(.has-selection) {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
   }
 
   .batch-action-bar .pending-actions {

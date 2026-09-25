@@ -2,6 +2,7 @@ import { h, type VNodeChild } from "vue";
 import { NInput, NTag, type DataTableColumns } from "naive-ui";
 
 import type { PendingItem, ReleaseNoteInfo } from "../../api/client";
+import PendingEvidenceExplanation from "../../components/pending/PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "../../components/pending/PendingReleaseNotes.vue";
 import { digestProvenanceDisplay } from "../../utils/digestProvenance";
 import {
@@ -124,7 +125,8 @@ export function renderRiskBadges(
   row: PendingItem,
   riskCues: (row: PendingItem) => SafetyCue[],
 ): VNodeChild {
-  const badges = riskCues(row).map((cue) =>
+  const cues = riskCues(row);
+  const badges = cues.map((cue) =>
     h(
       NTag,
       { key: cue.key, size: "small", type: cue.type, class: "safety-badge" },
@@ -134,7 +136,10 @@ export function renderRiskBadges(
   if (badges.length === 0) {
     return h("span", { class: "risk-badges-muted" }, "None");
   }
-  return h("div", { class: "risk-badges-container" }, badges);
+  return h("div", { class: "risk-badges-container" }, [
+    ...badges,
+    h(PendingEvidenceExplanation, { cues }),
+  ]);
 }
 
 export function renderReleaseNotes(

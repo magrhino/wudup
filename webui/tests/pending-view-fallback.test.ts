@@ -246,6 +246,9 @@ describe("pending view fallback and release notes", () => {
     const preview = card.find(".stack-change-preview");
     expect(preview.text()).toContain("Retained metadata");
     expect(preview.text()).toContain("Release advisory: critical");
+    expect(preview.findAll(".evidence-explanation")).toHaveLength(2);
+    expect(preview.text()).toContain("candidate scans inspect the proposed image");
+    expect(preview.text()).toContain("not a guarantee of a safe update");
     expect(preview.text()).toContain("Release advisory: needs review");
     expect(card.find(".stack-card-tags").text()).toContain("1 verified high/critical release update");
   });
@@ -666,6 +669,17 @@ describe("pending view fallback and release notes", () => {
           warnings: [],
         },
       };
+      updates.securityScans = {
+        source_file: updates.pending.source_file,
+        source: updates.pending.source,
+        source_hash: updates.pending.source_hash ?? "",
+        scanning_enabled: true,
+        scanner: "trivy",
+        scan_mode: "registry",
+        count: 0,
+        items: [],
+        warnings: [],
+      };
       mockPendingLifecycle(settings, updates);
       const wrapper = mountPendingView(pinia);
       const card = wrapper.find(".mobile-card");
@@ -674,6 +688,11 @@ describe("pending view fallback and release notes", () => {
       expect(card.text()).toContain("Safety cues");
       expect(card.text()).toContain("Digest-only");
       expect(card.text()).toContain("Mutable latest");
+      expect(card.text()).toContain("Candidate scan: unavailable");
+      const evidence = card.find(".evidence-explanation");
+      expect(evidence.text()).toContain("published vulnerability evidence");
+      expect(evidence.text()).toContain("candidate scans inspect the proposed image");
+      expect(evidence.text()).toContain("not a guarantee of a safe update");
     } finally {
       restore();
     }

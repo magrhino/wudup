@@ -33,6 +33,7 @@ import {
   pendingSelectionKey,
 } from "../../views/pending/usePendingSelectionState";
 import { pluralize } from "../../views/pending/utils";
+import PendingEvidenceExplanation from "./PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import PendingUpdateRow from "./PendingUpdateRow.vue";
 
@@ -61,7 +62,7 @@ const emit = defineEmits<{
 }>();
 
 function actionableRiskCues(item: PendingGroupedItem): SafetyCue[] {
-  return props.riskCues(item).filter((cue) => cue.type === "warning" || cue.type === "error");
+  return props.riskCues(item).filter((cue) => cue.type === "warning" || cue.type === "error" || cue.key.startsWith("security-"));
 }
 
 const verifiedUpdateCount = computed(
@@ -229,6 +230,7 @@ const previewDisabledMessage = computed(() =>
             Choose stream
           </n-button>
         </span>
+        <PendingEvidenceExplanation class="stack-change-evidence" :cues="riskCues(item)" />
         <PendingReleaseNotes
           class="stack-change-release"
           :candidate-label="`${groupedItemServices(item)} · ${groupedItemTarget(item)}`"
@@ -383,6 +385,7 @@ const previewDisabledMessage = computed(() =>
   line-height: 1.4;
 }
 
+.stack-change-evidence,
 .stack-change-release {
   grid-column: 2;
 }
@@ -471,6 +474,7 @@ const previewDisabledMessage = computed(() =>
 }
 
 @media (--wud-compact) {
+  .stack-change-evidence,
   .stack-change-release {
     grid-column: 1 / -1;
   }
