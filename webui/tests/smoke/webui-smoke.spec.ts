@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import type { RunSummary } from "../../src/api/client";
 import { touchTargetSizePx } from "../../src/touchTargets";
 
 type ApiCall = {
@@ -293,7 +294,7 @@ function jobResponse(status = "queued") {
   };
 }
 
-function runSummary() {
+function runSummary(): RunSummary {
   return {
     id: 7,
     started_at: "2026-05-28T12:00:00+00:00",
@@ -304,6 +305,7 @@ function runSummary() {
     wud_file: "/out/images.todo",
     log_file: "/out/logs/job-smoke.log",
     metadata: { source: "webui" },
+    events: [],
   };
 }
 
