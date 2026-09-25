@@ -13,6 +13,7 @@ import {
   pendingMetadataStatusTagType,
   pendingMetadataStatusTitle,
 } from "../../views/pending/pendingDisplay";
+import PendingEvidenceExplanation from "./PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import PendingSecurityScanDetails from "./PendingSecurityScanDetails.vue";
 
@@ -131,6 +132,7 @@ function groupedItemTarget(item: PendingGroupedItem): string {
       </span>
       <span v-if="metaDetail" class="wrap-anywhere">{{ metaDetail }}</span>
     </div>
+    <PendingEvidenceExplanation :cues="riskCues" />
     <PendingSecurityScanDetails
       v-if="securityScan"
       :scan="securityScan"

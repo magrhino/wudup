@@ -268,7 +268,16 @@ test("static demo mobile layout stays within the viewport", async ({ page }) => 
     }),
   ).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Select stack data/ })).toBeVisible();
+  const selfUpdate = page.getByLabel("WUDup self-update", { exact: true });
+  const selfUpdateSummary = selfUpdate.locator("summary");
+  await expect(selfUpdate).toHaveJSProperty("open", false);
+  await selfUpdateSummary.focus();
+  await page.keyboard.press("Enter");
+  await expect(selfUpdate).toHaveJSProperty("open", true);
   await expectTouchTargetHeight(page, "Pull image");
+  await selfUpdateSummary.focus();
+  await page.keyboard.press("Enter");
+  await expect(selfUpdate).toHaveJSProperty("open", false);
   await expectNoHorizontalOverflow(page, 390);
   await expect(page.getByRole("button", { name: "Review selected (0)", exact: true })).toBeDisabled();
   await expect(page.locator(".stack-card").first()).toBeInViewport();

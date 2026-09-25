@@ -868,7 +868,7 @@ for (const kind of ["removal", "cleanup"] as const) {
     await page.goto("/#/pending");
     await page.getByRole("checkbox", { name: /Select stack media/ }).check();
     if (kind === "removal") {
-      await page.getByText("Queue details and actions", { exact: true }).click();
+      await page.getByText("Queue tools", { exact: true }).click();
       await page.getByRole("button", { name: "Remove 1 selected entry", exact: true }).click();
     } else {
       await page.getByRole("button", { name: /Review selected \(/ }).click();
@@ -1031,9 +1031,9 @@ test("selection toolbar stays compact without hiding selection scope or actions"
     await page.keyboard.press("Enter");
     await expect(review).toBeDisabled();
     await expect(toolbar).not.toContainText("hidden by search");
-    await page.getByText("Queue details and actions", { exact: true }).click();
+    await page.getByText("Queue tools", { exact: true }).click();
     await expect(page.getByRole("button", { name: "Rescan WUD", exact: true })).toBeVisible();
-    await page.getByText("Queue details and actions", { exact: true }).click();
+    await page.getByText("Queue tools", { exact: true }).click();
     await page.getByRole("textbox", { name: "Search pending updates" }).fill("");
   }
   expect(state.calls.some((call) => call.path === "/api/v1/plans/apply")).toBe(false);

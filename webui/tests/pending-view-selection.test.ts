@@ -147,6 +147,7 @@ describe("pending view selection actions", () => {
 
     await wrapper.find('input[aria-label="Select stack media"]').setValue(true);
     expect(review().text()).toBe("Review selected (1)");
+    expect(wrapper.find(".batch-action-bar").classes()).toContain("has-selection");
     expect(review().attributes("disabled")).toBeUndefined();
     await review().trigger("click");
     expect(createPlan).toHaveBeenCalledTimes(1);

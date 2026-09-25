@@ -402,9 +402,13 @@ describe("app shell", () => {
 
     expectTextToContain(
       wrapper,
-      "Update available: v0.24.2 → v0.25.0",
+      "WUDup update available: v0.24.2 → v0.25.0",
       "ghcr.io/magrhino/wudup:latest",
     );
+    const notice = wrapper.find("details.self-update-banner");
+    expect(notice.attributes("open")).toBeUndefined();
+    expect(notice.find("summary").text()).toContain("WUDup update available");
+    notice.element.setAttribute("open", "");
     await clickButtonByText(wrapper, "Pull image");
 
     const dialog = wrapper.find('[role="dialog"]');
@@ -429,6 +433,25 @@ describe("app shell", () => {
     await clickButtonByText(dialog, "Pull image");
 
     expect(applySelfUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps self-update failures visible outside the collapsed notice", async () => {
+    const stores = createAppStores(true);
+    stores.selfUpdate.selfUpdate = selfUpdateResponse({
+      can_update: false,
+      disabled_reason: "WebUI mutations are disabled.",
+    });
+    stores.selfUpdate.selfUpdateError = "Image pull failed. Check registry access and try again.";
+    stubAppShellLoads(stores);
+    const { wrapper } = await mountAppAt(stores);
+    await flushPromises();
+
+    const notice = wrapper.find("details.self-update-banner");
+    expect(notice.attributes("open")).toBeUndefined();
+    expect(notice.text()).not.toContain("Image pull failed");
+    expect(notice.text()).toContain("WebUI mutations are disabled.");
+    expect(notice.find("button").attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".self-update-message").text()).toContain("Check registry access and try again");
   });
 
   it("shows pinned self-update tag prepare preview before applying", async () => {
