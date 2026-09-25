@@ -4,6 +4,21 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.63.0](https://github.com/magrhino/wudup/compare/v0.62.0...v0.63.0) (2026-09-25)
+
+
+### Features
+
+* **webui:** clarify queue evidence and mobile hierarchy ([#753](https://github.com/magrhino/wudup/issues/753)) ([978d89e](https://github.com/magrhino/wudup/commit/978d89e24063131a479c7e6029cb81ca1b8bef44))
+* **webui:** clarify update review and result summaries ([#751](https://github.com/magrhino/wudup/issues/751)) ([9a8dfd0](https://github.com/magrhino/wudup/commit/9a8dfd016c05cac69907a7be878d9ccc17592402))
+* **webui:** complete pending update review summaries ([#752](https://github.com/magrhino/wudup/issues/752)) ([f127e07](https://github.com/magrhino/wudup/commit/f127e07cbcd6c0ed08c3355745c67ec46f97b3b4))
+* **webui:** prioritize dashboard update decisions ([#754](https://github.com/magrhino/wudup/issues/754)) ([8481010](https://github.com/magrhino/wudup/commit/84810104b2ebc7196fcd3163d763c8932bff7860))
+
+
+### Bug Fixes
+
+* **webui:** clarify live tracking tag feedback ([#748](https://github.com/magrhino/wudup/issues/748)) ([bc2d751](https://github.com/magrhino/wudup/commit/bc2d7515eda1b989e46ce856896e046661ccce83))
+
 ## [0.62.0](https://github.com/magrhino/wudup/compare/v0.61.3...v0.62.0) (2026-09-23)
 
 
