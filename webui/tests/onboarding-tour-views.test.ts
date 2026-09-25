@@ -317,7 +317,7 @@ vi.spyOn(settings, "loadTagExclusions").mockResolvedValue(undefined as any);
     await flushPromises();
 
     expect(wrapper.text()).toContain("Start from current state");
-    expect(wrapper.text()).toContain("Pending: 2");
+    expect(wrapper.text()).toContain("Pending: 1");
     const nextButton = wrapper
       .findAll("button")
       .find((button) => button.text().includes("Open pending updates"));

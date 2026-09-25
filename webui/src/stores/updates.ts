@@ -162,9 +162,13 @@ export const useUpdatesStore = defineStore("updates", () => {
   let activeLoads = 0;
   const releaseNotesLoading = ref(false);
   const releaseNotesError = ref("");
+  let releaseNotesRequestId = 0;
   const releaseNotificationLoading = ref(false);
   const releaseNotificationError = ref("");
   const securityScansLoading = ref(false);
+  let activeSecurityScanRequests = 0;
+  let securityScanRequestId = 0;
+  let securityScanRefreshInFlight: Promise<void> | null = null;
   const securityScansError = ref("");
   const error = ref("");
   let pendingLoadInFlight: Promise<void> | null = null;
@@ -317,29 +321,33 @@ export const useUpdatesStore = defineStore("updates", () => {
   }
 
   async function loadReleaseNotes(): Promise<void> {
+    const requestId = ++releaseNotesRequestId;
     releaseNotesLoading.value = true;
     releaseNotesError.value = "";
     try {
-      releaseNotes.value = await webApi.releaseNotes();
+      const response = await webApi.releaseNotes();
+      if (requestId === releaseNotesRequestId) releaseNotes.value = response;
     } catch (caughtError) {
-      releaseNotesError.value = errorMessage(caughtError);
+      if (requestId === releaseNotesRequestId) releaseNotesError.value = errorMessage(caughtError);
       throw caughtError;
     } finally {
-      releaseNotesLoading.value = false;
+      if (requestId === releaseNotesRequestId) releaseNotesLoading.value = false;
     }
   }
 
   async function refreshReleaseNotes(): Promise<void> {
     const auth = useAuthStore();
+    const requestId = ++releaseNotesRequestId;
     releaseNotesLoading.value = true;
     releaseNotesError.value = "";
     try {
-      releaseNotes.value = await webApi.refreshReleaseNotes(await auth.ensureCsrf());
+      const response = await webApi.refreshReleaseNotes(await auth.ensureCsrf());
+      if (requestId === releaseNotesRequestId) releaseNotes.value = response;
     } catch (caughtError) {
-      releaseNotesError.value = errorMessage(caughtError);
+      if (requestId === releaseNotesRequestId) releaseNotesError.value = errorMessage(caughtError);
       throw caughtError;
     } finally {
-      releaseNotesLoading.value = false;
+      if (requestId === releaseNotesRequestId) releaseNotesLoading.value = false;
     }
   }
 
@@ -390,20 +398,39 @@ export const useUpdatesStore = defineStore("updates", () => {
   }
 
   async function loadSecurityScans(): Promise<void> {
+    activeSecurityScanRequests += 1;
     securityScansLoading.value = true;
-    securityScansError.value = "";
+    let requestId: number | undefined;
     try {
-      securityScans.value = await webApi.securityScans();
+      // A cache read during a refresh can capture its old results. Wait for the
+      // refresh to publish before reading, and preserve its error if it fails.
+      while (securityScanRefreshInFlight) await securityScanRefreshInFlight;
+      requestId = ++securityScanRequestId;
+      securityScansError.value = "";
+      const response = await webApi.securityScans();
+      if (requestId === securityScanRequestId) securityScans.value = response;
     } catch (caughtError) {
-      securityScansError.value = errorMessage(caughtError);
+      if (requestId === securityScanRequestId) securityScansError.value = errorMessage(caughtError);
       throw caughtError;
     } finally {
-      securityScansLoading.value = false;
+      activeSecurityScanRequests -= 1;
+      securityScansLoading.value = activeSecurityScanRequests > 0;
     }
   }
 
-  async function refreshSecurityScans(): Promise<void> {
+  function refreshSecurityScans(): Promise<void> {
+    if (securityScanRefreshInFlight) return securityScanRefreshInFlight;
+    const refresh = runSecurityScanRefresh().finally(() => {
+      if (securityScanRefreshInFlight === refresh) securityScanRefreshInFlight = null;
+    });
+    securityScanRefreshInFlight = refresh;
+    return refresh;
+  }
+
+  async function runSecurityScanRefresh(): Promise<void> {
     const auth = useAuthStore();
+    const requestId = ++securityScanRequestId;
+    activeSecurityScanRequests += 1;
     securityScansLoading.value = true;
     securityScansError.value = "";
     try {
@@ -422,16 +449,15 @@ export const useUpdatesStore = defineStore("updates", () => {
       if (job.status === "failure") {
         throw new Error(job.error || "Security scan refresh failed");
       }
-      if (job.result) {
-        securityScans.value = job.result;
-      } else {
-        await loadSecurityScans();
-      }
+      // Keep the fallback read inside this refresh, rather than waiting on itself.
+      const response = job.result ?? await webApi.securityScans();
+      if (requestId === securityScanRequestId) securityScans.value = response;
     } catch (caughtError) {
-      securityScansError.value = errorMessage(caughtError);
+      if (requestId === securityScanRequestId) securityScansError.value = errorMessage(caughtError);
       throw caughtError;
     } finally {
-      securityScansLoading.value = false;
+      activeSecurityScanRequests -= 1;
+      securityScansLoading.value = activeSecurityScanRequests > 0;
     }
   }
 
@@ -677,6 +703,12 @@ export const useUpdatesStore = defineStore("updates", () => {
   }
 
   function setPending(response: PendingResponse): void {
+    // Release-note responses have no source hash; discard notes from the old queue,
+    // including requests still in flight, before accepting a different snapshot.
+    if (!response.source_hash || response.source_hash !== pending.value?.source_hash
+      || response.source_file !== pending.value?.source_file) {
+      clearReleaseNoteDisplay();
+    }
     pending.value = response;
     pendingWudMetadataCheckedAt.value = response.wud_api.last_checked_at;
     settlePendingRescan(response.wud_api.last_checked_at);
@@ -750,6 +782,8 @@ export const useUpdatesStore = defineStore("updates", () => {
   }
 
   function clearReleaseNoteDisplay(): void {
+    releaseNotesRequestId += 1;
+    releaseNotesLoading.value = false;
     releaseNotes.value = null;
     releaseNotesError.value = "";
     releaseNotification.value = null;

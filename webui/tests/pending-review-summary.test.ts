@@ -151,6 +151,21 @@ describe("Pending review decision summary", () => {
     expect(result.unresolved.join(" ")).toContain("Security evidence is incomplete.");
   });
 
+  it.each([
+    { loading: true, error: "", expected: "Candidate security scan information is loading." },
+    { loading: false, error: "Scanner unavailable.", expected: "Candidate security scan metadata is unavailable: Scanner unavailable." },
+  ])("does not present cached scan success during an unresolved request ($loading)", ({ loading, error, expected }) => {
+    const { plan, note, scan } = evidenceFixture();
+    const wrapper = mountWithApp({
+      components: { PendingReviewSummary },
+      setup: () => ({ plan, note, scan, loading, error }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="loading" :security-scans-error="error" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+    });
+    expect(wrapper.text()).toContain(expected);
+    expect(wrapper.text()).not.toContain("0 introduced");
+    wrapper.unmount();
+  });
+
   it("renders scoped reasons as text and discloses all evidence for larger selections", () => {
     const { plan, note, scan } = evidenceFixture();
     plan.stacks.push({ ...plan.stacks[0]!, name: "other" });
@@ -158,7 +173,7 @@ describe("Pending review decision summary", () => {
     const wrapper = mountWithApp({
       components: { PendingReviewSummary },
       setup: () => ({ plan, note, scan, reasons }),
-      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :release-notes-loading="false" release-notes-error="" :reasons="reasons" />',
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="reasons" />',
     });
     expect(wrapper.text()).toContain("other / app:");
     expect(wrapper.text()).toContain("Approval required: review the label replacement.");

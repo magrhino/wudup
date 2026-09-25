@@ -20,8 +20,11 @@ import {
   doctorResponse,
   onboardingChecklistResponse,
   pendingItem,
+  pendingGroupedItem,
+  pendingGrouping,
   pendingResponse,
   runSummary,
+  runVerification,
   servicePolicy,
   snooze,
   statusResponse,
@@ -137,8 +140,8 @@ describe("DashboardView split-store coverage", () => {
     expect(wrapper.text()).toContain("Database file is not ready");
     expect(wrapper.find(".dashboard-status-strip").exists()).toBe(true);
     expect(wrapper.find(".metric-card").exists()).toBe(false);
-    expect(wrapper.text()).toContain("Pending");
-    expect(wrapper.text()).toContain("3");
+    expect(wrapper.text()).toContain("Open pending updates");
+    expect(wrapper.text()).toContain("2 pending updates");
     expect(wrapper.text()).toContain("Missing");
     expect(wrapper.text()).toContain("#42");
     expect(wrapper.text()).toContain("Needs attention");
@@ -148,7 +151,7 @@ describe("DashboardView split-store coverage", () => {
     expect(wrapper.text()).toContain("Active exclusions");
   });
 
-  it("falls back to pending count from updates when status is unavailable", async () => {
+  it("does not call a nonempty queue clear when its details are missing", async () => {
     const { pinia, router, connection, settings, updates, runs } =
       await setupRoute();
     stubDashboardLoaders(connection, settings, updates, runs);
@@ -162,8 +165,86 @@ describe("DashboardView split-store coverage", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("7");
-    expect(wrapper.text()).toContain("Queue clear");
+    expect(wrapper.text()).not.toContain("Queue clear");
+    expect(wrapper.text()).toContain("Update details are unavailable");
     expect(wrapper.text()).toContain("No runs recorded.");
+  });
+
+  it("keeps loading and failed queue reads distinct from an empty queue", async () => {
+    const { pinia, router, connection, settings, updates, runs } = await setupRoute();
+    stubDashboardLoaders(connection, settings, updates, runs);
+    const wrapper = mountWithApp(DashboardView, { pinia, router });
+    expect(wrapper.text()).toContain("Loading pending updates");
+    expect(wrapper.text()).not.toContain("Queue clear");
+    updates.error = "WUD could not be reached";
+    await flushPromises();
+    expect(wrapper.text()).toContain("Pending updates unavailable");
+    expect(wrapper.text()).not.toContain("Queue clear");
+    updates.error = "";
+    updates.pending = pendingResponse([]);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Queue clear");
+  });
+
+  it("separates version decisions and attention from stopped and snoozed work", async () => {
+    const { pinia, router, connection, settings, updates, runs } = await setupRoute();
+    stubDashboardLoaders(connection, settings, updates, runs);
+    const items = [
+      pendingGroupedItem({ line_no: 1 }),
+      pendingGroupedItem({ line_no: 2, desired_tag: "" }),
+      pendingGroupedItem({ line_no: 3, metadata_status: "retained" }),
+      pendingGroupedItem({ line_no: 4, runtime_state: "not-running" }),
+      pendingGroupedItem({ line_no: 5 }),
+    ];
+    updates.pending = pendingResponse(items);
+    updates.pending.grouping.groups = items.map((item, index) => ({
+      ...pendingGrouping([item]).groups[0]!, name: `stack-${index + 1}`,
+    }));
+    settings.snoozes = [snooze({ service_key: "stack-5/app", active: true })];
+    const wrapper = mountWithApp(DashboardView, { pinia, router });
+    await flushPromises();
+    const rows = wrapper.findAll(".dashboard-review-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.text()).toContain("stack-3");
+    expect(rows[0]!.text()).toContain("Needs attention");
+    expect(rows.some(row => row.text().includes("Version decision"))).toBe(true);
+    expect(rows.some(row => row.text().includes("Review updates"))).toBe(true);
+    expect(wrapper.text()).toContain("1 stopped or unverified target");
+    expect(wrapper.text()).toContain("1 snoozed target");
+    expect(wrapper.text()).not.toContain("Ready to apply");
+  });
+
+  it("keeps image targets visible when stack matching is unavailable", async () => {
+    const { pinia, router, connection, settings, updates, runs } = await setupRoute();
+    stubDashboardLoaders(connection, settings, updates, runs);
+    updates.pending = pendingResponse();
+    updates.pending.grouping.status = "unavailable";
+    const wrapper = mountWithApp(DashboardView, { pinia, router });
+    await flushPromises();
+    expect(wrapper.text()).toContain("Stack matching is unavailable");
+    expect(wrapper.text()).toContain("repo/app:1.0");
+    expect(wrapper.find(".dashboard-review-row").exists()).toBe(false);
+  });
+
+  it("shows recorded changes and incomplete health evidence in recent results", async () => {
+    const { pinia, router, connection, settings, updates, runs } = await setupRoute();
+    stubDashboardLoaders(connection, settings, updates, runs);
+    const verification = runVerification();
+    verification.items[0]!.health_status = "unknown";
+    runs.runs = [
+      runSummary({ id: 43, mode: "web-settings" }),
+      runSummary({ id: 42, dry_run: false, finished_at: "2026-05-28T12:01:00Z", verification }),
+    ];
+    const wrapper = mountWithApp(DashboardView, { pinia, router });
+    await flushPromises();
+    const result = wrapper.get(".dashboard-run-row");
+    expect(result.text()).toContain("app · 1.0 → 1.1");
+    expect(result.text()).toContain("Image verified");
+    expect(result.text()).toContain("Health evidence incomplete");
+    expect(result.text()).not.toContain("Health checks passed");
+    expect(result.attributes("href")).toBe("/runs/42");
+    expect(wrapper.findAll(".dashboard-run-row")).toHaveLength(1);
+    expect(wrapper.html().indexOf("Recent update results")).toBeLessThan(wrapper.html().indexOf('aria-label="System status"'));
   });
 });
 

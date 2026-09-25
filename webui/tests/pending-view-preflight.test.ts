@@ -149,6 +149,27 @@ describe("pending view preflight safety", () => {
     wrapper.unmount();
   });
 
+  it.each([
+    { loading: false, error: "Scanner connection failed. Retry the scan.", expected: "Candidate security scan metadata is unavailable: Scanner connection failed. Retry the scan." },
+    { loading: true, error: "", expected: "Candidate security scan information is loading." },
+  ])("keeps scan request context inside the review modal ($loading)", async ({ loading, error, expected }) => {
+    const { pinia, settings, updates } = setupStores(false);
+    updates.pending = pendingResponse();
+    updates.securityScansLoading = loading;
+    updates.securityScansError = error;
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse({ can_apply: false });
+    });
+    const wrapper = mountPendingView(pinia);
+    await wrapper.findAll("button").find((button) => button.text() === "Review media plan")!.trigger("click");
+    await flushPromises();
+    const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
+    expect(summary.text()).toContain(expected);
+    expect(summary.text()).toContain("no candidate scan is confirmed");
+    wrapper.unmount();
+  });
+
   it("shows blocked preflight errors without an apply action", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(true);
     updates.pending = pendingResponse();

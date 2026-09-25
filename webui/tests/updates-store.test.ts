@@ -863,6 +863,126 @@ describe("updates store", () => {
     expect(updates.securityScanFor(changedLine)).toBeNull();
   });
 
+  it.each([
+    { first: "load", fails: false },
+    { first: "load", fails: true },
+    { first: "refresh", fails: false },
+    { first: "refresh", fails: true },
+  ])("keeps scan loading active when overlapping $first finishes first (fails=$fails)", async ({ first, fails }) => {
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    const loadResponse = deferred<SecurityScansResponse>();
+    const refreshResponse = deferred<SecurityScanJobResponse>();
+    vi.spyOn(webApi, "securityScans").mockReturnValue(loadResponse.promise);
+    vi.spyOn(webApi, "refreshSecurityScans").mockReturnValue(refreshResponse.promise);
+    const load = updates.loadSecurityScans().catch(error => error);
+    const refresh = updates.refreshSecurityScans().catch(error => error);
+    await flushPromises();
+    expect(updates.securityScansLoading).toBe(true);
+
+    const staleResult = securityScansResponse([completeSecurityScanInfo({ verdict: "none_reported" })]);
+    const result = securityScansResponse([completeSecurityScanInfo()]);
+    const failure = new Error("Scan request failed.");
+    if (first === "load") {
+      if (fails) loadResponse.reject(failure);
+      else loadResponse.resolve(staleResult);
+      expect(await load).toBe(fails ? failure : undefined);
+    } else {
+      if (fails) refreshResponse.reject(failure);
+      else refreshResponse.resolve(securityScanJobResponse({ result }));
+      expect(await refresh).toBe(fails ? failure : undefined);
+    }
+    expect(updates.securityScansLoading).toBe(true);
+    expect(updates.securityScansError).toBe(fails && first === "refresh" ? failure.message : "");
+
+    loadResponse.resolve(staleResult);
+    refreshResponse.resolve(securityScanJobResponse({ result }));
+    await Promise.all([load, refresh]);
+    expect(updates.securityScansLoading).toBe(false);
+    expect(updates.securityScans).toEqual(fails && first === "refresh" ? null : result);
+    expect(updates.securityScansError).toBe(fails && first === "refresh" ? failure.message : "");
+  });
+
+  it("shares an active refresh and reads the current queue only after it completes", async () => {
+    const updates = useUpdatesStore();
+    updates.pending = pendingResponse();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    const refreshResponse = deferred<SecurityScanJobResponse>();
+    const refreshApi = vi.spyOn(webApi, "refreshSecurityScans").mockReturnValue(refreshResponse.promise);
+    const newResult = securityScansResponse([completeSecurityScanInfo()], { source_hash: "new-source" });
+    const readApi = vi.spyOn(webApi, "securityScans").mockResolvedValue(newResult);
+    const refresh = updates.refreshSecurityScans();
+    const duplicate = updates.refreshSecurityScans();
+    updates.pending = { ...pendingResponse(), source_hash: "new-source" };
+    const read = updates.loadSecurityScans();
+    await flushPromises();
+    expect(refreshApi).toHaveBeenCalledTimes(1);
+    expect(readApi).not.toHaveBeenCalled();
+    expect(updates.securityScansLoading).toBe(true);
+
+    refreshResponse.resolve(securityScanJobResponse());
+    await Promise.all([refresh, duplicate, read]);
+    expect(readApi).toHaveBeenCalledTimes(1);
+    expect(updates.currentSecurityScans).toEqual(newResult);
+    expect(updates.securityScanJob?.status).toBe("success");
+    expect(updates.securityScansError).toBe("");
+    expect(updates.securityScansLoading).toBe(false);
+  });
+
+  it("preserves refresh failure for waiting reads and permits a later retry", async () => {
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    const refreshResponse = deferred<SecurityScanJobResponse>();
+    const refreshApi = vi.spyOn(webApi, "refreshSecurityScans").mockReturnValueOnce(refreshResponse.promise);
+    const readApi = vi.spyOn(webApi, "securityScans");
+    const refresh = updates.refreshSecurityScans().catch(error => error);
+    const read = updates.loadSecurityScans().catch(error => error);
+    refreshResponse.resolve(securityScanJobResponse({ status: "failure", result: null, error: "Scanner failed." }));
+    const failures = await Promise.all([refresh, read]);
+    expect(failures.map(error => error.message)).toEqual(["Scanner failed.", "Scanner failed."]);
+    expect(readApi).not.toHaveBeenCalled();
+    expect(updates.securityScansError).toBe("Scanner failed.");
+    expect(updates.securityScansLoading).toBe(false);
+
+    const result = securityScansResponse([completeSecurityScanInfo()]);
+    refreshApi.mockResolvedValue(securityScanJobResponse({ result }));
+    await updates.refreshSecurityScans();
+    expect(updates.securityScans).toEqual(result);
+    expect(updates.securityScansError).toBe("");
+    expect(updates.securityScansLoading).toBe(false);
+  });
+
+  it.each([false, true])("keeps the latest scan read when an older read finishes last (fails=%s)", async (fails) => {
+    const updates = useUpdatesStore();
+    const older = deferred<SecurityScansResponse>();
+    const latest = securityScansResponse([completeSecurityScanInfo()]);
+    vi.spyOn(webApi, "securityScans").mockReturnValueOnce(older.promise).mockResolvedValueOnce(latest);
+    const oldRead = updates.loadSecurityScans().catch(error => error);
+    await updates.loadSecurityScans();
+    if (fails) older.reject(new Error("Old read failed."));
+    else older.resolve(securityScansResponse([completeSecurityScanInfo({ verdict: "none_reported" })]));
+    await oldRead;
+    expect(updates.securityScans).toEqual(latest);
+    expect(updates.securityScansError).toBe("");
+    expect(updates.securityScansLoading).toBe(false);
+  });
+
+  it("keeps a refresh loading through its fallback scan read", async () => {
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    vi.spyOn(webApi, "refreshSecurityScans").mockResolvedValue(securityScanJobResponse({ result: null }));
+    const read = deferred<SecurityScansResponse>();
+    vi.spyOn(webApi, "securityScans").mockReturnValue(read.promise);
+    const refresh = updates.refreshSecurityScans();
+    await flushPromises();
+    expect(updates.securityScansLoading).toBe(true);
+    const result = securityScansResponse([completeSecurityScanInfo()]);
+    read.resolve(result);
+    await refresh;
+    expect(updates.securityScansLoading).toBe(false);
+    expect(updates.securityScans).toEqual(result);
+  });
+
   it("refreshes security scans through a bounded job poll", async () => {
     vi.useFakeTimers();
     const scan = completeSecurityScanInfo();
@@ -1363,6 +1483,48 @@ describe("updates store", () => {
 describe("connection store focused coverage", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  it("invalidates release notes when a new queue reuses the same line and version", async () => {
+    const updates = useUpdatesStore();
+    const original = pendingResponse([pendingItem({ image: "old/app:1.0.0", desired_tag: "2.0.0" })]);
+    updates.pending = original;
+    updates.releaseNotes = releaseNotesResponse([releaseNoteInfo({ image_repo: "old/app", release_tag: "v2.0.0" })]);
+    const notes = updates.releaseNotes;
+    const loadPending = vi.spyOn(webApi, "pending").mockResolvedValue(original);
+    await updates.loadPending();
+    expect(updates.releaseNotes).toBe(notes);
+
+    const changed = pendingResponse([pendingItem({ image: "new/app:1.0.0", desired_tag: "2.0.0" })]);
+    changed.source_hash = "new-queue";
+    loadPending.mockResolvedValue(changed);
+    await updates.loadPending();
+    expect(updates.releaseNotes).toBeNull();
+    expect(updates.pending?.items[0]?.image).toBe("new/app:1.0.0");
+  });
+
+  it.each(["loadReleaseNotes", "refreshReleaseNotes"] as const)("discards an old %s response after the queue changes", async (method) => {
+    const updates = useUpdatesStore();
+    updates.pending = pendingResponse();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-notes");
+    const oldRequest = deferred<ReturnType<typeof releaseNotesResponse>>();
+    const apiMethod = method === "loadReleaseNotes" ? "releaseNotes" : "refreshReleaseNotes";
+    const loadNotes = vi.spyOn(webApi, apiMethod).mockReturnValueOnce(oldRequest.promise);
+    const loading = updates[method]();
+    await flushPromises();
+    const changed = { ...pendingResponse(), source_hash: "new-queue" };
+    vi.spyOn(webApi, "pending").mockResolvedValue(changed);
+    await updates.loadPending();
+    expect(updates.releaseNotes).toBeNull();
+    expect(updates.releaseNotesLoading).toBe(false);
+
+    const currentNotes = releaseNotesResponse([releaseNoteInfo({ title: "Current release" })]);
+    loadNotes.mockResolvedValue(currentNotes);
+    await updates[method]();
+    oldRequest.resolve(releaseNotesResponse([releaseNoteInfo({ title: "Old release" })]));
+    await loading;
+    expect(updates.releaseNotes).toEqual(currentNotes);
+    expect(updates.releaseNotesLoading).toBe(false);
   });
 
   it("loads release notes with independent loading state", async () => {
