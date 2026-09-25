@@ -75,6 +75,13 @@ These summaries do not change apply eligibility: release and scan evidence
 remains advisory, and existing readiness and fresh-plan checks still control
 Apply.
 
+The Dashboard leads with pending work by stack, distinguishing version decisions
+and targets needing attention from stopped, unverified, and snoozed work. These
+are review cues, not permission to apply. Recent update results reuse History's
+image and health evidence; routine settings and login events remain in History.
+System health and management links follow the update work. Failed queue reads
+remain unavailable or explicitly show the last loaded queue, never a clear queue.
+
 Run detail leads with the same service/stack scope and separate image and health
 evidence. History reuses a compact result with relative time; hover the time for
 the exact timestamp, or open **Exact timestamps** in run detail with touch or

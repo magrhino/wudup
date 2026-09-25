@@ -16,7 +16,7 @@ export function planChanges(plan: PlanResponse): ImageChange[] {
   }))));
 }
 
-function isImageUpdate(run: RunSummary): boolean {
+export function isImageUpdate(run: RunSummary): boolean {
   return ["pause", "stop", "live", "apply", "auto-update", "cli", "web-retag"].includes(run.mode);
 }
 

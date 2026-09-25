@@ -9,13 +9,21 @@ const props = defineProps<{
   releaseNotesLoading: boolean;
   releaseNotesError: string;
   securityScans: SecurityScanInfo[];
+  securityScansLoading: boolean;
+  securityScansError: string;
   reasons: string[];
 }>();
-const evidence = computed(() => reviewEvidence(props.plan, props.releaseNotes, props.securityScans, props.releaseNotesLoading, props.releaseNotesError));
+const scanRequestReason = computed(() => props.securityScansLoading
+  ? "Candidate security scan information is loading."
+  : props.securityScansError ? `Candidate security scan metadata is unavailable: ${props.securityScansError}` : "");
+const evidence = computed(() => reviewEvidence(
+  props.plan, props.releaseNotes, scanRequestReason.value ? [] : props.securityScans,
+  props.releaseNotesLoading, props.releaseNotesError,
+));
 const sections = computed(() => [
   { title: "Operational impact", items: props.plan.stacks.map(operationalImpact), empty: "No execution steps are recorded." },
   { title: "Supporting evidence", items: evidence.value.supporting, empty: "No supporting evidence is available for this selection." },
-  { title: "Unresolved before apply", items: [...new Set([...props.reasons, ...evidence.value.unresolved])], empty: "No additional unresolved reasons are reported. Review apply readiness below." },
+  { title: "Unresolved before apply", items: [...new Set([scanRequestReason.value, ...props.reasons, ...evidence.value.unresolved].filter(Boolean))], empty: "No additional unresolved reasons are reported. Review apply readiness below." },
 ]);
 </script>
 

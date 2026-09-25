@@ -191,6 +191,8 @@ function pendingPlanReviewModalProps(
     releaseNotesLoading: false,
     releaseNotesError: "",
     securityScans: [],
+    securityScansLoading: false,
+    securityScansError: "",
     planMetadataWarning: "",
     planStatusLabel: "Ready",
     planLines: [],

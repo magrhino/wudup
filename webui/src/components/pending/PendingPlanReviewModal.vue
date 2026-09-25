@@ -90,6 +90,8 @@ const props = defineProps<{
   releaseNotesLoading: boolean;
   releaseNotesError: string;
   securityScans: SecurityScanInfo[];
+  securityScansLoading: boolean;
+  securityScansError: string;
   planTagStreamUpdates: { stack: string; update: PlanTagStreamUpdate }[];
   planMetadataWarning: string;
   planStatusLabel: string;
@@ -183,6 +185,8 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       :release-notes-loading="releaseNotesLoading"
       :release-notes-error="releaseNotesError"
       :security-scans="securityScans"
+      :security-scans-loading="securityScansLoading"
+      :security-scans-error="securityScansError"
       :reasons="reviewReasons"
     >
       <section
