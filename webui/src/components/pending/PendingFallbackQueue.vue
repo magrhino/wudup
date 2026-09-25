@@ -23,6 +23,7 @@ import {
 } from "../../views/pending/pendingDisplay";
 import type { SafetyCue } from "../../views/pending/safetyCues";
 import PendingEmptyQueueState from "./PendingEmptyQueueState.vue";
+import PendingEvidenceExplanation from "./PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 
 defineProps<{
@@ -162,6 +163,7 @@ const emit = defineEmits<{
               </n-tag>
             </div>
             <span v-else class="risk-badges-muted">None</span>
+            <PendingEvidenceExplanation :cues="riskCues(item)" />
           </dd>
         </div>
         <div>

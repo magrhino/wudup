@@ -8,6 +8,8 @@ import type {
   SecurityScanInfo,
 } from "../src/api/client";
 import { DemoApiState } from "../src/api/demo/state";
+import PendingStackCard from "../src/components/pending/PendingStackCard.vue";
+import PendingEvidenceExplanation from "../src/components/pending/PendingEvidenceExplanation.vue";
 import PendingCleanupModal from "../src/components/pending/PendingCleanupModal.vue";
 import PendingPlanReviewModal from "../src/components/pending/PendingPlanReviewModal.vue";
 import PendingRemovalModal from "../src/components/pending/PendingRemovalModal.vue";
@@ -1353,7 +1355,10 @@ describe("pending helper modules", () => {
         }),
       releaseNoteReason: () => "",
       releaseNoteStatus: () => "",
-      riskCues: () => [{ key: "major-bump", label: "Major bump", type: "error" }],
+      riskCues: () => [
+        { key: "major-bump", label: "Major bump", type: "error" },
+        { key: "security-unknown", label: "Candidate scan: unavailable", type: "warning" },
+      ],
       tagInputProps: (row) => ({ "aria-label": `New tag for ${row.image}` }),
       tagOverrideValue: () => "2.0.0",
       updateTagOverride,
@@ -1385,6 +1390,11 @@ describe("pending helper modules", () => {
     expect(updateTagOverride).toHaveBeenCalledWith(item, "2.1.0");
     expect(wrapper.text()).toContain("sha256:abcdef...789");
     expect(wrapper.text()).toContain("Major bump");
+    expect(wrapper.text()).toContain("Candidate scan: unavailable");
+    const evidence = wrapper.find(".risk-badges-container .evidence-explanation");
+    expect(evidence.text()).toContain("published vulnerability evidence");
+    expect(evidence.text()).toContain("candidate scans inspect the proposed image");
+    expect(evidence.text()).toContain("not a guarantee of a safe update");
     expect(wrapper.text()).toContain("GitHub release");
     await wrapper.find('button[aria-haspopup="dialog"]').trigger("click");
     expect(wrapper.text()).toContain("Possible breaking change");
@@ -1572,5 +1582,57 @@ describe("pending helper modules", () => {
     expect(keep?.attributes("type")).toBe("button");
     await keep?.trigger("click");
     expect(wrapper.emitted("choose-tag-stream")?.[0]).toEqual([issue, "preserve"]);
+  });
+});
+
+
+describe("queue evidence explanation", () => {
+  it.each(["verified-security", "security-review", "security-stale", "security-unknown", "security-none-reported", "security-not-scanned"])(
+    "keeps %s advisory and distinguishes its source from candidate scanning",
+    (key) => {
+      const wrapper = mount(PendingEvidenceExplanation, {
+        props: { cues: [{ key, label: "Evidence", type: "warning" }] },
+      });
+      expect(wrapper.text()).toContain("published vulnerability evidence");
+      expect(wrapper.text()).toContain("candidate scans inspect the proposed image");
+      expect(wrapper.text()).toContain("Both are advisory checks, not a guarantee of a safe update");
+    },
+  );
+
+  it.each([
+    ["security-none-reported", "Candidate scan: None reported", "success"],
+    ["security-not-scanned", "Candidate scan: Not scanned", "default"],
+    ["security-stale", "Candidate scan: stale", "warning"],
+  ] as const)("keeps %s visible before opening stack details", (key, label, type) => {
+    const group = pendingGrouping([pendingGroupedItem()]).groups[0]!;
+    const wrapper = mount(PendingStackCard, {
+      global: { stubs: naiveStubs },
+      props: {
+        group,
+        loading: false,
+        releaseNoteFor: () => null,
+        releaseNoteReason: () => "",
+        releaseNoteStatus: () => "Not checked",
+        riskCues: () => [{ key, label, type }],
+        securityScanFor: () => null,
+        selectedSelectionKeySet: new Set<string>(),
+        stackHasSelection: false,
+        stackIndeterminate: false,
+        stackSelected: false,
+        tagInputProps: () => ({ "aria-label": "New tag" }),
+        tagOverrideValue: () => "",
+        updateDisabled: false,
+      },
+    });
+    expect(wrapper.find(".stack-change-preview").text()).toContain(label);
+    expect(wrapper.find(".stack-change-preview .evidence-explanation").text()).toContain("Both are advisory checks");
+    expect(wrapper.find(".stack-details").attributes("open")).toBeUndefined();
+  });
+
+  it("omits security guidance when the row has only operational cues", () => {
+    const wrapper = mount(PendingEvidenceExplanation, {
+      props: { cues: [{ key: "major-bump", label: "Major bump", type: "error" }] },
+    });
+    expect(wrapper.find("p").exists()).toBe(false);
   });
 });

@@ -24,7 +24,7 @@ function updateQuery(value: string): void {
       :value="query"
       clearable
       class="pending-search-input"
-      placeholder="Search stack, service, image, tag, digest, action, or release note"
+      placeholder="Search pending updates"
       :input-props="{ 'aria-label': 'Search pending updates' }"
       @update:value="updateQuery"
     >
@@ -55,11 +55,6 @@ function updateQuery(value: string): void {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-panel-lift);
 }
 
 .pending-search-input {

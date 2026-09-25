@@ -18,101 +18,71 @@ defineEmits<{
 </script>
 
 <template>
-  <section
-    class="self-update-banner"
-    aria-label="WUDup self-update"
-  >
-    <div class="self-update-banner-main">
-      <ArrowUpCircle :size="20" aria-hidden="true" />
-      <div>
-        <strong>
-          Update available:
-          {{ currentTag }} &rarr; {{ latestTag }}
-        </strong>
-        <span>{{ facts }}</span>
+  <details class="self-update-banner" aria-label="WUDup self-update">
+    <summary class="disclosure-summary disclosure-summary-triangle">
+      <ArrowUpCircle :size="18" aria-hidden="true" />
+      <span class="wrap-anywhere">
+        WUDup update available: {{ currentTag }} &rarr; {{ latestTag }}
+      </span>
+    </summary>
+    <div class="self-update-banner-content">
+      <span class="self-update-facts">{{ facts }}</span>
+      <div class="self-update-banner-actions">
+        <span v-if="disabledReason" class="self-update-disabled">{{ disabledReason }}</span>
+        <n-button
+          secondary
+          size="small"
+          :disabled="buttonDisabled"
+          :title="actionTitle"
+          @click="$emit('open')"
+        >
+          {{ actionLabel }}
+        </n-button>
       </div>
     </div>
-    <div class="self-update-banner-actions">
-      <span
-        v-if="disabledReason"
-        class="self-update-disabled"
-      >
-        {{ disabledReason }}
-      </span>
-      <n-button
-        type="primary"
-        size="small"
-        :disabled="buttonDisabled"
-        :title="actionTitle"
-        @click="$emit('open')"
-      >
-        {{ actionLabel }}
-      </n-button>
-    </div>
-  </section>
+  </details>
 </template>
 
 <style scoped>
 .self-update-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--color-operational-teal) 34%, var(--color-border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-operational-teal) 8%, var(--color-surface));
-  color: var(--color-ink);
-}
-
-.self-update-banner-main,
-.self-update-banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.self-update-banner-main>svg {
-  flex: 0 0 auto;
-  color: var(--color-operational-teal);
-}
-
-.self-update-banner-main div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.self-update-banner-main span,
-.self-update-disabled {
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
   color: var(--color-muted-text);
   font-size: var(--text-metadata-size);
+}
+
+.self-update-banner summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--size-touch-target);
+  padding-block: 4px;
+  cursor: pointer;
+}
+
+.self-update-banner summary svg {
+  flex: 0 0 auto;
+}
+
+.self-update-banner-content {
+  display: grid;
+  gap: 8px;
+  padding-block: 4px 12px;
+}
+
+.self-update-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.self-update-facts,
+.self-update-disabled {
   overflow-wrap: anywhere;
 }
 
-.self-update-disabled {
-  max-width: 42ch;
-}
-
-@media (--wud-app-shell) {
-  .self-update-banner {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .self-update-banner-actions {
-    width: 100%;
-  }
-}
-
 @media (--wud-compact) {
-  .self-update-banner-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
   .self-update-banner-actions :deep(.n-button) {
     min-width: var(--size-touch-target);
     min-height: var(--size-touch-target);
