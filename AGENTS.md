@@ -54,7 +54,9 @@ Repo-local routing/context only for WUDup. Global instructions control default b
 
 - `src/wudup/AGENTS.md` owns Python backend module boundaries, WebUI backend safety, updater compatibility, and focused Python test guidance.
 - `webui/AGENTS.md` owns frontend state, typed API client, components/views, static demo, and frontend validation guidance.
+- `webui/src/api/demo/AGENTS.md` owns the static public demo API and fixture contract.
 - Prefer the closest scoped file over expanding root; nested guidance should replace duplicated root detail.
+- Each `AGENTS.md` has a sibling one-line `CLAUDE.md` (`@AGENTS.md`) so Claude Code loads it; add the same shim when creating a new scoped `AGENTS.md`.
 
 ## Issue Creation
 
@@ -144,7 +146,7 @@ Do not read or edit unless directly required.
 
 ## Nested AGENTS Suggestions
 
-Intentional scoped guides: `src/wudup/AGENTS.md` and `webui/AGENTS.md`.
+Intentional scoped guides: `src/wudup/AGENTS.md`, `webui/AGENTS.md`, and `webui/src/api/demo/AGENTS.md`.
 Do not add `tests/AGENTS.md` until focused backend test files make test ownership stable enough to replace root guidance.
 
 ## Edit Discipline
