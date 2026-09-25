@@ -5,6 +5,8 @@ import { NButton, NModal, NTag } from "naive-ui";
 
 import type { ReleaseNoteInfo } from "../../api/client";
 import { useUpdatesStore } from "../../stores/updates";
+import { safeUrl } from "../../utils/safeUrl";
+import ReleaseNotesMarkdown from "./ReleaseNotesMarkdown";
 import {
   notificationStatusLabel as releaseNotificationStatusLabel,
   notificationStatusType as releaseNotificationStatusType,
@@ -45,15 +47,6 @@ const matched = computed(() => {
 const contextLabel = computed(() => matched.value ? "Matched to candidate" : "Upstream context");
 const unavailableReason = computed(() => props.releaseNoteReason || props.releaseNote?.error ||
   (props.releaseNoteStatus === "Checking..." ? "Loading release information…" : "Release notes are not available for this candidate."));
-
-function safeUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-}
 
 function openNotes(): void {
   show.value = true;
@@ -164,13 +157,13 @@ function readChangelog(): Promise<void> {
               <strong><ShieldAlert :size="14" aria-hidden="true" /> {{ securityLabel }}</strong>
               <span>{{ security?.reason }}</span>
             </output>
-            <pre v-if="releaseBody" class="release-panel-body">{{ releaseBody }}</pre>
+            <ReleaseNotesMarkdown v-if="releaseBody" class="release-panel-body" :source="releaseBody" breaks />
             <output v-else-if="!changelogLoading && !changelogReady && !changelogProblem">{{ unavailableReason }}</output>
             <output v-if="changelogLoading">Loading changelog notes…</output>
             <output v-if="changelogProblem" class="release-changelog-problem">{{ changelogProblem }}</output>
             <section v-if="changelogReady">
               <h3>Changelog notes</h3>
-              <pre class="release-panel-body">{{ changelog.body }}</pre>
+              <ReleaseNotesMarkdown class="release-panel-body" :source="changelog.body" :heading-level="4" />
               <a v-if="safeUrl(changelog.sourceUrl)" class="release-note-link" :href="changelog.sourceUrl"
                 target="_blank" rel="noopener noreferrer">Changelog source <ExternalLink :size="14" aria-hidden="true" /></a>
             </section>
@@ -273,12 +266,75 @@ function readChangelog(): Promise<void> {
 }
 
 .release-panel-body {
-  margin: 0;
-  white-space: pre-wrap;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
   overflow-wrap: anywhere;
-  font-family: inherit;
   font-size: var(--text-metadata-size);
   line-height: 1.6;
+}
+
+.release-panel-body :deep(:is(h3, h4, h5, h6)) {
+  margin: 8px 0 0;
+  font-size: var(--text-body-size);
+}
+
+.release-panel-body :deep(:is(p, ul, ol, blockquote, pre, hr)) {
+  margin: 0;
+}
+
+.release-panel-body :deep(:is(ul, ol)) {
+  padding-inline-start: 20px;
+}
+
+.release-panel-body :deep(a) {
+  font-weight: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.release-panel-body :deep(li.task) {
+  list-style: none;
+}
+
+.release-panel-body :deep(blockquote) {
+  padding-inline-start: 12px;
+  border-inline-start: 3px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.release-panel-body :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.release-panel-body :deep(pre) {
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--color-panel-tint);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.release-panel-body :deep(hr) {
+  border: 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.release-panel-body :deep(.release-markdown-table) {
+  overflow-x: auto;
+}
+
+.release-panel-body :deep(table) {
+  border-collapse: collapse;
+}
+
+.release-panel-body :deep(:is(th, td)) {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border-subtle);
+  text-align: start;
+  overflow-wrap: normal;
 }
 
 .release-panel-content section {
