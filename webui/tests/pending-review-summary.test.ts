@@ -134,6 +134,23 @@ describe("Pending review decision summary", () => {
     expect(result.unresolved.join(" ")).toContain("Release provider is unavailable");
   });
 
+  it("prioritizes loading and request errors when release information does not match", () => {
+    const { plan, note, scan } = evidenceFixture();
+    note.release_tag = "v3.0.0";
+    const loading = reviewEvidence(plan, [note], [scan], true, "Release lookup failed.");
+    expect(loading.unresolved).toEqual(["media / app: Release information is loading."]);
+    const failed = reviewEvidence(plan, [note], [scan], false, "Release lookup failed.");
+    expect(failed.unresolved).toEqual(["media / app: Release lookup failed."]);
+  });
+
+  it("keeps an unknown verdict unresolved even when the scan completed", () => {
+    const { plan, note, scan } = evidenceFixture();
+    scan.verdict = "unknown";
+    const result = reviewEvidence(plan, [note], [scan], false, "");
+    expect(result.supporting.join(" ")).not.toContain("comparison");
+    expect(result.unresolved.join(" ")).toContain("Security evidence is incomplete.");
+  });
+
   it("renders scoped reasons as text and discloses all evidence for larger selections", () => {
     const { plan, note, scan } = evidenceFixture();
     plan.stacks.push({ ...plan.stacks[0]!, name: "other" });
