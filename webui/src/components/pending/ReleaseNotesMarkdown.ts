@@ -106,7 +106,8 @@ function renderInline(tokens: Token[] | undefined, inLink = false): VNodeChild[]
       case "checkbox":
         return h("input", { type: "checkbox", checked: t.checked, disabled: true, "aria-label": t.checked ? "Done" : "Not done" });
       case "text":
-        return t.tokens ? renderInline(t.tokens, inLink) : decodeEntities(t.text);
+        // marked has already resolved numeric references in `text`; decode the source once.
+        return t.tokens ? renderInline(t.tokens, inLink) : decodeEntities(t.raw);
       default:
         return decodeEntities(t.text ?? t.raw ?? "");
     }

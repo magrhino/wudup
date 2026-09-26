@@ -116,4 +116,20 @@ describe("release notes markdown", () => {
     expect(render("3. c\n4. d").find("ol").attributes("start")).toBe("3");
     expect(render("1. a").find("ol").attributes("start")).toBeUndefined();
   });
+
+  it("decodes numeric references only once", () => {
+    expect(render("&#38;lt; &#38;amp; &#128512; *&#38;gt;*").text()).toBe("&lt; &amp; \u{1f600} &gt;");
+  });
+
+  it("covers inline breaks, unlabeled images, nested links, and a trailing bare <", () => {
+    expect(render("a<br>b<br/>c").findAll("p br")).toHaveLength(2);
+    const image = render("![](https://e.example/i.png)").find("a");
+    expect(image.attributes("href")).toBe("https://e.example/i.png");
+    expect(image.text()).toBe("[image]");
+    const nested = render("[outer <https://inner.example>](https://outer.example)");
+    expect(nested.findAll("a").map((a) => a.attributes("href"))).toEqual(["https://outer.example"]);
+    expect(nested.find("a").text()).toBe("outer https://inner.example");
+    expect(render("<div>\na <").text()).toBe("a <");
+    expect(render("<div>\nplain tail").text()).toBe("plain tail");
+  });
 });
