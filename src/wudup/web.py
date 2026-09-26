@@ -6,10 +6,8 @@ import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -804,31 +802,6 @@ def api_job_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
-    )
-
-
-def _auto_update_tick(
-    app: FastAPI,
-    settings: web_models.WebSettings,
-    *,
-    now: datetime | None = None,
-) -> web_models.ApplyJobResponse | None:
-    return web_scheduler._auto_update_tick(
-        app,
-        settings,
-        effective_config_loader=web_settings._effective_config,
-        now=now,
-    )
-
-
-def _start_auto_update_scheduler(
-    app: FastAPI,
-    settings: web_models.WebSettings,
-) -> Any:
-    return web_scheduler.start_auto_update_scheduler(
-        app,
-        settings,
-        effective_config_loader=web_settings._effective_config,
     )
 
 

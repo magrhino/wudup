@@ -731,24 +731,16 @@ class _PlanBuilder(_UpdateScopeMixin):
         return self._normalized_resolved_image(match)
 
     def _normalized_resolved_image(self, match: Match) -> str:
-        if not self.config.digest_pin_updates and is_digest_target_line(match.target):
-            return image_with_tag(match.compose_image, image_tag(match.target.first))
-        return match.resolved
+        return _pending_normalized_resolved(
+            match,
+            digest_pin_updates_enabled=self.config.digest_pin_updates,
+        )
 
     def _match_digest_unpin(self, match: Match) -> DigestUnpinUpdate | None:
-        updates = self.digest_unpin_updates_by_stack.get(match.stack.index, ())
-        key = (
-            match.compose_image,
-            image_tag(match.target.first),
-            normalize_digest(match.target.digest),
+        return _pending_digest_unpin_for_matches(
+            (match,),
+            self.digest_unpin_updates_by_stack.get(match.stack.index, ()),
         )
-        for update in updates:
-            if (update.old_image, update.resolved_tag, update.target_digest) != key:
-                continue
-            if match.service and match.service not in update.services:
-                continue
-            return update
-        return None
 
 
 def _digest_pin_line_image_details(

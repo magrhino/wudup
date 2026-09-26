@@ -790,34 +790,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     releaseNotificationError.value = "";
   }
 
-  async function createJob(
-    planId: string,
-    lineNumbers: number[],
-    allowTagUpdates: boolean,
-    tagOverrides: TagOverrideRequest[] = [],
-    digestPinLabelRewriteApprovals: DigestPinLabelRewriteApprovalRequest[] = [],
-    options: PlanMutationOptions = {},
-  ): Promise<ApplyJobResponse> {
-    const auth = useAuthStore();
-    await loadWithState(async () => {
-      applyJobLog.value = null;
-      const job = await webApi.createJob(
-        planId,
-        lineNumbers,
-        allowTagUpdates,
-        tagOverrides,
-        digestPinLabelRewriteApprovals,
-        await auth.ensureCsrf(),
-        options,
-      );
-      setApplyJob(job);
-    });
-    if (applyJob.value === null) {
-      throw new Error("Apply job was not created");
-    }
-    return applyJob.value;
-  }
-
   async function applyPlan(
     planId: string,
     lineNumbers: number[],
@@ -1065,7 +1037,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     removeSelectedPending,
     rescanPending,
     clearPlan,
-    createJob,
     applyPlan,
     clearApplyJob,
     clearApplyJobLog,
@@ -1074,9 +1045,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     setError,
     loadApplyJob,
     loadApplyJobLogFromRun,
-    markApplyJobRecovery,
-    rememberApplyJob,
-    clearRememberedApplyJobId,
   };
 });
 

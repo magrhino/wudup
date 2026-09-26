@@ -1377,7 +1377,7 @@ describe("updates store", () => {
     const updates = useUpdatesStore();
     useRunsStore();
 
-    await updates.createJob("plan-test", [1], false, []);
+    await updates.applyPlan("plan-test", [1], false, []);
 
     expect(updates.rememberedApplyJobId).toBe("job-active");
     expect(globalThis.sessionStorage.getItem("applyJobId")).toBe("job-active");
