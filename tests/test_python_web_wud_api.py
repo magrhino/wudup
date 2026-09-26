@@ -50,8 +50,9 @@ from wudup.release_notes import (
 from wudup.release_notes import (
     release_note_contexts,
 )
-from wudup.web import create_app, load_web_settings
+from wudup.web import create_app
 from wudup.web_auth import WebConfigError
+from wudup.web_config import load_web_settings
 
 
 def _settings(

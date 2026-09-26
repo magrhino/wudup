@@ -8,7 +8,7 @@ from typing import Any
 from tests.web_test_helpers import _web_env
 
 from wudup import web_wud_transport
-from wudup.web import load_web_settings
+from wudup.web_config import load_web_settings
 
 
 def settings(tmp_path: Path, base_url: str):
