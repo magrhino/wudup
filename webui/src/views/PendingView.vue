@@ -39,6 +39,12 @@ import {
   releaseNoteStatus as pendingReleaseNoteStatus,
   tagInputProps,
 } from "./pending/pendingDisplay";
+import {
+  cleanupLineLabel,
+  removalLineLabel,
+  staleDiagnosticDetail,
+  staleDiagnosticLabel,
+} from "./pending/planReviewFormatters";
 import { createPendingColumns } from "./pending/tableColumns";
 import { pluralize } from "./pending/utils";
 import {
@@ -373,14 +379,11 @@ const securityScanSummaryLabel = computed(() => securityScanSummary.value.label)
 const securityScanSummaryType = computed(() => securityScanSummary.value.type);
 
 const {
-  actionCommand,
   applyButtonLabel,
   applyDisabled,
   applyPreflight,
   applyPreflightAttentionChecks,
   applyPreflightCheckDetail,
-  applyPreflightCheckLabel,
-  applyPreflightCheckType,
   applyPreflightPassedChecks,
   applyPreflightPassedText,
   applyPlanPayload,
@@ -397,18 +400,12 @@ const {
   cleanupDisabled,
   cleanupDisabledMessage,
   cleanupItems,
-  cleanupLineLabel,
   cleanupReviewSummary,
   approveDigestPinLabelRewrite,
   approveTagStreamLabelRewrite,
   clearUpdateIntent,
   digestPinLabelApprovalApproved,
   digestPinLabelApprovalIssues,
-  digestPinLabelIssueProposedRegex,
-  issueDetailString,
-  issueHint,
-  issueLabel,
-  issueType,
   mutationDisabledMessage,
   mutationStateLabel,
   mutationStateType,
@@ -432,7 +429,6 @@ const {
   removalConfirmButtonLabel,
   removalDisabled,
   removalItems,
-  removalLineLabel,
   removeSelectedDisabled,
   removeSelectedDisabledMessage,
   selectedTagOverrideError,
@@ -440,8 +436,6 @@ const {
   selectedUpdateContext,
   setUpdateIntent,
   chooseTagStream,
-  staleDiagnosticDetail,
-  staleDiagnosticLabel,
   unmatchedIssueSummary,
   unmatchedReviewCountLabel,
   unmatchedReviewSummary,
@@ -1083,14 +1077,11 @@ onBeforeUnmount(() => {
       v-if="updates.plan"
       :show="showPreflightModal"
       :plan="updates.plan"
-      :action-command="actionCommand"
       :apply-button-label="applyButtonLabel"
       :apply-disabled="applyDisabled"
       :apply-preflight="applyPreflight"
       :apply-preflight-attention-checks="applyPreflightAttentionChecks"
       :apply-preflight-check-detail="applyPreflightCheckDetail"
-      :apply-preflight-check-label="applyPreflightCheckLabel"
-      :apply-preflight-check-type="applyPreflightCheckType"
       :apply-preflight-passed-checks="applyPreflightPassedChecks"
       :apply-preflight-passed-text="applyPreflightPassedText"
       :apply-readiness-status-label="applyReadinessStatusLabel"
@@ -1105,15 +1096,10 @@ onBeforeUnmount(() => {
       :cleanup-review-summary="cleanupReviewSummary"
       :digest-pin-label-approval-approved="digestPinLabelApprovalApproved"
       :digest-pin-label-approval-issues="digestPinLabelApprovalIssues"
-      :digest-pin-label-issue-proposed-regex="digestPinLabelIssueProposedRegex"
       :tag-stream-decision-issues="tagStreamDecisionIssues"
       :tag-stream-decision-selected="tagStreamDecisionSelected"
       :tag-stream-label-approval-approved="tagStreamLabelApprovalApproved"
       :tag-stream-label-approval-issues="tagStreamLabelApprovalIssues"
-      :issue-detail-string="issueDetailString"
-      :issue-hint="issueHint"
-      :issue-label="issueLabel"
-      :issue-type="issueType"
       :loading="updates.loading"
       :mutation-disabled-message="mutationDisabledMessage"
       :plan-actions="planActions"
@@ -1136,8 +1122,6 @@ onBeforeUnmount(() => {
       :preflight-summary="preflightSummary"
       :preflight-tag-rewrite-notice="preflightTagRewriteNotice"
       :preflight-title="preflightTitle"
-      :stale-diagnostic-detail="staleDiagnosticDetail"
-      :stale-diagnostic-label="staleDiagnosticLabel"
       :visible-plan-issues="visiblePlanIssues"
       @apply="confirmApply"
       @approve-digest-pin-label-rewrite="approveDigestPinLabelRewrite"

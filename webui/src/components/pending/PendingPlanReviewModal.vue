@@ -8,8 +8,6 @@ import { planChanges } from "../../utils/updateSummary";
 import type {
   ApplyPreflightCheck,
   ApplyPreflightResponse,
-  ApplyPreflightStatus,
-  PlanAction,
   PlanCleanupItem,
   PlanIssue,
   PlanResponse,
@@ -25,7 +23,19 @@ import {
   type PlanDigestUnpinUpdateView,
   type PlanLineView,
 } from "../../views/pending/utils";
-import { tagStreamLabelApprovalIssueKey } from "../../views/pending/usePendingPlanReviewState";
+import {
+  actionCommand,
+  applyPreflightCheckLabel,
+  applyPreflightCheckType,
+  digestPinLabelIssueProposedRegex,
+  issueDetailString,
+  issueHint,
+  issueLabel,
+  issueType,
+  staleDiagnosticDetail,
+  staleDiagnosticLabel,
+  tagStreamLabelApprovalIssueKey,
+} from "../../views/pending/planReviewFormatters";
 import PendingPlanLineList from "./PendingPlanLineList.vue";
 import PendingReviewSummary from "./PendingReviewSummary.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
@@ -36,14 +46,11 @@ import PreflightNoticeList from "../preflight/PreflightNoticeList.vue";
 type TagType = "default" | "error" | "info" | "success" | "warning";
 
 const props = defineProps<{
-  actionCommand: (action: PlanAction) => string;
   applyButtonLabel: string;
   applyDisabled: boolean;
   applyPreflight: ApplyPreflightResponse | null;
   applyPreflightAttentionChecks: ApplyPreflightCheck[];
   applyPreflightCheckDetail: (check: ApplyPreflightCheck) => string;
-  applyPreflightCheckLabel: (status: ApplyPreflightStatus) => string;
-  applyPreflightCheckType: (status: ApplyPreflightStatus) => TagType;
   applyPreflightPassedChecks: ApplyPreflightCheck[];
   applyPreflightPassedText: string;
   applyReadinessStatusLabel: string;
@@ -58,15 +65,10 @@ const props = defineProps<{
   cleanupReviewSummary: string;
   digestPinLabelApprovalApproved: (issue: PlanIssue) => boolean;
   digestPinLabelApprovalIssues: PlanIssue[];
-  digestPinLabelIssueProposedRegex: (issue: PlanIssue) => string;
   tagStreamDecisionIssues: PlanIssue[];
   tagStreamDecisionSelected: (issue: PlanIssue, decision: TagStreamDecision) => boolean;
   tagStreamLabelApprovalApproved: (issue: PlanIssue) => boolean;
   tagStreamLabelApprovalIssues: PlanIssue[];
-  issueDetailString: (issue: PlanIssue, key: string) => string;
-  issueHint: (issue: PlanIssue) => string;
-  issueLabel: (issue: PlanIssue) => string;
-  issueType: (issue: PlanIssue) => "error" | "warning" | "info";
   loading: boolean;
   mutationDisabledMessage: string;
   plan: PlanResponse;
@@ -91,8 +93,6 @@ const props = defineProps<{
   preflightTagRewriteNotice: string;
   preflightTitle: string;
   show: boolean;
-  staleDiagnosticDetail: (item: PlanCleanupItem) => string;
-  staleDiagnosticLabel: (item: PlanCleanupItem) => string;
   visiblePlanIssues: PlanIssue[];
 }>();
 
@@ -111,10 +111,10 @@ const reviewReasons = computed(() => {
   return [
     ...[...props.visiblePlanIssues, ...props.tagStreamDecisionIssues,
       ...props.tagStreamLabelApprovalIssues, ...props.digestPinLabelApprovalIssues].map(issue => [
-      props.issueLabel(issue),
-      props.issueHint(issue),
+      issueLabel(issue),
+      issueHint(issue),
     ].filter(Boolean).join(" — ")),
-    ...props.cleanupItems.map(item => `${item.image}: ${props.staleDiagnosticLabel(item)}. ${props.staleDiagnosticDetail(item)}`),
+    ...props.cleanupItems.map(item => `${item.image}: ${staleDiagnosticLabel(item)}. ${staleDiagnosticDetail(item)}`),
     ...props.plan.skipped.filter(item => !cleanupLines.has(item.line_no))
       .map(item => `${item.image}: skipped. ${item.reason}`),
     props.planMetadataWarning,
@@ -137,7 +137,7 @@ function selectedTagStreamUpdate(issue: PlanIssue): PlanTagStreamUpdate | undefi
 
 function tagStreamRulePreview(issue: PlanIssue): string {
   return selectedTagStreamUpdate(issue)?.proposed_label_regex
-    ?? props.issueDetailString(issue, "preserve_label_regex");
+    ?? issueDetailString(issue, "preserve_label_regex");
 }
 </script>
 
