@@ -54,6 +54,9 @@ from .web_models import (
 )
 
 WEB_APPLY_EXECUTOR_MAX_WORKERS = 1
+# Finished apply, retag, and tracking-repair jobs stay pollable in memory until
+# this many jobs are registered; older finished runs remain in run history.
+WEB_APPLY_JOB_LIMIT = 20
 DEFAULT_JOB_LOG_TAIL_BYTES = 65_536
 JOB_STREAM_HEARTBEAT_SECONDS = 15.0
 JOB_STREAM_LOG_POLL_SECONDS = 1.0
@@ -189,31 +192,54 @@ def _submit_apply_job_state(
             status="queued",
             selected_line_numbers=tuple(plan.selected_line_numbers),
         )
-        jobs[job.id] = job
+        _register_apply_job_unlocked(jobs, job)
         response = _apply_job_response(job)
         apply_condition.notify_all()
-        executor.submit(
-            _run_apply_job,
-            settings,
-            plan.plan_id,
-            tuple(plan.selected_line_numbers),
-            allow_tag_updates,
-            tag_overrides,
-            digest_pin_label_rewrite_approvals,
-            _digest_pin_updates_from_plan(plan),
-            _digest_unpin_updates_from_plan(plan),
-            jobs,
-            apply_condition,
-            job.id,
-            wud_lock,
-            effective_config_loader,
-            auto_update_schedule_run_updater,
-            active_run_context,
-            tuple(plan.selected_selections),
-            tuple(plan.completed_update_selections),
-            tag_stream_updates,
-        )
+        try:
+            executor.submit(
+                _run_apply_job,
+                settings,
+                plan.plan_id,
+                tuple(plan.selected_line_numbers),
+                allow_tag_updates,
+                tag_overrides,
+                digest_pin_label_rewrite_approvals,
+                _digest_pin_updates_from_plan(plan),
+                _digest_unpin_updates_from_plan(plan),
+                jobs,
+                apply_condition,
+                job.id,
+                wud_lock,
+                effective_config_loader,
+                auto_update_schedule_run_updater,
+                active_run_context,
+                tuple(plan.selected_selections),
+                tuple(plan.completed_update_selections),
+                tag_stream_updates,
+            )
+        except Exception:
+            del jobs[job.id]
+            apply_condition.notify_all()
+            raise
         return response
+
+
+def _register_apply_job_unlocked(
+    jobs: dict[str, WebApplyJob], job: WebApplyJob
+) -> None:
+    """Add a job and evict the oldest finished jobs beyond WEB_APPLY_JOB_LIMIT.
+
+    Callers must hold web_apply_condition. Queued and running jobs are never
+    evicted.
+    """
+    terminal_ids = [
+        job_id
+        for job_id, existing in jobs.items()
+        if existing.status in TERMINAL_APPLY_JOB_STATUSES
+    ]
+    for job_id in terminal_ids[: max(0, len(jobs) - WEB_APPLY_JOB_LIMIT + 1)]:
+        jobs.pop(job_id, None)
+    jobs[job.id] = job
 
 
 def _active_apply_job_exists(request: Request) -> bool:
