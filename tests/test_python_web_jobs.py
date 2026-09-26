@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
+from httpx import Response
 from tests.web_test_helpers import (
     _client,
     _csrf_headers,
@@ -635,13 +637,16 @@ def test_register_apply_job_keeps_active_jobs(status: str) -> None:
     assert len(jobs) == web_jobs.WEB_APPLY_JOB_LIMIT
 
 
-def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
+def _single_service_apply_client(
+    tmp_path: Path, extra_env: dict[str, str] | None = None
+) -> tuple[TestClient, dict[str, str], Path]:
     fake_env, fake_root = _fake_docker_env(tmp_path)
     client = _client(
         tmp_path,
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **(extra_env or {}),
             **fake_env,
         },
     )
@@ -653,15 +658,16 @@ def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
         "stack",
         [("app", "repo/app:latest", "cid-app")],
     )
-    finished = _fill_finished_apply_jobs(client)
-    headers = _csrf_headers(client)
+    return client, _csrf_headers(client), fake_root
+
+
+def _post_line_one_apply_job(client: TestClient, headers: dict[str, str]) -> Response:
     plan = client.post(
         "/api/v1/plans",
         json={"line_numbers": [1]},
         headers=headers,
     ).json()
-
-    response = client.post(
+    return client.post(
         "/api/v1/jobs",
         json={
             "plan_id": plan["plan_id"],
@@ -670,6 +676,13 @@ def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
         },
         headers=headers,
     )
+
+
+def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
+    client, headers, _fake_root = _single_service_apply_client(tmp_path)
+    finished = _fill_finished_apply_jobs(client)
+
+    response = _post_line_one_apply_job(client, headers)
 
     assert response.status_code == 202
     job_id = response.json()["job_id"]
@@ -679,30 +692,9 @@ def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
 
 
 def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_LOCK_TIMEOUT": "0",
-            **fake_env,
-        },
+    client, headers, _fake_root = _single_service_apply_client(
+        tmp_path, {"WUD_LOCK_TIMEOUT": "0"}
     )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-    _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "stack",
-        [("app", "repo/app:latest", "cid-app")],
-    )
-    headers = _csrf_headers(client)
-    plan = client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=headers,
-    ).json()
 
     class FailingExecutor:
         def submit(self, *_args: object, **_kwargs: object) -> None:
@@ -712,30 +704,14 @@ def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
     client.app.state.web_apply_executor = FailingExecutor()
 
     with pytest.raises(RuntimeError, match="queue failed"):
-        client.post(
-            "/api/v1/jobs",
-            json={
-                "plan_id": plan["plan_id"],
-                "line_numbers": [1],
-                "confirmation": "apply",
-            },
-            headers=headers,
-        )
+        _post_line_one_apply_job(client, headers)
 
     assert client.app.state.web_apply_jobs == {}
     assert web_jobs._active_mutation_error_in_state(client.app.state) == ""
 
     # A leaked WUD lock would make this retry fail with 409 under a zero timeout.
     client.app.state.web_apply_executor = working_executor
-    retry = client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": plan["plan_id"],
-            "line_numbers": [1],
-            "confirmation": "apply",
-        },
-        headers=headers,
-    )
+    retry = _post_line_one_apply_job(client, headers)
 
     assert retry.status_code == 202, retry.text
     job = _wait_apply_job(client, retry.json()["job_id"])
@@ -743,41 +719,11 @@ def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
 
 
 def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            **fake_env,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-    _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "stack",
-        [("app", "repo/app:latest", "cid-app")],
-    )
+    client, headers, fake_root = _single_service_apply_client(tmp_path)
     hook = fake_root / "post-pull-hook"
     hook.write_text("#!/usr/bin/env bash\nsleep 0.1\n", encoding="utf-8")
     hook.chmod(0o755)
-    headers = _csrf_headers(client)
-    plan = client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=headers,
-    ).json()
-    apply_response = client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": plan["plan_id"],
-            "line_numbers": [1],
-            "confirmation": "apply",
-        },
-        headers=headers,
-    )
+    apply_response = _post_line_one_apply_job(client, headers)
 
     with client.stream(
         "GET",
