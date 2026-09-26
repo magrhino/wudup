@@ -16,7 +16,7 @@ Rules for files under `webui/`. Root `AGENTS.md` controls repo-wide safety, rele
 |---|---|---|---|
 | `src/api/client.ts` | Typed backend API client and response mapping. | Matching backend route/model plus consuming store. | Duplicating fetch logic in components or stores. |
 | `src/stores/connection.ts` | Status, doctor, restart, diagnostics. | API client and consuming view. | Mixing pending-update or settings state here. |
-| `src/stores/updates.ts` | Pending updates, release notes, apply jobs. | API client, job/release-note views, focused tests. | Sharing mutation state through localStorage. |
+| `src/stores/updates.ts`, `src/stores/applyJobSession.ts` | Pending updates, release notes, apply jobs; the plain session-storage module holds only transient apply-job recovery. | API client, job/release-note views, focused tests. | Sharing mutation state through localStorage. |
 | `src/stores/releaseChangelog.ts` | On-demand GitHub changelog cache for release-note rows, keyed by release URL. | `src/utils/releaseChangelog.ts`, `PendingReleaseNotes.vue`, focused store tests. | Pending-update state or resetting it from the updates store. |
 | `src/stores/selfUpdate.ts` | Self-update status, plans, pull/prepare submission, messages and refresh. | Typed self-update API, app-shell panel, focused store/router tests. | Coupling self-update lifecycle or loading to pending updates; backend safety decisions stay backend-owned. |
 | `src/stores/retags.ts` | Retag targets, choices, preview polling, and the saved GitHub fallback preference. | Retag API, `RetagsView.vue`, focused retag store/view tests. | Duplicating shared apply jobs: use updates store actions to clear/register jobs; updates must not import retags. |

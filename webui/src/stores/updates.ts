@@ -36,6 +36,13 @@ import {
 import { useAuthStore } from "./auth";
 import { errorMessage, runWithStoreState } from "./storeState";
 import { useRunsStore } from "./runs";
+import {
+  readApplyRecoveryStorage,
+  readRememberedApplyJobId,
+  removeRememberedApplyJobId,
+  writeApplyRecoveryStorage,
+  writeRememberedApplyJobId,
+} from "./applyJobSession";
 
 export const APPLY_JOB_RECOVERY_MESSAGE =
   "The update job is no longer available. The WebUI may have restarted. Review its run and log before applying more updates; the outcome is still unknown.";
@@ -54,7 +61,6 @@ type PendingLoadOptions = {
   freshAfterCurrent?: boolean;
 };
 
-const APPLY_JOB_STORAGE_KEY = "applyJobId";
 const TERMINAL_APPLY_JOB_STATUSES = new Set<ApplyJobResponse["status"]>([
   "success",
   "failure",
@@ -963,63 +969,4 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
-}
-
-function readRememberedApplyJobId(): string {
-  const storage = sessionStorageAvailable();
-  try {
-    return storage?.getItem(APPLY_JOB_STORAGE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function readApplyRecoveryStorage<T>(key: string, fallback: T): T {
-  try {
-    const value = JSON.parse(sessionStorageAvailable()?.getItem(key) ?? "null");
-    if (key === "applyJobRun") {
-      return (value?.jobId === readRememberedApplyJobId() &&
-        Number.isSafeInteger(value?.runId) && value.runId > 0 ? value.runId : fallback) as T;
-    }
-    return (Array.isArray(value) ? value.filter((entry) =>
-      entry && typeof entry.jobId === "string" && entry.jobId &&
-      (entry.runId === null || (Number.isSafeInteger(entry.runId) && entry.runId > 0)) &&
-      typeof entry.acknowledged === "boolean") : fallback) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeApplyRecoveryStorage(key: string, value: unknown): void {
-  try {
-    sessionStorageAvailable()?.setItem(key, JSON.stringify(value));
-  } catch {
-    // Recovery remains available in memory if session storage is unavailable.
-  }
-}
-
-function writeRememberedApplyJobId(jobId: string): void {
-  const storage = sessionStorageAvailable();
-  try {
-    storage?.setItem(APPLY_JOB_STORAGE_KEY, jobId);
-  } catch {
-    // Remembering a transient job id is best-effort.
-  }
-}
-
-function removeRememberedApplyJobId(): void {
-  const storage = sessionStorageAvailable();
-  try {
-    storage?.removeItem(APPLY_JOB_STORAGE_KEY);
-  } catch {
-    // Remembering a transient job id is best-effort.
-  }
-}
-
-function sessionStorageAvailable(): Storage | null {
-  try {
-    return "sessionStorage" in globalThis ? globalThis.sessionStorage : null;
-  } catch {
-    return null;
-  }
 }
