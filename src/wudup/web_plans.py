@@ -12,6 +12,7 @@ from . import (
     web_database,
     web_diagnostics,
     web_file_selection_store,
+    web_job_registry,
     web_jobs,
     web_pending_sources,
     web_scheduler,
@@ -81,14 +82,14 @@ def api_create_job(payload: ApplyPlanRequest, request: Request) -> ApplyJobRespo
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
     wud_lock: DirectoryLock | None = None
     try:
         pending_source = _resolve_pending_source_for_apply(settings)
         if pending_source.active == "file":
-            wud_lock = web_jobs._acquire_apply_wud_lock(settings)
+            wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
             pending_source = _resolve_pending_source_for_apply(settings)
             if pending_source.active != "file":
                 wud_lock.close()

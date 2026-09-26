@@ -59,7 +59,7 @@ web_app: Any = None
 web_auth: Any = None
 web_diagnostics: Any = None
 web_health: Any = None
-web_jobs: Any = None
+web_job_registry: Any = None
 web_onboarding: Any = None
 web_pending: Any = None
 web_plans: Any = None
@@ -82,7 +82,7 @@ WebSettings: Any = None
 def _ensure_web_fixture_imports() -> None:
     global _WEB_FIXTURE_IMPORTS_READY
     global Request
-    global web_app, web_auth, web_diagnostics, web_health, web_jobs
+    global web_app, web_auth, web_diagnostics, web_health, web_job_registry
     global web_onboarding, web_pending, web_plans, web_release_notes, web_retags
     global web_rollback, web_runs, web_self_update, web_settings, web_state, web_static
     global web_wud_api
@@ -99,7 +99,7 @@ def _ensure_web_fixture_imports() -> None:
     from wudup import web_auth as _web_auth
     from wudup import web_diagnostics as _web_diagnostics
     from wudup import web_health as _web_health
-    from wudup import web_jobs as _web_jobs
+    from wudup import web_job_registry as _web_job_registry
     from wudup import web_onboarding as _web_onboarding
     from wudup import web_pending as _web_pending
     from wudup import web_plans as _web_plans
@@ -133,7 +133,7 @@ def _ensure_web_fixture_imports() -> None:
     web_auth = _web_auth
     web_diagnostics = _web_diagnostics
     web_health = _web_health
-    web_jobs = _web_jobs
+    web_job_registry = _web_job_registry
     web_onboarding = _web_onboarding
     web_pending = _web_pending
     web_plans = _web_plans
@@ -622,7 +622,7 @@ def generate_static_demo_fixtures() -> dict[str, Any]:
                     data = _fixture_payload(context)
                 return _static_demo_payload(_sanitize_payload(data, context.paths))
             finally:
-                web_jobs.shutdown_apply_job_state(context.state)
+                web_job_registry.shutdown_apply_job_state(context.state)
 
 
 @contextlib.contextmanager
@@ -974,7 +974,7 @@ def _demo_context(root: Path) -> SimpleNamespace:
     _seed_wud_api_snapshot(settings)
     _seed_wud_api_configuration_diagnostics(settings)
     state = SimpleNamespace(web_settings=settings)
-    web_jobs.initialize_apply_job_state(state)
+    web_job_registry.initialize_apply_job_state(state)
     request = _demo_request(settings, state)
     _seed_release_note_cache(settings)
     return SimpleNamespace(

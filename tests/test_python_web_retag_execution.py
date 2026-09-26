@@ -14,7 +14,7 @@ from tests.web_retag_test_helpers import (
 )
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
-from wudup import web_jobs, web_retag_apply, web_retag_audit, web_retags
+from wudup import web_job_registry, web_retag_apply, web_retag_audit, web_retags
 from wudup.compose import ComposeCli
 
 
@@ -40,7 +40,7 @@ def test_retag_execution_preserves_mutation_recovery_and_audit_order(
     errors: list[Exception] = []
     source_hashes: dict[str, str] = {}
     closed = Event()
-    acquire = web_jobs._acquire_apply_wud_lock
+    acquire = web_job_registry._acquire_apply_wud_lock
 
     def acquire_lock(*args: object, **kwargs: object) -> SimpleNamespace:
         lock = acquire(*args, **kwargs)
@@ -53,7 +53,7 @@ def test_retag_execution_preserves_mutation_recovery_and_audit_order(
 
         return SimpleNamespace(close=close)
 
-    monkeypatch.setattr(web_jobs, "_acquire_apply_wud_lock", acquire_lock)
+    monkeypatch.setattr(web_job_registry, "_acquire_apply_wud_lock", acquire_lock)
 
     def track(owner: object, name: str, event: str) -> None:
         original = getattr(owner, name)

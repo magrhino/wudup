@@ -23,7 +23,7 @@ from wudup.db import (
 from wudup.release_notes import ReleaseNoteInfo as ReleaseNoteData
 from wudup.release_notes import ReleaseNoteLink as ReleaseNoteLinkData
 from wudup.web import create_app
-from wudup.web_jobs import WEB_APPLY_JOB_LIMIT
+from wudup.web_job_registry import WEB_APPLY_JOB_LIMIT
 from wudup.web_models import WebApplyJob
 
 DEFAULT_CLAIM_PHRASE = " ".join(("correct", "horse", "battery", "staple"))

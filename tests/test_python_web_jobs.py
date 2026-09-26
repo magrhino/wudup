@@ -23,7 +23,7 @@ from tests.web_test_helpers import (
     _write_fake_image_after_pull,
 )
 
-from wudup import web_jobs, web_wud_api
+from wudup import web_job_registry, web_jobs, web_wud_api
 from wudup import web_self_update as self_update_module
 from wudup.command import CommandError, CommandResult
 from wudup.compose import ComposeCli
@@ -177,7 +177,7 @@ def test_acquire_apply_wud_lock_coerces_env_timeout_to_int(
         def acquire(self) -> None:
             pass
 
-    monkeypatch.setattr(web_jobs, "DirectoryLock", FakeDirectoryLock)
+    monkeypatch.setattr(web_job_registry, "DirectoryLock", FakeDirectoryLock)
 
     cases = [
         ({"WUD_LOCK_TIMEOUT": "5"}, 5),
@@ -187,7 +187,7 @@ def test_acquire_apply_wud_lock_coerces_env_timeout_to_int(
     ]
 
     for command_env, expected in cases:
-        lock = web_jobs._acquire_apply_wud_lock(
+        lock = web_job_registry._acquire_apply_wud_lock(
             _settings_for_lock_timeout(tmp_path, command_env)
         )
         assert lock.timeout_seconds == expected
@@ -591,14 +591,14 @@ def test_job_status_snapshots_while_locked(tmp_path: Path, monkeypatch) -> None:
         status="running",
         selected_line_numbers=(1,),
     )
-    original_response = web_jobs._apply_job_response
+    original_response = web_job_registry._apply_job_response
     observed: dict[str, bool] = {}
 
     def assert_locked(job):
         observed["locked"] = client.app.state.web_apply_lock.locked()
         return original_response(job)
 
-    monkeypatch.setattr(web_jobs, "_apply_job_response", assert_locked)
+    monkeypatch.setattr(web_job_registry, "_apply_job_response", assert_locked)
 
     response = client.get(f"/api/v1/jobs/{job_id}")
 
@@ -608,8 +608,8 @@ def test_job_status_snapshots_while_locked(tmp_path: Path, monkeypatch) -> None:
 
 def test_register_apply_job_evicts_oldest_finished_jobs() -> None:
     jobs: dict[str, WebApplyJob] = {}
-    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
-        web_jobs._register_apply_job_unlocked(
+    for index in range(web_job_registry.WEB_APPLY_JOB_LIMIT + 5):
+        web_job_registry._register_apply_job_unlocked(
             jobs,
             WebApplyJob(
                 id=str(index),
@@ -619,7 +619,7 @@ def test_register_apply_job_evicts_oldest_finished_jobs() -> None:
         )
 
     assert list(jobs) == [
-        str(index) for index in range(5, web_jobs.WEB_APPLY_JOB_LIMIT + 5)
+        str(index) for index in range(5, web_job_registry.WEB_APPLY_JOB_LIMIT + 5)
     ]
 
 
@@ -627,14 +627,14 @@ def test_register_apply_job_evicts_oldest_finished_jobs() -> None:
 def test_register_apply_job_keeps_active_jobs(status: str) -> None:
     active = WebApplyJob(id="active", status=status, selected_line_numbers=())
     jobs: dict[str, WebApplyJob] = {"active": active}
-    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
-        web_jobs._register_apply_job_unlocked(
+    for index in range(web_job_registry.WEB_APPLY_JOB_LIMIT + 5):
+        web_job_registry._register_apply_job_unlocked(
             jobs,
             WebApplyJob(id=str(index), status="success", selected_line_numbers=()),
         )
 
     assert jobs["active"] is active
-    assert len(jobs) == web_jobs.WEB_APPLY_JOB_LIMIT
+    assert len(jobs) == web_job_registry.WEB_APPLY_JOB_LIMIT
 
 
 def _single_service_apply_client(
@@ -707,7 +707,7 @@ def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
         _post_line_one_apply_job(client, headers)
 
     assert client.app.state.web_apply_jobs == {}
-    assert web_jobs._active_mutation_error_in_state(client.app.state) == ""
+    assert web_job_registry._active_mutation_error_in_state(client.app.state) == ""
 
     # A leaked WUD lock would make this retry fail with 409 under a zero timeout.
     client.app.state.web_apply_executor = working_executor

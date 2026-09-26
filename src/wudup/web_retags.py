@@ -12,7 +12,7 @@ from typing import Protocol
 
 from fastapi import HTTPException, Request
 
-from . import web_database, web_jobs, web_retag_apply, web_retag_preview
+from . import web_database, web_job_registry, web_retag_apply, web_retag_preview
 from .compose import (
     ComposeCli,
     ComposeDiscoveryError,
@@ -234,7 +234,7 @@ def api_apply_retag_plan(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail=MUTATIONS_DISABLED_DETAIL)
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
     return web_retag_apply.submit_retag_apply_job(
