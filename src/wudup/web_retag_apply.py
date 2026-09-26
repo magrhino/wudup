@@ -88,7 +88,7 @@ def submit_retag_apply_job(
             status="queued",
             selected_line_numbers=(),
         )
-        jobs[job.id] = job
+        web_jobs._register_apply_job_unlocked(jobs, job)
         response = web_jobs._apply_job_response(job)
         apply_condition.notify_all()
         try:

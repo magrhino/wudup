@@ -14,6 +14,7 @@ from tests.web_test_helpers import (
     _fake_docker_calls,
     _fake_docker_env,
     _fake_image_state_file,
+    _fill_finished_apply_jobs,
     _install_wud_api,
     _make_fake_stack,
     _wait_apply_job,
@@ -419,6 +420,26 @@ def test_inventory_includes_build_only_service(
     worker = next(item for item in response.json()["items"] if item["service"] == "worker")
     assert worker["tracking_health"] == "no-image"
     assert worker["wud_match_state"] == "unknown"
+
+
+def test_repair_apply_evicts_oldest_finished_job(tmp_path: Path) -> None:
+    client, _fake_root, _compose_path = _tracking_fixture(tmp_path)
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+    plan = client.post("/api/v1/tracking-repairs", json=payload, headers=headers).json()
+    finished = _fill_finished_apply_jobs(client)
+
+    apply = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": plan["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+
+    assert apply.status_code == 202
+    job_id = apply.json()["job_id"]
+    assert _wait_apply_job(client, job_id)["status"] == "success"
+    assert list(client.app.state.web_apply_jobs) == [*finished[1:], job_id]
 
 
 def test_repair_plan_apply_recreates_only_selected_service(tmp_path: Path) -> None:

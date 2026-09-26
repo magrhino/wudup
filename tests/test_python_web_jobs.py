@@ -10,6 +10,7 @@ from tests.web_test_helpers import (
     _csrf_headers,
     _fake_docker_calls,
     _fake_docker_env,
+    _fill_finished_apply_jobs,
     _make_fake_stack,
     _self_update_payload,
     _sse_event_names,
@@ -601,6 +602,144 @@ def test_job_status_snapshots_while_locked(tmp_path: Path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert observed["locked"] is True
+
+
+def test_register_apply_job_evicts_oldest_finished_jobs() -> None:
+    jobs: dict[str, WebApplyJob] = {}
+    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
+        web_jobs._register_apply_job_unlocked(
+            jobs,
+            WebApplyJob(
+                id=str(index),
+                status="success" if index % 2 else "failure",
+                selected_line_numbers=(),
+            ),
+        )
+
+    assert list(jobs) == [
+        str(index) for index in range(5, web_jobs.WEB_APPLY_JOB_LIMIT + 5)
+    ]
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_register_apply_job_keeps_active_jobs(status: str) -> None:
+    active = WebApplyJob(id="active", status=status, selected_line_numbers=())
+    jobs: dict[str, WebApplyJob] = {"active": active}
+    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
+        web_jobs._register_apply_job_unlocked(
+            jobs,
+            WebApplyJob(id=str(index), status="success", selected_line_numbers=()),
+        )
+
+    assert jobs["active"] is active
+    assert len(jobs) == web_jobs.WEB_APPLY_JOB_LIMIT
+
+
+def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **fake_env,
+        },
+    )
+    wud_file = tmp_path / "state" / "images.todo"
+    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+    _make_fake_stack(
+        tmp_path,
+        fake_root,
+        "stack",
+        [("app", "repo/app:latest", "cid-app")],
+    )
+    finished = _fill_finished_apply_jobs(client)
+    headers = _csrf_headers(client)
+    plan = client.post(
+        "/api/v1/plans",
+        json={"line_numbers": [1]},
+        headers=headers,
+    ).json()
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={
+            "plan_id": plan["plan_id"],
+            "line_numbers": [1],
+            "confirmation": "apply",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    assert _wait_apply_job(client, job_id)["status"] == "success"
+    assert list(client.app.state.web_apply_jobs) == [*finished[1:], job_id]
+    assert client.get(f"/api/v1/jobs/{finished[0]}").status_code == 404
+
+
+def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_LOCK_TIMEOUT": "0",
+            **fake_env,
+        },
+    )
+    wud_file = tmp_path / "state" / "images.todo"
+    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+    _make_fake_stack(
+        tmp_path,
+        fake_root,
+        "stack",
+        [("app", "repo/app:latest", "cid-app")],
+    )
+    headers = _csrf_headers(client)
+    plan = client.post(
+        "/api/v1/plans",
+        json={"line_numbers": [1]},
+        headers=headers,
+    ).json()
+
+    class FailingExecutor:
+        def submit(self, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("queue failed")
+
+    working_executor = client.app.state.web_apply_executor
+    client.app.state.web_apply_executor = FailingExecutor()
+
+    with pytest.raises(RuntimeError, match="queue failed"):
+        client.post(
+            "/api/v1/jobs",
+            json={
+                "plan_id": plan["plan_id"],
+                "line_numbers": [1],
+                "confirmation": "apply",
+            },
+            headers=headers,
+        )
+
+    assert client.app.state.web_apply_jobs == {}
+    assert web_jobs._active_mutation_error_in_state(client.app.state) == ""
+
+    # A leaked WUD lock would make this retry fail with 409 under a zero timeout.
+    client.app.state.web_apply_executor = working_executor
+    retry = client.post(
+        "/api/v1/jobs",
+        json={
+            "plan_id": plan["plan_id"],
+            "line_numbers": [1],
+            "confirmation": "apply",
+        },
+        headers=headers,
+    )
+
+    assert retry.status_code == 202, retry.text
+    job = _wait_apply_job(client, retry.json()["job_id"])
+    assert job["status"] == "success", job["error"]
 
 
 def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
