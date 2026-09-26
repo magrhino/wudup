@@ -4,6 +4,24 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.64.0](https://github.com/magrhino/wudup/compare/v0.63.0...v0.64.0) (2026-09-26)
+
+
+### Features
+
+* **webui:** render release notes markdown safely ([#757](https://github.com/magrhino/wudup/issues/757)) ([14d4f05](https://github.com/magrhino/wudup/commit/14d4f05cabab5936f3b1831d95262226b9d0077e))
+
+
+### Bug Fixes
+
+* **retags:** reconcile known-image records after late apply rollback ([#765](https://github.com/magrhino/wudup/issues/765)) ([5615a1b](https://github.com/magrhino/wudup/commit/5615a1bd70b27b1e1c7ce97d6e0b839fe3bdbd81)), closes [#742](https://github.com/magrhino/wudup/issues/742)
+
+
+### Dependencies
+
+* **deps:** bump the npm-production group across 1 directory with 2 updates ([#759](https://github.com/magrhino/wudup/issues/759)) ([6d17377](https://github.com/magrhino/wudup/commit/6d173779a083fd2aaa8291686865df896418631a))
+* **deps:** bump vitest to 5 and pydantic to 2.13.5 ([#761](https://github.com/magrhino/wudup/issues/761)) ([e3333e9](https://github.com/magrhino/wudup/commit/e3333e953c2dc878af665cd0fc83b862223807b2))
+
 ## [0.63.0](https://github.com/magrhino/wudup/compare/v0.62.0...v0.63.0) (2026-09-25)
 
 
