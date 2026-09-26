@@ -35,6 +35,9 @@ WUD_API_SECRET_ACCESS_KEY = "".join(("se", "cret", "access", "key"))
 _PollResult = TypeVar("_PollResult")
 _POLL_TIMEOUT_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.02
+# Apply jobs run the real updater against fake Docker, including the health
+# gate's fixed 2s settle sleep, so they need more headroom under xdist load.
+_APPLY_JOB_TIMEOUT_SECONDS = 30.0
 
 
 def _poll_until(
@@ -650,18 +653,41 @@ def _manifest_index_digest(digest: str, *children: str) -> dict[str, object]:
     }
 
 
-def _wait_apply_job(client: TestClient, job_id: str) -> dict[str, object]:
+def _wait_apply_job(
+    client: TestClient,
+    job_id: str,
+    *,
+    timeout_seconds: float = _APPLY_JOB_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    last_body: dict[str, object] = {}
+
     def fetch_job() -> dict[str, object] | None:
         response = client.get(f"/api/v1/jobs/{job_id}")
         assert response.status_code == 200
         body = response.json()
+        last_body.clear()
+        last_body.update(body)
         if body["status"] not in {"queued", "running"}:
             return body
         return None
 
+    def timeout_message() -> str:
+        progress = last_body.get("progress") or []
+        recent = [
+            f"{event.get('phase')}={event.get('status')}: {event.get('message')}"
+            for event in progress[-3:]
+            if isinstance(event, dict)
+        ]
+        return (
+            f"apply job {job_id} did not finish within {timeout_seconds}s; "
+            f"last status={last_body.get('status')!r}; "
+            f"recent progress={recent or 'none'}"
+        )
+
     return _poll_until(
         fetch_job,
-        timeout_message=f"apply job {job_id} did not finish",
+        timeout_message=timeout_message,
+        timeout_seconds=timeout_seconds,
     )
 
 
