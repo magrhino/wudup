@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from .db import (
     init_db,
@@ -12,7 +14,9 @@ from .db import (
     upsert_known_image,
     utc_timestamp,
 )
+from .db_schema import EXPECTED_SCHEMA
 from .digest_provenance import DigestTagProvenance
+from .web_database import immediate_transaction as _immediate_transaction
 from .web_metadata import json_object as _json_object
 from .web_models import WebSettings
 from .web_retag_plans import (
@@ -31,34 +35,117 @@ from .web_retag_plans import (
     retag_update_identity as _retag_update_identity,
 )
 
+# Every column, so a rollback restores whole rows as the schema grows.
+_KNOWN_IMAGE_COLUMNS = tuple(column[0] for column in EXPECTED_SCHEMA["known_images"])
+
+
+@dataclass(frozen=True)
+class RetagKnownImageChange:
+    """One known-image row written by a retag, with the row it replaced."""
+
+    service_key: str
+    previous: tuple[object, ...] | None
+    recorded: tuple[object, ...]
+
 
 def _record_successful_retag_known_images(
     settings: WebSettings,
     updates: Sequence[_RetagPlanUpdate],
-) -> None:
+) -> tuple[RetagKnownImageChange, ...]:
+    """Record one stack's known images atomically and return what changed."""
     if not updates:
-        return
+        return ()
     with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
-        for item in updates:
-            if item.known_image_service_key_ambiguous:
-                continue
-            upsert_known_image(
-                conn,
-                service_key=item.service_key,
-                image=item.update.final_image,
-                digest=item.update.planned_digest,
-                metadata_json=_json_object(
-                    {
-                        "source": "webui",
-                        "operation": "retag",
-                    }
-                ),
-                digest_provenance=_retag_digest_provenance(
-                    item,
-                    confidence="verified",
-                ),
-            )
+        previous: dict[str, tuple[object, ...] | None] = {}
+        with _immediate_transaction(conn):
+            for item in updates:
+                if item.known_image_service_key_ambiguous:
+                    continue
+                if item.service_key not in previous:
+                    previous[item.service_key] = _known_image_row(
+                        conn, item.service_key
+                    )
+                upsert_known_image(
+                    conn,
+                    service_key=item.service_key,
+                    image=item.update.final_image,
+                    digest=item.update.planned_digest,
+                    metadata_json=_json_object(
+                        {
+                            "source": "webui",
+                            "operation": "retag",
+                        }
+                    ),
+                    digest_provenance=_retag_digest_provenance(
+                        item,
+                        confidence="verified",
+                    ),
+                    commit=False,
+                )
+            changes: list[RetagKnownImageChange] = []
+            for service_key, previous_row in previous.items():
+                recorded = _known_image_row(conn, service_key)
+                if recorded is None:
+                    raise RuntimeError(
+                        f"known image record for {service_key} was not saved"
+                    )
+                changes.append(
+                    RetagKnownImageChange(
+                        service_key=service_key,
+                        previous=previous_row,
+                        recorded=recorded,
+                    )
+                )
+        return tuple(changes)
+
+
+def _restore_retag_known_images(
+    settings: WebSettings,
+    changes: Sequence[RetagKnownImageChange],
+) -> None:
+    """Put back the rows replaced by a rolled-back retag.
+
+    A row is only restored while it still holds the value this retag wrote, so
+    a newer record from another writer is never overwritten.
+    """
+    if not changes:
+        return
+    placeholders = ", ".join("?" for _ in _KNOWN_IMAGE_COLUMNS)
+    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
+        init_db(conn)
+        with _immediate_transaction(conn):
+            for change in changes:
+                if _known_image_row(conn, change.service_key) != change.recorded:
+                    continue
+                if change.previous is None:
+                    conn.execute(
+                        "DELETE FROM known_images WHERE service_key = ?",
+                        (change.service_key,),
+                    )
+                    continue
+                conn.execute(
+                    f"""
+                    INSERT OR REPLACE INTO known_images ({", ".join(_KNOWN_IMAGE_COLUMNS)})
+                    VALUES ({placeholders})
+                    """,
+                    change.previous,
+                )
+
+
+def _known_image_row(
+    conn: sqlite3.Connection,
+    service_key: str,
+) -> tuple[object, ...] | None:
+    row = conn.execute(
+        f"""
+        SELECT {", ".join(_KNOWN_IMAGE_COLUMNS)}
+        FROM known_images
+        WHERE service_key = ?
+        """,
+        (service_key,),
+    ).fetchone()
+    return None if row is None else tuple(row)
 
 
 def _insert_retag_audit_run(
@@ -87,10 +174,14 @@ def _finish_retag_audit_run(
     status: str,
     error: str = "",
     successful_updates: Sequence[_RetagPlanUpdate] = (),
+    retained_known_image_updates: Sequence[_RetagPlanUpdate] = (),
 ) -> None:
     metadata = _retag_audit_metadata(build, status=status, error=error)
     successful_update_ids = {
         _retag_update_identity(item) for item in successful_updates
+    }
+    retained_known_image_ids = {
+        _retag_update_identity(item) for item in retained_known_image_updates
     }
     with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
@@ -110,7 +201,10 @@ def _finish_retag_audit_run(
                 "resolved_tag": item.update.resolved_tag,
                 "watch_tag": item.update.watch_tag,
                 "known_image_recorded": (
-                    item_status == "success"
+                    (
+                        item_status == "success"
+                        or _retag_update_identity(item) in retained_known_image_ids
+                    )
                     and not item.known_image_service_key_ambiguous
                 ),
             }
