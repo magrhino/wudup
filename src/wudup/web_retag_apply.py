@@ -61,9 +61,11 @@ class _RetagApplyFailed(RuntimeError):
         self,
         message: str,
         successful_updates: Sequence[_RetagPlanUpdate],
+        retained_known_image_updates: Sequence[_RetagPlanUpdate] = (),
     ) -> None:
         super().__init__(message)
         self.successful_updates = tuple(successful_updates)
+        self.retained_known_image_updates = tuple(retained_known_image_updates)
 
 
 def submit_retag_apply_job(
@@ -129,6 +131,7 @@ def _run_retag_apply_job(
     wud_lock: object | None = None
     preflight = True
     successful_updates: tuple[_RetagPlanUpdate, ...] = ()
+    retained_known_image_updates: tuple[_RetagPlanUpdate, ...] = ()
     web_jobs._append_apply_job_progress(
         jobs,
         apply_condition,
@@ -195,6 +198,7 @@ def _run_retag_apply_job(
     except Exception as exc:  # noqa: BLE001 - the apply job records all failures.
         if isinstance(exc, _RetagApplyFailed):
             successful_updates = exc.successful_updates
+            retained_known_image_updates = exc.retained_known_image_updates
         safe_error = _safe_retag_apply_error(settings, exc)
         web_jobs._append_apply_job_progress(
             jobs,
@@ -223,6 +227,7 @@ def _run_retag_apply_job(
                 status="failure",
                 error=safe_error,
                 successful_updates=successful_updates,
+                retained_known_image_updates=retained_known_image_updates,
             )
     finally:
         close = getattr(wud_lock, "close", None) if wud_lock is not None else None
@@ -284,8 +289,11 @@ def _apply_retag_stack(
             }
         )
     )
+    compose_path = stack.directory / stack.file
     backup: Path | None = None
+    backup_hash = ""
     written_hashes: list[str] = []
+    known_image_changes: tuple[web_retag_audit.RetagKnownImageChange, ...] = ()
     try:
         _revalidate_retag_runtime_before_apply(settings, compose, stack_updates)
         _progress(
@@ -298,7 +306,6 @@ def _apply_retag_stack(
             stack=stack.name,
             services=services,
         )
-        compose_path = stack.directory / stack.file
         backup = _backup_compose(compose_path)
         backup_hash = _compose_source_hash(backup)
         applier = (
@@ -363,7 +370,9 @@ def _apply_retag_stack(
             apply_condition,
             job_id,
         )
-        web_retag_audit._record_successful_retag_known_images(settings, stack_updates)
+        known_image_changes = web_retag_audit._record_successful_retag_known_images(
+            settings, stack_updates
+        )
         if backup is not None:
             _delete_path(backup)
             backup = None
@@ -386,14 +395,111 @@ def _apply_retag_stack(
                         expected_source_hash=written_hashes[-1],
                     )
                 except Exception as restore_exc:
-                    raise _RetagApplyFailed(
-                        str(restore_exc),
+                    raise _retag_stack_failure(
+                        settings,
+                        restore_exc,
                         successful_updates,
+                        compose_path,
+                        backup_hash,
+                        written_hashes,
+                        stack_updates,
+                        known_image_changes,
                     ) from restore_exc
             else:
-                _delete_path(backup)
+                try:
+                    _delete_path(backup)
+                except Exception as cleanup_exc:
+                    raise _RetagApplyFailed(
+                        f"{exc}; the unused Compose backup could not be "
+                        f"removed and was retained at {backup}: {cleanup_exc}",
+                        successful_updates,
+                    ) from cleanup_exc
             backup = None
-        raise _RetagApplyFailed(str(exc), successful_updates) from exc
+        raise _retag_stack_failure(
+            settings,
+            exc,
+            successful_updates,
+            compose_path,
+            backup_hash,
+            written_hashes,
+            stack_updates,
+            known_image_changes,
+        ) from exc
+
+
+def _retag_stack_failure(
+    settings: WebSettings,
+    failure: Exception,
+    successful_updates: Sequence[_RetagPlanUpdate],
+    compose_path: Path,
+    original_source_hash: str,
+    written_hashes: Sequence[str],
+    stack_updates: Sequence[_RetagPlanUpdate],
+    known_image_changes: Sequence[web_retag_audit.RetagKnownImageChange],
+) -> _RetagApplyFailed:
+    """Describe a failed stack after its known-image records match its Compose file."""
+    retained: tuple[_RetagPlanUpdate, ...] = ()
+    known_image_error = ""
+    if known_image_changes:
+        retained, known_image_error = _reconcile_retag_known_images(
+            settings,
+            compose_path,
+            original_source_hash,
+            written_hashes[-1] if written_hashes else "",
+            stack_updates,
+            known_image_changes,
+        )
+    return _RetagApplyFailed(
+        str(failure) + known_image_error,
+        successful_updates,
+        retained,
+    )
+
+
+def _reconcile_retag_known_images(
+    settings: WebSettings,
+    compose_path: Path,
+    original_source_hash: str,
+    written_source_hash: str,
+    stack_updates: Sequence[_RetagPlanUpdate],
+    changes: Sequence[web_retag_audit.RetagKnownImageChange],
+) -> tuple[tuple[_RetagPlanUpdate, ...], str]:
+    """Match known-image records to the Compose file left after a failed stack.
+
+    Returns the updates whose records remain saved, plus any error text to
+    append to the failure message.
+    """
+    recorded_keys = {change.service_key for change in changes}
+    recorded = tuple(
+        item
+        for item in stack_updates
+        if item.service_key in recorded_keys
+        and not item.known_image_service_key_ambiguous
+    )
+    try:
+        current_source_hash = _compose_source_hash(compose_path)
+    except Exception as exc:  # noqa: BLE001 - reported with the stack failure.
+        return recorded, (
+            "; the new image records were kept because the Compose file "
+            f"could not be read to confirm the rollback: {exc}"
+        )
+    if current_source_hash == written_source_hash:
+        # Compose still declares the retagged images, so the records stay accurate.
+        return recorded, ""
+    if current_source_hash != original_source_hash:
+        return recorded, (
+            "; the new image records were kept because the Compose file was "
+            "changed by something else during the rollback. Check the Compose "
+            "file and preview the retag again before retrying"
+        )
+    try:
+        web_retag_audit._restore_retag_known_images(settings, changes)
+    except Exception as exc:  # noqa: BLE001 - reported with the stack failure.
+        return recorded, (
+            "; the Compose file was restored but the saved image records could "
+            f"not be reset to their previous values: {exc}"
+        )
+    return (), ""
 
 
 def _revalidate_retag_runtime_before_apply(

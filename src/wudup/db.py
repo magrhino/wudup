@@ -717,12 +717,13 @@ def upsert_known_image(
     updated_at: str | None = None,
     metadata_json: str = "{}",
     digest_provenance: DigestTagProvenance | None = None,
+    commit: bool = True,
 ) -> None:
-    """Record the latest known image state for a service key."""
+    """Record the latest known image state, optionally joining the caller's transaction."""
 
     updated = updated_at or utc_timestamp()
     provenance = digest_provenance_or_empty(digest_provenance)
-    with conn:
+    with (conn if commit else nullcontext()):
         conn.execute(
             """
             INSERT INTO known_images (
