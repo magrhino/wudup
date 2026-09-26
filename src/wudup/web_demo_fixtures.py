@@ -58,6 +58,7 @@ Request: Any = None
 web_app: Any = None
 web_auth: Any = None
 web_diagnostics: Any = None
+web_effective_settings: Any = None
 web_health: Any = None
 web_jobs: Any = None
 web_onboarding: Any = None
@@ -82,7 +83,8 @@ WebSettings: Any = None
 def _ensure_web_fixture_imports() -> None:
     global _WEB_FIXTURE_IMPORTS_READY
     global Request
-    global web_app, web_auth, web_diagnostics, web_health, web_jobs
+    global web_app, web_auth, web_diagnostics, web_effective_settings, web_health
+    global web_jobs
     global web_onboarding, web_pending, web_plans, web_release_notes, web_retags
     global web_rollback, web_runs, web_self_update, web_settings, web_state, web_static
     global web_wud_api
@@ -98,6 +100,7 @@ def _ensure_web_fixture_imports() -> None:
     from wudup import web as _web_app
     from wudup import web_auth as _web_auth
     from wudup import web_diagnostics as _web_diagnostics
+    from wudup import web_effective_settings as _web_effective_settings
     from wudup import web_health as _web_health
     from wudup import web_jobs as _web_jobs
     from wudup import web_onboarding as _web_onboarding
@@ -132,6 +135,7 @@ def _ensure_web_fixture_imports() -> None:
     web_app = _web_app
     web_auth = _web_auth
     web_diagnostics = _web_diagnostics
+    web_effective_settings = _web_effective_settings
     web_health = _web_health
     web_jobs = _web_jobs
     web_onboarding = _web_onboarding
@@ -1051,17 +1055,17 @@ def _static_demo_default_static_dir(static_dir: Path):
 
 def _configure_backend_callbacks() -> None:
     web_health.configure(
-        effective_config_loader=web_settings._effective_config,
+        effective_config_loader=web_effective_settings._effective_config,
         static_spa_available_checker=web_static.static_spa_available,
     )
-    web_pending.configure(effective_config_loader=web_settings._effective_config)
-    web_plans.configure(effective_config_loader=web_settings._effective_config)
+    web_pending.configure(effective_config_loader=web_effective_settings._effective_config)
+    web_plans.configure(effective_config_loader=web_effective_settings._effective_config)
     web_retags.configure(
-        effective_config_loader=web_settings._effective_config,
-        retag_digest_pins_loader=web_settings._effective_retag_digest_pins,
+        effective_config_loader=web_effective_settings._effective_config,
+        retag_digest_pins_loader=web_effective_settings._effective_retag_digest_pins,
     )
     web_self_update.configure(
-        effective_config_loader=web_settings._effective_config,
+        effective_config_loader=web_effective_settings._effective_config,
         plan_response_builder=web_plans.plan_response,
     )
 

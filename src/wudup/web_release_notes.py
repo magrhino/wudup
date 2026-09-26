@@ -38,6 +38,10 @@ from .web_database import (
 from .web_database import (
     connect_readonly_db as _connect_readonly_db,
 )
+from .web_effective_settings import (
+    effective_release_notes_enabled,
+    effective_release_notification_config,
+)
 from .web_models import (
     PendingSourceInfo,
     ReleaseNoteInfo,
@@ -51,10 +55,6 @@ from .web_redaction import (
 )
 from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
-from .web_settings import (
-    effective_release_notes_enabled,
-    effective_release_notification_config,
-)
 from .wud_file import WudTarget
 
 LOGGER = logging.getLogger(__name__)

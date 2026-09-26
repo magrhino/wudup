@@ -20,7 +20,7 @@ from tests.web_test_helpers import (
 )
 
 from wudup import web as web_module
-from wudup import web_scheduler, web_settings
+from wudup import web_effective_settings, web_scheduler
 from wudup.db import init_db, open_db, upsert_known_image
 from wudup.digest_provenance import DigestTagProvenance
 
@@ -588,7 +588,7 @@ def test_auto_update_scheduler_uses_api_pending_source_without_wud_lock(
         candidate = web_scheduler._auto_update_candidate(
             conn,
             settings,
-            effective_config_loader=web_settings._effective_config,
+            effective_config_loader=web_effective_settings._effective_config,
             now_utc=now,
             started_at=now - timedelta(minutes=30),
         )
