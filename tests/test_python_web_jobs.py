@@ -5,11 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
+from httpx import Response
 from tests.web_test_helpers import (
     _client,
     _csrf_headers,
     _fake_docker_calls,
     _fake_docker_env,
+    _fill_finished_apply_jobs,
     _make_fake_stack,
     _self_update_payload,
     _sse_event_names,
@@ -603,13 +606,47 @@ def test_job_status_snapshots_while_locked(tmp_path: Path, monkeypatch) -> None:
     assert observed["locked"] is True
 
 
-def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
+def test_register_apply_job_evicts_oldest_finished_jobs() -> None:
+    jobs: dict[str, WebApplyJob] = {}
+    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
+        web_jobs._register_apply_job_unlocked(
+            jobs,
+            WebApplyJob(
+                id=str(index),
+                status="success" if index % 2 else "failure",
+                selected_line_numbers=(),
+            ),
+        )
+
+    assert list(jobs) == [
+        str(index) for index in range(5, web_jobs.WEB_APPLY_JOB_LIMIT + 5)
+    ]
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_register_apply_job_keeps_active_jobs(status: str) -> None:
+    active = WebApplyJob(id="active", status=status, selected_line_numbers=())
+    jobs: dict[str, WebApplyJob] = {"active": active}
+    for index in range(web_jobs.WEB_APPLY_JOB_LIMIT + 5):
+        web_jobs._register_apply_job_unlocked(
+            jobs,
+            WebApplyJob(id=str(index), status="success", selected_line_numbers=()),
+        )
+
+    assert jobs["active"] is active
+    assert len(jobs) == web_jobs.WEB_APPLY_JOB_LIMIT
+
+
+def _single_service_apply_client(
+    tmp_path: Path, extra_env: dict[str, str] | None = None
+) -> tuple[TestClient, dict[str, str], Path]:
     fake_env, fake_root = _fake_docker_env(tmp_path)
     client = _client(
         tmp_path,
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **(extra_env or {}),
             **fake_env,
         },
     )
@@ -621,16 +658,16 @@ def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
         "stack",
         [("app", "repo/app:latest", "cid-app")],
     )
-    hook = fake_root / "post-pull-hook"
-    hook.write_text("#!/usr/bin/env bash\nsleep 0.1\n", encoding="utf-8")
-    hook.chmod(0o755)
-    headers = _csrf_headers(client)
+    return client, _csrf_headers(client), fake_root
+
+
+def _post_line_one_apply_job(client: TestClient, headers: dict[str, str]) -> Response:
     plan = client.post(
         "/api/v1/plans",
         json={"line_numbers": [1]},
         headers=headers,
     ).json()
-    apply_response = client.post(
+    return client.post(
         "/api/v1/jobs",
         json={
             "plan_id": plan["plan_id"],
@@ -639,6 +676,54 @@ def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
         },
         headers=headers,
     )
+
+
+def test_apply_submission_evicts_oldest_finished_job(tmp_path: Path) -> None:
+    client, headers, _fake_root = _single_service_apply_client(tmp_path)
+    finished = _fill_finished_apply_jobs(client)
+
+    response = _post_line_one_apply_job(client, headers)
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    assert _wait_apply_job(client, job_id)["status"] == "success"
+    assert list(client.app.state.web_apply_jobs) == [*finished[1:], job_id]
+    assert client.get(f"/api/v1/jobs/{finished[0]}").status_code == 404
+
+
+def test_apply_cleans_up_job_when_executor_submit_fails(tmp_path: Path) -> None:
+    client, headers, _fake_root = _single_service_apply_client(
+        tmp_path, {"WUD_LOCK_TIMEOUT": "0"}
+    )
+
+    class FailingExecutor:
+        def submit(self, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("queue failed")
+
+    working_executor = client.app.state.web_apply_executor
+    client.app.state.web_apply_executor = FailingExecutor()
+
+    with pytest.raises(RuntimeError, match="queue failed"):
+        _post_line_one_apply_job(client, headers)
+
+    assert client.app.state.web_apply_jobs == {}
+    assert web_jobs._active_mutation_error_in_state(client.app.state) == ""
+
+    # A leaked WUD lock would make this retry fail with 409 under a zero timeout.
+    client.app.state.web_apply_executor = working_executor
+    retry = _post_line_one_apply_job(client, headers)
+
+    assert retry.status_code == 202, retry.text
+    job = _wait_apply_job(client, retry.json()["job_id"])
+    assert job["status"] == "success", job["error"]
+
+
+def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
+    client, headers, fake_root = _single_service_apply_client(tmp_path)
+    hook = fake_root / "post-pull-hook"
+    hook.write_text("#!/usr/bin/env bash\nsleep 0.1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    apply_response = _post_line_one_apply_job(client, headers)
 
     with client.stream(
         "GET",

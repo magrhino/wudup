@@ -456,7 +456,7 @@ def api_apply_tracking_repair(
         if active_error:
             raise HTTPException(status_code=409, detail=active_error)
         job = WebApplyJob(id=secrets.token_urlsafe(18), status="queued", selected_line_numbers=())
-        jobs[job.id] = job
+        web_jobs._register_apply_job_unlocked(jobs, job)
         condition.notify_all()
         try:
             state.web_apply_executor.submit(

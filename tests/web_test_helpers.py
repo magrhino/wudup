@@ -23,6 +23,8 @@ from wudup.db import (
 from wudup.release_notes import ReleaseNoteInfo as ReleaseNoteData
 from wudup.release_notes import ReleaseNoteLink as ReleaseNoteLinkData
 from wudup.web import create_app
+from wudup.web_jobs import WEB_APPLY_JOB_LIMIT
+from wudup.web_models import WebApplyJob
 
 DEFAULT_CLAIM_PHRASE = " ".join(("correct", "horse", "battery", "staple"))
 SSE_EVENT_PREFIX = "event: "
@@ -651,6 +653,18 @@ def _manifest_index_digest(digest: str, *children: str) -> dict[str, object]:
             for child in children
         ],
     }
+
+
+def _fill_finished_apply_jobs(client: TestClient) -> list[str]:
+    """Fill the apply-job registry to its limit with finished jobs, oldest first."""
+    job_ids = [f"finished-{index}" for index in range(WEB_APPLY_JOB_LIMIT)]
+    for index, job_id in enumerate(job_ids):
+        client.app.state.web_apply_jobs[job_id] = WebApplyJob(
+            id=job_id,
+            status="success" if index % 2 else "failure",
+            selected_line_numbers=(),
+        )
+    return job_ids
 
 
 def _wait_apply_job(

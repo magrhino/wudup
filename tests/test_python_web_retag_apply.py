@@ -22,6 +22,7 @@ from tests.web_test_helpers import (
     _csrf_headers,
     _fake_docker_calls,
     _fake_docker_env,
+    _fill_finished_apply_jobs,
     _make_fake_stack,
     _wait_apply_job,
 )
@@ -535,6 +536,27 @@ def test_retag_apply_start_approval_does_not_bypass_project_revalidation(
     assert compose_file.read_text(encoding="utf-8") == changed_content
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" not in calls
+
+
+def test_retag_apply_evicts_oldest_finished_job(tmp_path: Path) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+        },
+    )
+    client = fixture.client
+    headers = _csrf_headers(client)
+    plan = _create_retag_plan(client, headers)
+    finished = _fill_finished_apply_jobs(client)
+
+    response = _apply_retag_plan(client, headers, plan, choices=[_switch_choice()])
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    job = _wait_apply_job(client, job_id)
+    assert job["status"] == "success", job["error"]
+    assert list(client.app.state.web_apply_jobs) == [*finished[1:], job_id]
 
 
 def test_retag_apply_cleans_up_job_when_executor_submit_fails(
