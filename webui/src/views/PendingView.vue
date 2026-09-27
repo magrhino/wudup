@@ -10,7 +10,7 @@ import {
   NTag,
 } from "naive-ui";
 
-import type { ReleaseNoteInfo, ReleaseNotificationSource } from "../api/client";
+import type { ReleaseNoteInfo } from "../api/client";
 import CoreUpdateTourPanel from "../components/CoreUpdateTourPanel.vue";
 import { useRouteRefresh } from "../components/app/routeRefresh";
 import PendingApplyJobPanel from "../components/pending/PendingApplyJobPanel.vue";
@@ -39,6 +39,12 @@ import {
   releaseNoteStatus as pendingReleaseNoteStatus,
   tagInputProps,
 } from "./pending/pendingDisplay";
+import {
+  cleanupLineLabel,
+  removalLineLabel,
+  staleDiagnosticDetail,
+  staleDiagnosticLabel,
+} from "./pending/planReviewFormatters";
 import { createPendingColumns } from "./pending/tableColumns";
 import { pluralize } from "./pending/utils";
 import {
@@ -48,6 +54,8 @@ import {
 import { usePendingPlanActions } from "./pending/usePendingPlanActions";
 import { usePendingPlanReviewState } from "./pending/usePendingPlanReviewState";
 import { usePendingQueueState } from "./pending/usePendingQueueState";
+import { usePendingReleaseNotifications } from "./pending/usePendingReleaseNotifications";
+import { usePendingRescan } from "./pending/usePendingRescan";
 import { usePendingSearchResultState } from "./pending/usePendingSearchResultState";
 import { usePendingSearchState } from "./pending/usePendingSearchState";
 import { usePendingSelectionState } from "./pending/usePendingSelectionState";
@@ -136,8 +144,6 @@ let loadPendingAndReleaseNotesHandler: (
     freshAfterCurrent?: boolean;
   },
 ) => Promise<void> = async () => undefined;
-const showReleaseNotificationModal = ref(false);
-const releaseNotificationSource = ref<ReleaseNotificationSource | null>(null);
 const securityScanRefreshReadOnlyMessage =
   "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server " +
   "to refresh candidate security scans.";
@@ -197,165 +203,33 @@ const showSetupLink = computed(
 const selectedHasTagUpdates = computed(() =>
   lineNumbersHaveTagUpdates(selectedLineNumbers.value),
 );
-const wudRescanUnavailableMessage = computed(() => {
-  if (!updates.pending) {
-    return "";
-  }
-  if (auth.session?.mutations_enabled === false) {
-    return "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to rescan WUD.";
-  }
-  const status = updates.pending.wud_api;
-  if (!status) {
-    return "WUD API status is unavailable.";
-  }
-  if (!status.available) {
-    return status.detail || "WUD API is unavailable.";
-  }
-  if (status.state === "auth_required") {
-    return status.detail || "WUD API requires authentication.";
-  }
-  if (status.state !== "ready") {
-    return status.detail || "WUD API is not ready.";
-  }
-  return "";
+const {
+  globalRescanDisabled,
+  pendingRescanAlertType,
+  pendingRescanMessage,
+  rescanAllPending,
+  rescanSelectedPending,
+  selectedRescanDisabled,
+  selectedRescanDisabledMessage,
+  selectedRescanVisible,
+  wudRescanUnavailableMessage,
+} = usePendingRescan({
+  pendingItems,
+  selectedLineNumbers,
+  clearPreflight: () => clearPreflightHandler(),
 });
-const wudMetadataUnavailableMessage = computed(() => {
-  const status = updates.pending?.wud_api;
-  if (!status) {
-    return "WUD API status is unavailable.";
-  }
-  if (!status.metadata_available) {
-    return status.detail || "WUD API metadata is unavailable.";
-  }
-  return "";
-});
-const selectedWudRescanLineNumbers = computed(() => {
-  const byLine = new Map(pendingItems.value.map((item) => [item.line_no, item]));
-  return selectedLineNumbers.value.filter((lineNo) =>
-    Boolean(byLine.get(lineNo)?.wud_metadata?.id),
-  );
-});
-const globalRescanDisabled = computed(
-  () => updates.loading || Boolean(wudRescanUnavailableMessage.value),
-);
-const selectedRescanVisible = computed(() => selectedLineNumbers.value.length > 0);
-const selectedRescanDisabledMessage = computed(() => {
-  if (!selectedLineNumbers.value.length) {
-    return "";
-  }
-  if (wudRescanUnavailableMessage.value) {
-    return wudRescanUnavailableMessage.value;
-  }
-  if (wudMetadataUnavailableMessage.value) {
-    return wudMetadataUnavailableMessage.value;
-  }
-  if (!selectedWudRescanLineNumbers.value.length) {
-    return "Selected entries do not have WUD container IDs.";
-  }
-  return "";
-});
-const selectedRescanDisabled = computed(
-  () => updates.loading || Boolean(selectedRescanDisabledMessage.value),
-);
-const pendingRescanAlertType = computed(() =>
-  updates.pendingRescan?.status !== "success" || updates.pendingRescan?.skipped.length
-    ? "warning" : "info",
-);
-const pendingRescanMessage = computed(() => {
-  const rescan = updates.pendingRescan;
-  if (!rescan) {
-    return "";
-  }
-  if (rescan.status === "blocked") {
-    return "WUD scan request did not run. Review current WUD health and request details.";
-  }
-  const requested = rescan.scope === "all"
-    ? "Full WUD scan requested."
-    : `WUD rescan requested for ${pluralize(rescan.watched_count, "container")}.`;
-  if (rescan.status === "partial") {
-    const counts = rescan.scope === "selected"
-      ? ` ${pluralize(rescan.requested_count, "selected entry", "selected entries")}; ${pluralize(rescan.watched_count, "container scan request")} sent.`
-      : "";
-    const skipped = rescan.skipped.length
-      ? ` ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped.`
-      : "";
-    const prefix = rescan.scope === "all" ? `${requested} ` : "";
-    return `${prefix}WUD reported a partial scan result.${counts}${skipped} Review request details.`;
-  }
-  if (rescan.skipped.length) {
-    return `${requested} ${pluralize(rescan.skipped.length, "selected entry", "selected entries")} skipped. Review request details.`;
-  }
-  return `${requested} Waiting for fresh WUD results.`;
-});
-const releaseNotificationsDisabledReason = computed(() => {
-  if (updates.releaseNotes?.notifications_enabled === false) {
-    return (
-      updates.releaseNotes.notifications_disabled_reason ||
-      "Release-note notifications are disabled in Settings."
-    );
-  }
-  return "";
-});
-const applyJobReleaseNotificationsVisible = computed(
-  () => updates.applyJob?.status === "success" && Boolean(updates.applyJob.run_id),
-);
-const applyJobReleaseNotificationsDisabledMessage = computed(() => {
-  if (!applyJobReleaseNotificationsVisible.value) {
-    return "";
-  }
-  if (releaseNotificationsDisabledReason.value) {
-    return releaseNotificationsDisabledReason.value;
-  }
-  if (updates.releaseNotificationLoading) {
-    return "Release-note notification preview is loading.";
-  }
-  return "";
-});
-const applyJobReleaseNotificationsDisabled = computed(
-  () =>
-    !updates.applyJob?.run_id ||
-    updates.releaseNotificationLoading ||
-    Boolean(applyJobReleaseNotificationsDisabledMessage.value),
-);
-const releaseNotificationSendDisabledMessage = computed(() => {
-  const response = updates.releaseNotification;
-  if (!response) {
-    return updates.releaseNotificationLoading
-      ? ""
-      : "Preview release-note notifications before sending.";
-  }
-  if (response.sent) {
-    return "Release-note notifications were sent.";
-  }
-  if (!response.enabled) {
-    return "Release-note notifications are disabled in Settings.";
-  }
-  if (!response.destination.configured) {
-    return "Configure a Discord webhook in Settings or set DISCORD_WEBHOOK in the WebUI runtime.";
-  }
-  if (auth.session?.mutations_enabled === false) {
-    return "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to send notifications.";
-  }
-  if (!response.sendable_count) {
-    if (response.skipped_count) {
-      const skippedItems = response.items.filter((item) => item.skipped_reason);
-      const duplicatesOnly = skippedItems.every(
-        (item) => item.notification_status === "skipped_duplicate",
-      );
-      return duplicatesOnly
-        ? "Duplicate notifications are skipped. Preview resend to send them again."
-        : "Release-note notifications are skipped by the resend policy. Preview resend to review them.";
-    }
-    return "No release-note notifications are available to send.";
-  }
-  return "";
-});
-const releaseNotificationSendDisabled = computed(
-  () =>
-    updates.releaseNotificationLoading ||
-    releaseNotificationSource.value === null ||
-    Boolean(releaseNotificationSendDisabledMessage.value),
-);
+const {
+  applyJobReleaseNotificationsDisabled,
+  applyJobReleaseNotificationsDisabledMessage,
+  applyJobReleaseNotificationsVisible,
+  closeReleaseNotificationModal,
+  previewApplyJobReleaseNotifications,
+  previewReleaseNotificationResend,
+  releaseNotificationSendDisabled,
+  releaseNotificationSendDisabledMessage,
+  sendReleaseNotifications,
+  showReleaseNotificationModal,
+} = usePendingReleaseNotifications();
 const securityScanRefreshVisible = computed(
   () => updates.securityScans?.scanning_enabled ?? false,
 );
@@ -373,14 +247,11 @@ const securityScanSummaryLabel = computed(() => securityScanSummary.value.label)
 const securityScanSummaryType = computed(() => securityScanSummary.value.type);
 
 const {
-  actionCommand,
   applyButtonLabel,
   applyDisabled,
   applyPreflight,
   applyPreflightAttentionChecks,
   applyPreflightCheckDetail,
-  applyPreflightCheckLabel,
-  applyPreflightCheckType,
   applyPreflightPassedChecks,
   applyPreflightPassedText,
   applyPlanPayload,
@@ -397,18 +268,12 @@ const {
   cleanupDisabled,
   cleanupDisabledMessage,
   cleanupItems,
-  cleanupLineLabel,
   cleanupReviewSummary,
   approveDigestPinLabelRewrite,
   approveTagStreamLabelRewrite,
   clearUpdateIntent,
   digestPinLabelApprovalApproved,
   digestPinLabelApprovalIssues,
-  digestPinLabelIssueProposedRegex,
-  issueDetailString,
-  issueHint,
-  issueLabel,
-  issueType,
   mutationDisabledMessage,
   mutationStateLabel,
   mutationStateType,
@@ -432,7 +297,6 @@ const {
   removalConfirmButtonLabel,
   removalDisabled,
   removalItems,
-  removalLineLabel,
   removeSelectedDisabled,
   removeSelectedDisabledMessage,
   selectedTagOverrideError,
@@ -440,8 +304,6 @@ const {
   selectedUpdateContext,
   setUpdateIntent,
   chooseTagStream,
-  staleDiagnosticDetail,
-  staleDiagnosticLabel,
   unmatchedIssueSummary,
   unmatchedReviewCountLabel,
   unmatchedReviewSummary,
@@ -614,62 +476,6 @@ async function refreshAfterTerminalApplyJob(): Promise<void> {
 
 function releaseNoteStatus(note: ReleaseNoteInfo | null): string {
   return pendingReleaseNoteStatus(note, updates.releaseNotesLoading);
-}
-
-async function rescanAllPending(): Promise<void> {
-  if (globalRescanDisabled.value) {
-    return;
-  }
-  clearPreflightHandler();
-  await updates.rescanPending("all");
-}
-
-async function rescanSelectedPending(): Promise<void> {
-  if (selectedRescanDisabled.value) {
-    return;
-  }
-  clearPreflightHandler();
-  await updates.rescanPending("selected", selectedLineNumbers.value);
-}
-
-async function previewApplyJobReleaseNotifications(): Promise<void> {
-  const runId = updates.applyJob?.run_id;
-  if (applyJobReleaseNotificationsDisabled.value || !runId) {
-    return;
-  }
-  await previewReleaseNotifications({ run_id: runId });
-}
-
-async function previewReleaseNotifications(
-  source: ReleaseNotificationSource,
-): Promise<void> {
-  releaseNotificationSource.value = source;
-  showReleaseNotificationModal.value = true;
-  await updates.previewReleaseNotifications(source).catch(() => undefined);
-}
-
-async function previewReleaseNotificationResend(): Promise<void> {
-  if (releaseNotificationSource.value === null) {
-    return;
-  }
-  const source = {
-    ...releaseNotificationSource.value,
-    resend: true,
-  } as ReleaseNotificationSource;
-  await previewReleaseNotifications(source);
-}
-
-function closeReleaseNotificationModal(): void {
-  showReleaseNotificationModal.value = false;
-  releaseNotificationSource.value = null;
-  updates.clearReleaseNotification();
-}
-
-async function sendReleaseNotifications(): Promise<void> {
-  if (releaseNotificationSendDisabled.value || releaseNotificationSource.value === null) {
-    return;
-  }
-  await updates.sendReleaseNotifications(releaseNotificationSource.value).catch(() => undefined);
 }
 
 async function refreshSecurityScans(): Promise<void> {
@@ -1083,14 +889,11 @@ onBeforeUnmount(() => {
       v-if="updates.plan"
       :show="showPreflightModal"
       :plan="updates.plan"
-      :action-command="actionCommand"
       :apply-button-label="applyButtonLabel"
       :apply-disabled="applyDisabled"
       :apply-preflight="applyPreflight"
       :apply-preflight-attention-checks="applyPreflightAttentionChecks"
       :apply-preflight-check-detail="applyPreflightCheckDetail"
-      :apply-preflight-check-label="applyPreflightCheckLabel"
-      :apply-preflight-check-type="applyPreflightCheckType"
       :apply-preflight-passed-checks="applyPreflightPassedChecks"
       :apply-preflight-passed-text="applyPreflightPassedText"
       :apply-readiness-status-label="applyReadinessStatusLabel"
@@ -1105,15 +908,10 @@ onBeforeUnmount(() => {
       :cleanup-review-summary="cleanupReviewSummary"
       :digest-pin-label-approval-approved="digestPinLabelApprovalApproved"
       :digest-pin-label-approval-issues="digestPinLabelApprovalIssues"
-      :digest-pin-label-issue-proposed-regex="digestPinLabelIssueProposedRegex"
       :tag-stream-decision-issues="tagStreamDecisionIssues"
       :tag-stream-decision-selected="tagStreamDecisionSelected"
       :tag-stream-label-approval-approved="tagStreamLabelApprovalApproved"
       :tag-stream-label-approval-issues="tagStreamLabelApprovalIssues"
-      :issue-detail-string="issueDetailString"
-      :issue-hint="issueHint"
-      :issue-label="issueLabel"
-      :issue-type="issueType"
       :loading="updates.loading"
       :mutation-disabled-message="mutationDisabledMessage"
       :plan-actions="planActions"
@@ -1136,8 +934,6 @@ onBeforeUnmount(() => {
       :preflight-summary="preflightSummary"
       :preflight-tag-rewrite-notice="preflightTagRewriteNotice"
       :preflight-title="preflightTitle"
-      :stale-diagnostic-detail="staleDiagnosticDetail"
-      :stale-diagnostic-label="staleDiagnosticLabel"
       :visible-plan-issues="visiblePlanIssues"
       @apply="confirmApply"
       @approve-digest-pin-label-rewrite="approveDigestPinLabelRewrite"
