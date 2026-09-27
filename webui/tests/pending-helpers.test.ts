@@ -151,14 +151,11 @@ function pendingPlanReviewModalProps(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    actionCommand: () => "docker compose pull app",
     applyButtonLabel: "Apply 1 update",
     applyDisabled: false,
     applyPreflight: null,
     applyPreflightAttentionChecks: [],
     applyPreflightCheckDetail: () => "",
-    applyPreflightCheckLabel: () => "Ready",
-    applyPreflightCheckType: () => "success",
     applyPreflightPassedChecks: [],
     applyPreflightPassedText: "",
     applyReadinessStatusLabel: "",
@@ -173,15 +170,10 @@ function pendingPlanReviewModalProps(
     cleanupReviewSummary: "",
     digestPinLabelApprovalApproved: () => false,
     digestPinLabelApprovalIssues: [],
-    digestPinLabelIssueProposedRegex: () => "",
     tagStreamDecisionIssues: [],
     tagStreamDecisionSelected: () => false,
     tagStreamLabelApprovalApproved: () => false,
     tagStreamLabelApprovalIssues: [],
-    issueDetailString: () => "",
-    issueHint: () => "",
-    issueLabel: () => "",
-    issueType: () => "warning",
     loading: false,
     mutationDisabledMessage: "",
     plan: planResponse(),
@@ -206,8 +198,6 @@ function pendingPlanReviewModalProps(
     preflightTagRewriteNotice: "",
     preflightTitle: "Review selected updates",
     show: true,
-    staleDiagnosticDetail: () => "",
-    staleDiagnosticLabel: () => "",
     visiblePlanIssues: [],
     ...overrides,
   };
@@ -1564,10 +1554,6 @@ describe("pending helper modules", () => {
       pendingPlanReviewModalProps({
         plan: planResponse({ status: "blocked", issues: [issue] }),
         tagStreamDecisionIssues: [issue],
-        issueDetailString: (item: typeof issue, key: string) =>
-          typeof item.details[key as keyof typeof item.details] === "string"
-            ? item.details[key as keyof typeof item.details]
-            : "",
       }),
     );
 
@@ -1584,6 +1570,46 @@ describe("pending helper modules", () => {
     expect(keep?.attributes("type")).toBe("button");
     await keep?.trigger("click");
     expect(wrapper.emitted("choose-tag-stream")?.[0]).toEqual([issue, "preserve"]);
+  });
+
+  it("formats issues, cleanup diagnostics, and commands without helper props", () => {
+    const issue = {
+      severity: "error",
+      code: "compose-file-missing",
+      message: "Compose file is missing.",
+      line_no: 4,
+      stack: "media",
+      service: "app",
+      hint: "Restore the Compose file.",
+      details: {},
+    };
+    const cleanupItem = {
+      line_no: 7,
+      raw: "repo/old:latest",
+      image: "repo/old:latest",
+      desired_tag: "",
+      digest: "",
+      reason: "unmatched",
+      diagnostic: null,
+    };
+    const wrapper = mountPendingModal(
+      PendingPlanReviewModal,
+      pendingPlanReviewModalProps({
+        cleanupAvailable: true,
+        cleanupItems: [cleanupItem],
+        planActions: [{
+          stack: "media",
+          action: { kind: "pull", description: "Pull images", cwd: "/stacks/media", args: ["docker", "compose", "pull", "app"] },
+        }],
+        visiblePlanIssues: [issue],
+      }),
+    );
+
+    expect(wrapper.text()).toContain("line 4 / media / app: Compose file is missing.");
+    expect(wrapper.text()).toContain("Restore the Compose file.");
+    expect(wrapper.text()).toContain("No Compose match");
+    expect(wrapper.text()).toContain("No discovered Compose service matched this line.");
+    expect(wrapper.text()).toContain("docker compose pull app");
   });
 });
 

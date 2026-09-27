@@ -7,6 +7,7 @@ import type {
   ReleaseNoteInfo,
 } from "../../api/client";
 import type { ReleaseChangelogState } from "../../utils/releaseChangelog";
+import { useReleaseChangelogStore } from "../../stores/releaseChangelog";
 import { useRunsStore } from "../../stores/runs";
 import { useSettingsStore } from "../../stores/settings";
 import { useUpdatesStore } from "../../stores/updates";
@@ -49,6 +50,7 @@ function pendingSourceDisplayFor(label: string): string {
 
 export function usePendingQueueState() {
   const updates = useUpdatesStore();
+  const releaseChangelog = useReleaseChangelogStore();
   const runs = useRunsStore();
   const settings = useSettingsStore();
 
@@ -193,7 +195,7 @@ export function usePendingQueueState() {
   function releaseChangelogFor(
     note: ReleaseNoteInfo | null,
   ): ReleaseChangelogState | null {
-    return updates.releaseChangelogStateFor(note);
+    return releaseChangelog.releaseChangelogStateFor(note);
   }
 
   function riskCues(row: PendingItem): SafetyCue[] {

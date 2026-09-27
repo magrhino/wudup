@@ -10,8 +10,8 @@ from tests.web_test_helpers import (
     _web_env,
 )
 
-from wudup import web as web_module
 from wudup import web_auth as web_auth_module
+from wudup import web_config
 from wudup.db import (
     init_db,
     open_db,
@@ -316,7 +316,7 @@ def test_admin_reset_claim_requires_csrf_origin_headers(tmp_path: Path) -> None:
 def test_admin_reset_command_errors_for_missing_setup_and_unknown_user(
     tmp_path: Path,
 ) -> None:
-    missing_settings = web_module.load_web_settings(_web_env(tmp_path))
+    missing_settings = web_config.load_web_settings(_web_env(tmp_path))
     try:
         web_auth_module.issue_admin_recovery_claim(missing_settings, "admin")
         raise AssertionError("missing database should fail")
