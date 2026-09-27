@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "always-update": true,
   "packages": {
     ".": {
       "release-type": "python",
@@ -9,7 +10,6 @@
       "initial-version": "1.0.0",
       "draft": true,
       "force-tag-creation": true,
-      "always-update": true,
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
