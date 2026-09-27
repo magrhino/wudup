@@ -4,7 +4,7 @@ import { AlertTriangle, ExternalLink, FileText, ShieldAlert } from "@lucide/vue"
 import { NButton, NModal, NTag } from "naive-ui";
 
 import type { ReleaseNoteInfo } from "../../api/client";
-import { useUpdatesStore } from "../../stores/updates";
+import { useReleaseChangelogStore } from "../../stores/releaseChangelog";
 import { safeUrl } from "../../utils/safeUrl";
 import ReleaseNotesMarkdown from "./ReleaseNotesMarkdown";
 import {
@@ -53,12 +53,12 @@ function openNotes(): void {
   if (!releaseBody.value && canReadChangelog.value) void readChangelog();
 }
 
-const updates = useUpdatesStore();
+const releaseChangelog = useReleaseChangelogStore();
 const changelog = computed(() =>
-  updates.releaseChangelogStateFor(props.releaseNote),
+  releaseChangelog.releaseChangelogStateFor(props.releaseNote),
 );
 const canReadChangelog = computed(() =>
-  updates.releaseChangelogCanLoad(props.releaseNote),
+  releaseChangelog.releaseChangelogCanLoad(props.releaseNote),
 );
 const changelogLoading = computed(() => changelog.value.status === "loading");
 const changelogReady = computed(() => changelog.value.status === "ready");
@@ -99,7 +99,7 @@ const securityLabel = computed(() => {
 });
 
 function readChangelog(): Promise<void> {
-  return updates.loadReleaseChangelog(props.releaseNote);
+  return releaseChangelog.loadReleaseChangelog(props.releaseNote);
 }
 </script>
 

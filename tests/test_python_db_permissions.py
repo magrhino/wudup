@@ -175,7 +175,7 @@ from unittest.mock import patch
 from wudup.db import open_db, init_db
 original_umask = os.umask(int(sys.argv[2], 8))
 path = Path(sys.argv[1])
-with patch('wudup.db.os.umask', side_effect=AssertionError('global umask change')):
+with patch('wudup.db_storage.os.umask', side_effect=AssertionError('global umask change')):
     for _ in range(2):
         with open_db(path) as conn:
             init_db(conn)
@@ -207,7 +207,7 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
         with (
             patch.object(Path, "mkdir", racing_mkdir),
             patch.object(Path, "chmod", side_effect=AssertionError("changed race winner")),
-            patch("wudup.db.os.fchmod", side_effect=AssertionError("changed race winner")),
+            patch("wudup.db_storage.os.fchmod", side_effect=AssertionError("changed race winner")),
         ):
             with open_db(self.path) as conn:
                 init_db(conn)
@@ -226,8 +226,8 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
             return real_open(path, flags, *args)
 
         with (
-            patch("wudup.db.os.open", side_effect=racing_open),
-            patch("wudup.db.os.fchmod") as chmod,
+            patch("wudup.db_storage.os.open", side_effect=racing_open),
+            patch("wudup.db_storage.os.fchmod") as chmod,
             patch("wudup.db.sqlite3.connect") as connect,
         ):
             with self.assertRaisesRegex(OSError, "Could not protect the new database directory"):
@@ -322,7 +322,7 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
 
     def test_database_create_failure_stops_before_sqlite_opens(self) -> None:
         with (
-            patch("wudup.db.os.open", side_effect=PermissionError("denied")),
+            patch("wudup.db_storage.os.open", side_effect=PermissionError("denied")),
             patch("wudup.db.sqlite3.connect") as connect,
         ):
             with self.assertRaisesRegex(OSError, "Could not protect"):
@@ -399,7 +399,7 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
             with self.subTest(failure=failure):
                 self.path.parent.chmod(0o770)
                 with (
-                    patch("wudup.db.os.fchmod", side_effect=failure),
+                    patch("wudup.db_storage.os.fchmod", side_effect=failure),
                     patch("wudup.db.sqlite3.connect") as connect,
                 ):
                     with self.assertRaisesRegex(OSError, "owner-only permissions"):
@@ -437,10 +437,10 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
                         owner_state["uid"] = uid
 
                 with (
-                    patch("wudup.db.os.geteuid", return_value=0),
+                    patch("wudup.db_storage.os.geteuid", return_value=0),
                     patch.object(Path, "lstat", root_lstat),
-                    patch("wudup.db.os.fstat", side_effect=lambda fd: directory_metadata(real_fstat(fd))),
-                    patch("wudup.db.os.fchown", side_effect=handoff) as chown,
+                    patch("wudup.db_storage.os.fstat", side_effect=lambda fd: directory_metadata(real_fstat(fd))),
+                    patch("wudup.db_storage.os.fchown", side_effect=handoff) as chown,
                 ):
                     if action == "success":
                         with open_db(self.path, owner_uid=owner.uid) as conn:
@@ -475,10 +475,10 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
             return metadata
 
         with (
-            patch("wudup.db.os.geteuid", return_value=0),
+            patch("wudup.db_storage.os.geteuid", return_value=0),
             patch.object(Path, "lstat", root_lstat),
-            patch("wudup.db.os.fchown") as chown,
-            patch("wudup.db.os.fchmod") as chmod,
+            patch("wudup.db_storage.os.fchown") as chown,
+            patch("wudup.db_storage.os.fchmod") as chmod,
         ):
             with open_db(self.path, owner_uid=os.getuid() or 1000) as conn:
                 init_db(conn)
@@ -490,7 +490,7 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
     def test_foreign_writable_directory_is_not_repaired(self) -> None:
         self.path.parent.mkdir()
         self.path.parent.chmod(0o770)
-        with self.foreign_owner(self.path.parent), patch("wudup.db.os.fchmod") as chmod:
+        with self.foreign_owner(self.path.parent), patch("wudup.db_storage.os.fchmod") as chmod:
             with self.assertRaisesRegex(OSError, "Could not protect"):
                 connect_db(self.path)
             chmod.assert_not_called()
@@ -525,7 +525,7 @@ os.umask(original_umask)  # Restore access for subprocess coverage's exit-time w
             return real_open(path, flags, *args)
 
         with (
-            patch("wudup.db.os.open", side_effect=racing_open),
+            patch("wudup.db_storage.os.open", side_effect=racing_open),
             patch("wudup.db.sqlite3.connect") as connect,
         ):
             with self.assertRaisesRegex(OSError, "Could not protect"):
