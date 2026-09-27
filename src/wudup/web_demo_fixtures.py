@@ -65,6 +65,7 @@ web_onboarding: Any = None
 web_pending: Any = None
 web_plans: Any = None
 web_release_notes: Any = None
+web_retag_targets: Any = None
 web_retags: Any = None
 web_rollback: Any = None
 web_runs: Any = None
@@ -84,7 +85,8 @@ def _ensure_web_fixture_imports() -> None:
     global _WEB_FIXTURE_IMPORTS_READY
     global Request
     global web_app, web_auth, web_config, web_diagnostics, web_health, web_job_registry
-    global web_onboarding, web_pending, web_plans, web_release_notes, web_retags
+    global web_onboarding, web_pending, web_plans, web_release_notes
+    global web_retag_targets, web_retags
     global web_rollback, web_runs, web_self_update, web_settings, web_state, web_static
     global web_wud_api
     global GitHubClient, refresh_release_notes
@@ -106,6 +108,7 @@ def _ensure_web_fixture_imports() -> None:
     from wudup import web_pending as _web_pending
     from wudup import web_plans as _web_plans
     from wudup import web_release_notes as _web_release_notes
+    from wudup import web_retag_targets as _web_retag_targets
     from wudup import web_retags as _web_retags
     from wudup import web_rollback as _web_rollback
     from wudup import web_runs as _web_runs
@@ -141,6 +144,7 @@ def _ensure_web_fixture_imports() -> None:
     web_pending = _web_pending
     web_plans = _web_plans
     web_release_notes = _web_release_notes
+    web_retag_targets = _web_retag_targets
     web_retags = _web_retags
     web_rollback = _web_rollback
     web_runs = _web_runs
@@ -1059,7 +1063,7 @@ def _configure_backend_callbacks() -> None:
     )
     web_pending.configure(effective_config_loader=web_settings._effective_config)
     web_plans.configure(effective_config_loader=web_settings._effective_config)
-    web_retags.configure(
+    web_retag_targets.configure(
         effective_config_loader=web_settings._effective_config,
         retag_digest_pins_loader=web_settings._effective_retag_digest_pins,
     )

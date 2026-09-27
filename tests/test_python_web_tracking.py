@@ -23,7 +23,7 @@ from tests.web_test_helpers import (
 from wudup import (
     compose_persistence,
     compose_rewrite,
-    web_retags,
+    web_retag_targets,
     web_tracking,
     web_wud_api,
 )
@@ -332,7 +332,7 @@ def test_inventory_matches_exact_compose_path_despite_duplicate_project_service(
     tmp_path: Path, monkeypatch
 ) -> None:
     client, _fake_root, compose_path = _tracking_fixture(tmp_path)
-    discover = web_retags._discover_retag_stacks
+    discover = web_retag_targets._discover_retag_stacks
 
     def duplicate_identity(settings):
         stacks = discover(settings)
@@ -344,7 +344,7 @@ def test_inventory_matches_exact_compose_path_despite_duplicate_project_service(
             original, directory=other_directory, project_directory=other_directory,
         )
 
-    monkeypatch.setattr(web_retags, "_discover_retag_stacks", duplicate_identity)
+    monkeypatch.setattr(web_retag_targets, "_discover_retag_stacks", duplicate_identity)
     _install_wud_api(
         monkeypatch,
         containers=[{
@@ -404,14 +404,14 @@ def test_inventory_includes_build_only_service(
     tmp_path: Path, monkeypatch
 ) -> None:
     client, _fake_root, _compose_path = _tracking_fixture(tmp_path)
-    discover = web_retags._discover_retag_stacks
+    discover = web_retag_targets._discover_retag_stacks
 
     def with_build_only(settings):
         stacks = discover(settings)
         assert isinstance(stacks, tuple)
         return tuple(replace(stack, service_names=(*stack.service_names, "worker")) for stack in stacks)
 
-    monkeypatch.setattr(web_retags, "_discover_retag_stacks", with_build_only)
+    monkeypatch.setattr(web_retag_targets, "_discover_retag_stacks", with_build_only)
 
     response = client.get("/api/v1/tracked-containers")
 
