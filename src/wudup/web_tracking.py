@@ -14,7 +14,14 @@ from threading import Condition
 
 from fastapi import HTTPException, Request
 
-from . import web_database, web_jobs, web_retags, web_wud_api
+from . import (
+    web_database,
+    web_jobs,
+    web_retag_identity,
+    web_retag_runtime,
+    web_retag_targets,
+    web_wud_api,
+)
 from .command import CommandError, CommandRunner
 from .compose import (
     ComposeCli,
@@ -62,7 +69,7 @@ def api_tracked_containers(request: Request) -> TrackedContainersResponse:
 
 
 def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
-    stacks_or_response = web_retags._discover_retag_stacks(settings)
+    stacks_or_response = web_retag_targets._discover_retag_stacks(settings)
     snapshot = web_wud_api.get_snapshot(settings, include_containers=True)
     if not isinstance(stacks_or_response, tuple):
         return TrackedContainersResponse(
@@ -72,7 +79,7 @@ def tracked_containers(settings: WebSettings) -> TrackedContainersResponse:
             warnings=stacks_or_response.warnings,
         )
     stacks = stacks_or_response
-    records = web_retags._retag_target_records_for_stacks(settings, stacks)
+    records = web_retag_targets._retag_target_records_for_stacks(settings, stacks)
     wud_by_key, unkeyed_wud = _wud_containers_by_key(snapshot.inventory_containers)
     discovered_services = [
         (stack, service)
@@ -165,7 +172,7 @@ def _wud_match_detail(
 
 
 def _tracked_record_item(
-    record: web_retags._RetagTargetRecord,
+    record: web_retag_targets._RetagTargetRecord,
     snapshot: web_wud_api.WudApiSnapshot,
     wud_by_key: Mapping[tuple[str, str], list[web_wud_api.WudApiContainer]],
     unkeyed_wud: bool,
@@ -211,7 +218,7 @@ def _unresolved_service_item(
     if service_key_counts[key] > 1:
         known_at, action_at, action_status, action_run_id = "", "", "", None
     return TrackedContainerItem(
-        target_id=web_retags._retag_target_id_from_values(
+        target_id=web_retag_identity.retag_target_id(
             stack.directory, stack.file, stack.project_directory, stack.name, service,
         ),
         service_key=key, stack=stack.name, service=service,
@@ -248,7 +255,7 @@ def _confirmed_wud_match(
         labels.get("com.docker.compose.oneoff", ""),
     ))
     return runtime_key is not None and compose_runtime_service_key_matches(
-        web_retags._retag_compose_service_key(stack, service), runtime_key
+        web_retag_runtime._retag_compose_service_key(stack, service), runtime_key
     )
 
 
@@ -374,8 +381,8 @@ def api_tracking_repair_plan(
 
 def build_tracking_repair_plan(
     settings: WebSettings, payload: TrackingRepairRequest
-) -> tuple[TrackingRepairPlan, web_retags._RetagTargetRecord]:
-    records = web_retags._retag_target_records(settings)
+) -> tuple[TrackingRepairPlan, web_retag_targets._RetagTargetRecord]:
+    records = web_retag_targets._retag_target_records(settings)
     if not isinstance(records, tuple):
         raise HTTPException(status_code=503, detail="Compose services could not be discovered.")
     matches = [record for record in records if record.item.target_id == payload.target_id]
@@ -471,7 +478,7 @@ def api_apply_tracking_repair(
 
 def _revalidate_tracking_repair(
     settings: WebSettings, payload: TrackingRepairApplyRequest,
-) -> tuple[TrackingRepairPlan, web_retags._RetagTargetRecord, str, CommandRunner, ComposeCli]:
+) -> tuple[TrackingRepairPlan, web_retag_targets._RetagTargetRecord, str, CommandRunner, ComposeCli]:
     plan, record = build_tracking_repair_plan(settings, payload)
     if not secrets.compare_digest(plan.plan_id, payload.plan_id) or not plan.can_apply:
         raise RuntimeError("Tracking repair plan changed; preview it again.")
@@ -486,14 +493,14 @@ def _revalidate_tracking_repair(
         stack.directory, stack.file, project_directory=stack.project_directory
     ) != stack.project_name:
         raise RuntimeError("Compose project changed before tracking repair.")
-    running = web_retags._running_retag_compose_service_keys(settings)
-    if running is None or web_retags._retag_compose_service_key(stack, item.service) not in running:
+    running = web_retag_runtime._running_retag_compose_service_keys(settings)
+    if running is None or web_retag_runtime._retag_compose_service_key(stack, item.service) not in running:
         raise RuntimeError("Selected service is no longer confirmed running.")
     return plan, record, expected_image_id, runner, compose
 
 
 def _verify_recreated_service(
-    compose: ComposeCli, runner: CommandRunner, record: web_retags._RetagTargetRecord,
+    compose: ComposeCli, runner: CommandRunner, record: web_retag_targets._RetagTargetRecord,
     expected_image_id: str, rendered_hash: str,
 ) -> None:
     stack = record.stack
@@ -509,7 +516,7 @@ def _verify_recreated_service(
 
 
 def _rollback_tracking_repair(
-    settings: WebSettings, record: web_retags._RetagTargetRecord,
+    settings: WebSettings, record: web_retag_targets._RetagTargetRecord,
     plan: TrackingRepairPlan, backup: Path, recreate_started: bool,
     expected_image_id: str,
 ) -> str:
@@ -547,7 +554,7 @@ def _run_tracking_repair(
     backup: Path | None = None
     run_id: int | None = None
     plan: TrackingRepairPlan | None = None
-    record: web_retags._RetagTargetRecord | None = None
+    record: web_retag_targets._RetagTargetRecord | None = None
     changed = False
     recreate_started = False
     expected_image_id = ""
@@ -602,7 +609,7 @@ def _run_tracking_repair(
         compose.up(
             stack.directory, stack.file, [item.service],
             force_recreate=True, no_deps=True, remove_orphans=False,
-            wait=True, wait_timeout=web_retags._effective_config(settings).max_wait,
+            wait=True, wait_timeout=web_retag_targets._effective_config(settings).max_wait,
             project_directory=stack.project_directory,
         )
         _verify_recreated_service(compose, runner, record, expected_image_id, plan.rendered_hash)
@@ -634,7 +641,7 @@ def _run_tracking_repair(
 def _finish_failed_tracking_repair(
     settings: WebSettings, jobs: dict[str, WebApplyJob], condition: Condition,
     job_id: str, exc: Exception, run_id: int | None, plan: TrackingRepairPlan | None,
-    record: web_retags._RetagTargetRecord | None, backup: Path | None,
+    record: web_retag_targets._RetagTargetRecord | None, backup: Path | None,
     changed: bool, recreate_started: bool, expected_image_id: str,
 ) -> bool:
     rollback_error = (

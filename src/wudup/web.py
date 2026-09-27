@@ -35,6 +35,7 @@ from . import (
     web_release_notes,
     web_release_notifications,
     web_request_context,
+    web_retag_targets,
     web_retags,
     web_rollback,
     web_runs,
@@ -135,7 +136,7 @@ def create_app(
     )
     web_pending.configure(effective_config_loader=web_settings._effective_config)
     web_plans.configure(effective_config_loader=web_settings._effective_config)
-    web_retags.configure(
+    web_retag_targets.configure(
         effective_config_loader=web_settings._effective_config,
         retag_digest_pins_loader=web_settings._effective_retag_digest_pins,
     )
