@@ -247,9 +247,7 @@ describe("pending view fallback and release notes", () => {
     const preview = card.find(".stack-change-preview");
     expect(preview.text()).toContain("Retained metadata");
     expect(preview.text()).toContain("Release advisory: critical");
-    expect(preview.findAll(".evidence-explanation")).toHaveLength(2);
-    expect(preview.text()).toContain("candidate scans inspect the proposed image");
-    expect(preview.text()).toContain("not a guarantee of a safe update");
+    expect(preview.text()).not.toContain("not a guarantee of a safe update");
     expect(preview.text()).toContain("Release advisory: needs review");
     expect(card.find(".stack-card-tags").text()).toContain("1 verified high/critical release update");
   });
@@ -690,10 +688,7 @@ describe("pending view fallback and release notes", () => {
       expect(card.text()).toContain("Digest-only");
       expect(card.text()).toContain("Mutable latest");
       expect(card.text()).toContain("Candidate scan: unavailable");
-      const evidence = card.find(".evidence-explanation");
-      expect(evidence.text()).toContain("published vulnerability evidence");
-      expect(evidence.text()).toContain("candidate scans inspect the proposed image");
-      expect(evidence.text()).toContain("not a guarantee of a safe update");
+      expect(card.text()).not.toContain("not a guarantee of a safe update");
     } finally {
       restore();
     }

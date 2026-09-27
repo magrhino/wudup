@@ -33,6 +33,7 @@ type ParsedVersion = {
   major: number;
   minor: number;
   patch: number;
+  parts: number[];
 };
 
 export function getPendingGroupedItem(
@@ -126,7 +127,9 @@ function addVersionBumpCue(
   if (!current || !desired) {
     return;
   }
-  if (current.major !== desired.major) {
+  if (compareVersionParts(desired.parts, current.parts) < 0) {
+    addCue("downgrade", "Downgrade", "error");
+  } else if (current.major !== desired.major) {
     addCue("major-bump", "Major bump", "error");
   } else if (current.minor !== desired.minor) {
     addCue("minor-bump", "Minor bump", "warning");
@@ -218,14 +221,25 @@ function addPolicyCues(
 }
 
 function parseVersion(tag: string): ParsedVersion | null {
-  const match = tag.match(/^v?(\d+)\.(\d+)(?:\.(\d+))?/);
-  if (!match) {
+  const match = tag.match(/^v?(\d+(?:\.\d+)+)/);
+  if (!match?.[1]) {
     return null;
   }
-  const [, majorStr = "0", minorStr = "0", patchStr = "0"] = match;
+  const parts = match[1].split(".").map((part) => parseInt(part, 10));
   return {
-    major: parseInt(majorStr, 10),
-    minor: parseInt(minorStr, 10),
-    patch: parseInt(patchStr, 10),
+    major: parts[0] ?? 0,
+    minor: parts[1] ?? 0,
+    patch: parts[2] ?? 0,
+    parts,
   };
+}
+
+function compareVersionParts(left: number[], right: number[]): number {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
 }
