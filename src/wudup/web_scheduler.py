@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
-from . import web_database, web_jobs, web_pending_sources
+from . import web_database, web_job_registry, web_jobs, web_pending_sources
 from .config import UpdaterConfig
 from .db import (
     active_dependency_snooze_rows,
@@ -130,7 +130,7 @@ def _auto_update_tick(
 ) -> ApplyJobResponse | None:
     if (
         not settings.mutations_enabled
-        or web_jobs._active_apply_job_exists_in_state(app.state)
+        or web_job_registry._active_apply_job_exists_in_state(app.state)
     ):
         return None
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -152,7 +152,7 @@ def _auto_update_tick(
         return None
     _selection, _plan, pending_source = candidate
     wud_lock = (
-        web_jobs._acquire_apply_wud_lock(settings)
+        web_job_registry._acquire_apply_wud_lock(settings)
         if pending_source.active == "file"
         else None
     )

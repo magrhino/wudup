@@ -19,7 +19,7 @@ from typing import Any, Literal, cast
 
 from fastapi import BackgroundTasks, HTTPException, Request
 
-from . import __version__, web_jobs
+from . import __version__, web_job_registry
 from .banner import (
     current_tag,
     fetch_latest_release_tag,
@@ -117,7 +117,7 @@ def api_plan_self_update(request: Request) -> SelfUpdatePlanResponse:
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
 
@@ -171,7 +171,7 @@ def api_apply_self_update(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    reservation_error = web_jobs._reserve_self_update(request.app.state)
+    reservation_error = web_job_registry._reserve_self_update(request.app.state)
     if reservation_error:
         raise HTTPException(status_code=409, detail=reservation_error)
 
@@ -198,7 +198,7 @@ def api_apply_self_update(
             status,
         )
     finally:
-        web_jobs._release_self_update(request.app.state)
+        web_job_registry._release_self_update(request.app.state)
 
     return SelfUpdateApplyResponse(
         status=(
@@ -339,7 +339,7 @@ def api_prepare_self_update(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    reservation_error = web_jobs._reserve_self_update(request.app.state)
+    reservation_error = web_job_registry._reserve_self_update(request.app.state)
     if reservation_error:
         raise HTTPException(status_code=409, detail=reservation_error)
 
@@ -445,7 +445,7 @@ def api_prepare_self_update(
             metadata_extra=metadata,
         )
     finally:
-        web_jobs._release_self_update(request.app.state)
+        web_job_registry._release_self_update(request.app.state)
         _remove_self_update_cached_plan(request.app.state, payload.plan_id)
 
     return SelfUpdatePrepareResponse(
@@ -468,7 +468,7 @@ def api_restart_container(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
     container = settings.restart_container.strip()

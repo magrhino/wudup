@@ -16,7 +16,7 @@ from fastapi import HTTPException, Request
 
 from . import (
     web_database,
-    web_jobs,
+    web_job_registry,
     web_retag_identity,
     web_retag_runtime,
     web_retag_targets,
@@ -459,11 +459,11 @@ def api_apply_tracking_repair(
     condition: Condition = state.web_apply_condition
     jobs: dict[str, WebApplyJob] = state.web_apply_jobs
     with condition:
-        active_error = web_jobs._active_mutation_error_unlocked(state)
+        active_error = web_job_registry._active_mutation_error_unlocked(state)
         if active_error:
             raise HTTPException(status_code=409, detail=active_error)
         job = WebApplyJob(id=secrets.token_urlsafe(18), status="queued", selected_line_numbers=())
-        web_jobs._register_apply_job_unlocked(jobs, job)
+        web_job_registry._register_apply_job_unlocked(jobs, job)
         condition.notify_all()
         try:
             state.web_apply_executor.submit(
@@ -473,7 +473,7 @@ def api_apply_tracking_repair(
             del jobs[job.id]
             condition.notify_all()
             raise
-        return web_jobs._apply_job_response(job)
+        return web_job_registry._apply_job_response(job)
 
 
 def _revalidate_tracking_repair(
@@ -547,7 +547,7 @@ def _run_tracking_repair(
     condition: Condition,
     job_id: str,
 ) -> None:
-    web_jobs._update_apply_job(
+    web_job_registry._update_apply_job(
         jobs, condition, job_id, status="running", started_at=utc_timestamp()
     )
     lock = None
@@ -560,17 +560,17 @@ def _run_tracking_repair(
     expected_image_id = ""
     retain_backup = False
     try:
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="preflight", status="running", message="Revalidating Compose and runtime state."),
         )
-        lock = web_jobs._acquire_apply_wud_lock(settings)
+        lock = web_job_registry._acquire_apply_wud_lock(settings)
         plan, record, expected_image_id, runner, compose = _revalidate_tracking_repair(
             settings, payload
         )
         stack = record.stack
         item = record.item
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="preflight", status="success", message="Selected service and plan revalidated."),
         )
@@ -583,7 +583,7 @@ def _run_tracking_repair(
             )
         path = stack.directory / stack.file
         backup = _backup_compose(path)
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="compose", status="running", message="Writing the tracking label in Compose."),
         )
@@ -592,7 +592,7 @@ def _run_tracking_repair(
             expected_source_hash=plan.source_hash,
         )
         changed = True
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="compose", status="success", message="Tracking label written; image unchanged."),
         )
@@ -600,7 +600,7 @@ def _run_tracking_repair(
         _require_approved_compose_source(path, plan.rendered_hash)
         if _matching_runtime_image_id(settings, stack, item.service, item.image) != expected_image_id:
             raise RuntimeError("Running image changed before tracking repair; reconcile the image and preview again.")
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="running", message="Recreating only the selected service without a pull."),
         )
@@ -613,16 +613,16 @@ def _run_tracking_repair(
             project_directory=stack.project_directory,
         )
         _verify_recreated_service(compose, runner, record, expected_image_id, plan.rendered_hash)
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="recreate", status="success", message="Selected service is running after recreation."),
         )
         _finish_tracking_audit(settings, run_id, plan, "success")
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="completion", status="success", message="Tracking label repaired and service recreated."),
         )
-        web_jobs._update_apply_job(
+        web_job_registry._update_apply_job(
             jobs, condition, job_id, status="success", run_id=run_id,
             finished_at=utc_timestamp(),
         )
@@ -661,11 +661,11 @@ def _finish_failed_tracking_repair(
             error += "; " + _safe_exception_detail(
                 settings, "audit record could not be finalized", audit_exc
             )
-    web_jobs._append_apply_job_progress(
+    web_job_registry._append_apply_job_progress(
         jobs, condition, job_id,
         UpdaterProgressEvent(phase="completion", status="failure", message=error),
     )
-    web_jobs._update_apply_job(
+    web_job_registry._update_apply_job(
         jobs, condition, job_id, status="failure", run_id=run_id,
         finished_at=utc_timestamp(), error=error,
     )

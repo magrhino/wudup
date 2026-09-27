@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request
 from . import (
     web_database,
     web_file_selection_store,
-    web_jobs,
+    web_job_registry,
     web_pending_snoozes,
     web_pending_sources,
     web_wud_api,
@@ -126,13 +126,13 @@ def api_pending_cleanup(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
     _require_file_pending_source(settings, operation="cleanup")
 
     payload_lines = _cleanup_payload_lines(payload)
-    wud_lock = web_jobs._acquire_apply_wud_lock(settings)
+    wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
     try:
         try:
             parsed = parse_wud_file(settings.config.wud_out_file)
@@ -216,13 +216,13 @@ def api_pending_removal(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
     _require_file_pending_source(settings, operation="removal")
 
     payload_lines = _removal_payload_lines(payload)
-    wud_lock = web_jobs._acquire_apply_wud_lock(settings)
+    wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
     try:
         try:
             parsed = parse_wud_file(settings.config.wud_out_file)

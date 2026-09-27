@@ -12,7 +12,7 @@ from tests.web_test_helpers import (
     _make_fake_stack,
 )
 
-from wudup import web_jobs, web_pending
+from wudup import web_job_registry, web_pending
 from wudup.file_ops import OwnerConfig
 from wudup.locks import DirectoryLock, lock_dir_for
 from wudup.web_models import WebSettings
@@ -70,7 +70,7 @@ def test_pending_mutation_orders_locked_audit_file_write_and_transaction(
     audit_connections: list[sqlite3.Connection] = []
     locks: list[DirectoryLock] = []
     owners: list[OwnerConfig] = []
-    acquire = web_jobs._acquire_apply_wud_lock
+    acquire = web_job_registry._acquire_apply_wud_lock
     init_db = web_pending.init_db
     audit_name = f"_insert_pending_{operation}_audit"
     insert_audit = getattr(web_pending, audit_name)
@@ -128,7 +128,7 @@ def test_pending_mutation_orders_locked_audit_file_write_and_transaction(
             stream.write("repo/old:latest\nrepo/new:latest\n")
         return remove_lines(path, parsed, selected, **kwargs)
 
-    monkeypatch.setattr(web_jobs, "_acquire_apply_wud_lock", acquire_lock)
+    monkeypatch.setattr(web_job_registry, "_acquire_apply_wud_lock", acquire_lock)
     monkeypatch.setattr(web_pending, "init_db", initialize)
     monkeypatch.setattr(web_pending, audit_name, audited)
     monkeypatch.setattr(web_pending, "remove_lines_before_run", remove)

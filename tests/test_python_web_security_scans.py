@@ -18,7 +18,7 @@ from tests.web_test_helpers import (
     _wud_api_container,
 )
 
-from wudup import web_jobs, web_security
+from wudup import web_job_registry, web_security
 from wudup.db import init_db, open_db, utc_timestamp
 from wudup.digest_verifier import (
     DigestResolveResult,
@@ -235,7 +235,7 @@ def test_security_scan_refresh_rejects_concurrent_jobs(
 
     assert first.status_code == 200
     assert (
-        web_jobs._active_mutation_error_in_state(client.app.state)
+        web_job_registry._active_mutation_error_in_state(client.app.state)
         == "security scan refresh is already running"
     )
     assert second.status_code == 409
@@ -357,7 +357,7 @@ def test_security_scan_refresh_reserves_against_self_update_race(
 
     def reserve_self_update() -> None:
         try:
-            reservation["error"] = web_jobs._reserve_self_update(client.app.state)
+            reservation["error"] = web_job_registry._reserve_self_update(client.app.state)
         finally:
             reservation_done.set()
 
@@ -401,7 +401,7 @@ def test_active_mutation_error_checks_security_jobs_under_scan_lock() -> None:
     )
 
     assert (
-        web_jobs._active_mutation_error_in_state(state)
+        web_job_registry._active_mutation_error_in_state(state)
         == "security scan refresh is already running"
     )
 
@@ -416,7 +416,7 @@ def test_active_mutation_error_keeps_general_guards_when_scan_jobs_excluded() ->
     )
 
     assert (
-        web_jobs._active_mutation_error_in_state(
+        web_job_registry._active_mutation_error_in_state(
             state,
             include_security_scan_jobs=False,
         )
@@ -426,7 +426,7 @@ def test_active_mutation_error_keeps_general_guards_when_scan_jobs_excluded() ->
     state.web_apply_jobs = {}
     state.web_self_update_running = True
     assert (
-        web_jobs._active_mutation_error_in_state(
+        web_job_registry._active_mutation_error_in_state(
             state,
             include_security_scan_jobs=False,
         )
@@ -435,7 +435,7 @@ def test_active_mutation_error_keeps_general_guards_when_scan_jobs_excluded() ->
 
     state.web_self_update_running = False
     assert (
-        web_jobs._active_mutation_error_in_state(
+        web_job_registry._active_mutation_error_in_state(
             state,
             include_security_scan_jobs=False,
         )

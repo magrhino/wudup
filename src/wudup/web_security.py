@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from . import web_jobs
+from . import web_job_registry
 from .command import CommandRunner
 from .config import ConfigError, parse_bool_env
 from .db import DatabaseError, init_db, open_db, utc_timestamp
@@ -175,7 +175,7 @@ def api_refresh_security_scans(request: Request) -> SecurityScanJobResponse:
             jobs[job.id] = job
             _prune_security_scan_jobs_unlocked(jobs)
 
-    active_error = web_jobs._reserve_mutation_state(
+    active_error = web_job_registry._reserve_mutation_state(
         state,
         reserve_scan_job,
         include_security_scan_jobs=False,

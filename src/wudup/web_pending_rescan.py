@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from fastapi import HTTPException, Request
 
 from . import (
-    web_jobs,
+    web_job_registry,
     web_pending_rescan_audit,
     web_pending_rescan_payload,
     web_pending_sources,
@@ -35,7 +35,7 @@ def api_pending_rescan(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_jobs._active_mutation_error(request)
+    active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
 
@@ -45,7 +45,7 @@ def api_pending_rescan(
             detail="selected rescan lines are required",
         )
 
-    wud_lock = web_jobs._acquire_apply_wud_lock(settings)
+    wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
     try:
         if payload.scope == "all":
             audit_line_numbers: tuple[int, ...] = ()

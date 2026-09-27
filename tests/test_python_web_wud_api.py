@@ -29,7 +29,7 @@ from wudup import (
     web as web_module,
 )
 from wudup import (
-    web_jobs,
+    web_job_registry,
     web_release_notifications,
     web_retags,
     web_scheduler,
@@ -757,7 +757,7 @@ def test_web_app_wires_pending_observation_lifecycle_and_contains_checkpoint_fai
         (web_scheduler, "shutdown_auto_update_scheduler_state", "scheduler"),
         (web_retags, "shutdown_retag_preview_state", "retag-preview"),
         (web_security, "shutdown_security_scan_state", "security-scan"),
-        (web_jobs, "shutdown_apply_job_state", "apply-jobs"),
+        (web_job_registry, "shutdown_apply_job_state", "apply-jobs"),
     ):
         monkeypatch.setattr(
             module,

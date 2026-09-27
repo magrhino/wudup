@@ -11,7 +11,7 @@ from threading import Condition
 from fastapi import HTTPException
 from starlette.datastructures import State
 
-from . import web_jobs, web_retag_audit
+from . import web_job_registry, web_retag_audit
 from .command import CommandError, CommandRunner
 from .compose import ComposeCli, ComposeStack
 from .compose_rewrite import (
@@ -80,7 +80,7 @@ def submit_retag_apply_job(
     jobs: dict[str, WebApplyJob] = state.web_apply_jobs
     executor = state.web_apply_executor
     with apply_condition:
-        active_error = web_jobs._active_mutation_error_unlocked(state)
+        active_error = web_job_registry._active_mutation_error_unlocked(state)
         if active_error:
             raise HTTPException(status_code=409, detail=active_error)
         job = WebApplyJob(
@@ -88,8 +88,8 @@ def submit_retag_apply_job(
             status="queued",
             selected_line_numbers=(),
         )
-        web_jobs._register_apply_job_unlocked(jobs, job)
-        response = web_jobs._apply_job_response(job)
+        web_job_registry._register_apply_job_unlocked(jobs, job)
+        response = web_job_registry._apply_job_response(job)
         apply_condition.notify_all()
         try:
             executor.submit(
@@ -119,7 +119,7 @@ def _run_retag_apply_job(
     build_plan: Callable[[WebSettings, RetagPlanRequest], _RetagPlanBuild],
     effective_config: Callable[[WebSettings], UpdaterConfig],
 ) -> None:
-    web_jobs._update_apply_job(
+    web_job_registry._update_apply_job(
         jobs,
         apply_condition,
         job_id,
@@ -132,7 +132,7 @@ def _run_retag_apply_job(
     preflight = True
     successful_updates: tuple[_RetagPlanUpdate, ...] = ()
     retained_known_image_updates: tuple[_RetagPlanUpdate, ...] = ()
-    web_jobs._append_apply_job_progress(
+    web_job_registry._append_apply_job_progress(
         jobs,
         apply_condition,
         job_id,
@@ -143,7 +143,7 @@ def _run_retag_apply_job(
         ),
     )
     try:
-        wud_lock = web_jobs._acquire_apply_wud_lock(settings)
+        wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
         build = build_plan(
             settings,
             RetagPlanRequest(
@@ -156,7 +156,7 @@ def _run_retag_apply_job(
             raise RuntimeError("retag plan is stale")
         if not plan.can_apply or not build.updates:
             raise RuntimeError("retag plan is not ready to apply")
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs,
             apply_condition,
             job_id,
@@ -177,7 +177,7 @@ def _run_retag_apply_job(
             effective_config=effective_config,
         )
         web_retag_audit._finish_retag_audit_run(settings, run_id, build, status="success")
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs,
             apply_condition,
             job_id,
@@ -187,7 +187,7 @@ def _run_retag_apply_job(
                 message="Retag changes applied.",
             ),
         )
-        web_jobs._update_apply_job(
+        web_job_registry._update_apply_job(
             jobs,
             apply_condition,
             job_id,
@@ -200,7 +200,7 @@ def _run_retag_apply_job(
             successful_updates = exc.successful_updates
             retained_known_image_updates = exc.retained_known_image_updates
         safe_error = _safe_retag_apply_error(settings, exc)
-        web_jobs._append_apply_job_progress(
+        web_job_registry._append_apply_job_progress(
             jobs,
             apply_condition,
             job_id,
@@ -210,7 +210,7 @@ def _run_retag_apply_job(
                 message=safe_error,
             ),
         )
-        web_jobs._update_apply_job(
+        web_job_registry._update_apply_job(
             jobs,
             apply_condition,
             job_id,
@@ -777,7 +777,7 @@ def _progress(
     stack: str = "",
     services: Sequence[str] = (),
 ) -> None:
-    web_jobs._append_apply_job_progress(
+    web_job_registry._append_apply_job_progress(
         jobs,
         apply_condition,
         job_id,

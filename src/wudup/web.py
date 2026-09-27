@@ -12,12 +12,11 @@ from fastapi import (
     APIRouter,
     Depends,
     FastAPI,
-    Query,
     Request,
     Response,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from . import (
     __version__,
@@ -27,6 +26,7 @@ from . import (
     web_diagnostics,
     web_effective_settings,
     web_health,
+    web_job_registry,
     web_jobs,
     web_models,
     web_onboarding,
@@ -73,7 +73,7 @@ def create_app(
     )
     app.state.web_settings = active_settings
     app.state.web_setup_claim = ""
-    web_jobs.initialize_apply_job_state(app.state)
+    web_job_registry.initialize_apply_job_state(app.state)
     web_security.initialize_security_scan_state(app.state, active_settings)
     web_retags.initialize_retag_preview_state(app.state)
     web_release_notifications.initialize_release_notification_scheduler_state(app.state)
@@ -110,7 +110,7 @@ def create_app(
         web_scheduler.shutdown_auto_update_scheduler_state(app.state)
         web_retags.shutdown_retag_preview_state(app.state)
         web_security.shutdown_security_scan_state(app.state)
-        web_jobs.shutdown_apply_job_state(app.state)
+        web_job_registry.shutdown_apply_job_state(app.state)
         try:
             web_wud_api.checkpoint_pending_observation_cache(active_settings)
         except Exception:  # noqa: BLE001 - persistence must not fail app shutdown.
@@ -521,13 +521,13 @@ def create_app(
     )
     router.add_api_route(
         "/jobs/{job_id}",
-        api_job,
+        web_jobs.api_job,
         methods=["GET"],
         response_model=web_models.ApplyJobResponse,
     )
     router.add_api_route(
         "/jobs/{job_id}/stream",
-        api_job_stream,
+        web_jobs.api_job_stream,
         methods=["GET"],
     )
     router.add_api_route(
@@ -539,7 +539,7 @@ def create_app(
     )
     router.add_api_route(
         "/apply-jobs/{job_id}",
-        api_apply_job,
+        web_jobs.api_apply_job,
         methods=["GET"],
         response_model=web_models.ApplyJobResponse,
     )
@@ -695,41 +695,6 @@ def api_post_only_method_not_allowed() -> JSONResponse:
         {"detail": "method not allowed"},
         status_code=405,
         headers={"Allow": "POST"},
-    )
-
-
-def api_job(job_id: str, request: Request) -> web_models.ApplyJobResponse:
-    return web_jobs._apply_job_response_for_request(job_id, request)
-
-
-def api_apply_job(job_id: str, request: Request) -> web_models.ApplyJobResponse:
-    return api_job(job_id, request)
-
-
-def api_job_stream(
-    job_id: str,
-    request: Request,
-    log_tail_bytes: int = Query(
-        default=web_jobs.DEFAULT_JOB_LOG_TAIL_BYTES,
-        ge=1,
-    ),
-) -> StreamingResponse:
-    settings = web_request_context.request_settings(request)
-    web_jobs._require_apply_job(job_id, request)
-    return StreamingResponse(
-        web_jobs._apply_job_stream(
-            request.app.state,
-            settings,
-            job_id,
-            log_tail_bytes=min(log_tail_bytes, web_runs.MAX_LOG_TAIL_BYTES),
-            safe_log_path=web_runs._safe_log_path,
-            read_log_tail=web_runs._read_log_tail,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 

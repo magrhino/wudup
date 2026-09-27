@@ -66,6 +66,7 @@ const COMPANION_TEST_RULES = [
       src/wudup/web_auth.py
       src/wudup/web_diagnostics.py
       src/wudup/web_effective_settings.py
+      src/wudup/web_job_registry.py
       src/wudup/web_jobs.py
       src/wudup/web_pending.py
       src/wudup/web_plans.py
@@ -211,6 +212,7 @@ function runReviewPromptRules() {
     "src/wudup/updater_lifecycle*.py",
     "src/wudup/updater_runner_*.py",
     "src/wudup/web_health.py",
+    "src/wudup/web_job_registry.py",
     "src/wudup/web_jobs.py",
     "src/wudup/web_scheduler.py",
     "src/wudup/web_self_update.py",
