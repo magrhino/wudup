@@ -32,10 +32,8 @@ import {
   usePendingApplyJob,
   type PendingApplyJobPanelRef,
 } from "../src/views/pending/usePendingApplyJob";
-import {
-  tagStreamLabelApprovalIssueKey,
-  usePendingPlanReviewState,
-} from "../src/views/pending/usePendingPlanReviewState";
+import { tagStreamLabelApprovalIssueKey } from "../src/views/pending/planReviewFormatters";
+import { usePendingPlanReviewState } from "../src/views/pending/usePendingPlanReviewState";
 import { usePendingQueueState } from "../src/views/pending/usePendingQueueState";
 import {
   pendingSelectionKey,

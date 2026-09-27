@@ -11,7 +11,7 @@ from tests.db_helpers import db_connection
 
 from wudup.platforms import ImagePlatform
 from wudup.security_subjects import PendingSecurityOptions, pending_security_context
-from wudup.web import load_web_settings
+from wudup.web_config import load_web_settings
 from wudup.web_security import security_scans_response
 
 

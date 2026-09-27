@@ -6,7 +6,7 @@ import pytest
 from tests.web_test_helpers import _web_env
 
 from wudup import web_wud_cache, web_wud_transport
-from wudup.web import load_web_settings
+from wudup.web_config import load_web_settings
 from wudup.web_models import WudApiStatus
 
 

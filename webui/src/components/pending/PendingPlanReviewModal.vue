@@ -8,8 +8,6 @@ import { planChanges } from "../../utils/updateSummary";
 import type {
   ApplyPreflightCheck,
   ApplyPreflightResponse,
-  ApplyPreflightStatus,
-  PlanAction,
   PlanCleanupItem,
   PlanIssue,
   PlanResponse,
@@ -19,25 +17,26 @@ import type {
   TagStreamDecision,
 } from "../../api/client";
 import {
-  pendingMetadataStatusLabel,
-  pendingMetadataStatusTagType,
-  pendingMetadataStatusTitle,
-  releaseNoteReason,
-  releaseNoteStatus,
-} from "../../views/pending/pendingDisplay";
-import {
-  planLineDigestPinLabel,
-  planLineDigestUnpinLabel,
-  planLineServiceLabel,
-  planLineTagRewriteLabel,
   pluralize,
   type PlanActionView,
   type PlanDigestPinLabelRewriteView,
   type PlanDigestUnpinUpdateView,
   type PlanLineView,
 } from "../../views/pending/utils";
-import { tagStreamLabelApprovalIssueKey } from "../../views/pending/usePendingPlanReviewState";
-import PendingReleaseNotes from "./PendingReleaseNotes.vue";
+import {
+  actionCommand,
+  applyPreflightCheckLabel,
+  applyPreflightCheckType,
+  digestPinLabelIssueProposedRegex,
+  issueDetailString,
+  issueHint,
+  issueLabel,
+  issueType,
+  staleDiagnosticDetail,
+  staleDiagnosticLabel,
+  tagStreamLabelApprovalIssueKey,
+} from "../../views/pending/planReviewFormatters";
+import PendingPlanLineList from "./PendingPlanLineList.vue";
 import PendingReviewSummary from "./PendingReviewSummary.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
 import PreflightFooterActions from "../preflight/PreflightFooterActions.vue";
@@ -47,14 +46,11 @@ import PreflightNoticeList from "../preflight/PreflightNoticeList.vue";
 type TagType = "default" | "error" | "info" | "success" | "warning";
 
 const props = defineProps<{
-  actionCommand: (action: PlanAction) => string;
   applyButtonLabel: string;
   applyDisabled: boolean;
   applyPreflight: ApplyPreflightResponse | null;
   applyPreflightAttentionChecks: ApplyPreflightCheck[];
   applyPreflightCheckDetail: (check: ApplyPreflightCheck) => string;
-  applyPreflightCheckLabel: (status: ApplyPreflightStatus) => string;
-  applyPreflightCheckType: (status: ApplyPreflightStatus) => TagType;
   applyPreflightPassedChecks: ApplyPreflightCheck[];
   applyPreflightPassedText: string;
   applyReadinessStatusLabel: string;
@@ -69,15 +65,10 @@ const props = defineProps<{
   cleanupReviewSummary: string;
   digestPinLabelApprovalApproved: (issue: PlanIssue) => boolean;
   digestPinLabelApprovalIssues: PlanIssue[];
-  digestPinLabelIssueProposedRegex: (issue: PlanIssue) => string;
   tagStreamDecisionIssues: PlanIssue[];
   tagStreamDecisionSelected: (issue: PlanIssue, decision: TagStreamDecision) => boolean;
   tagStreamLabelApprovalApproved: (issue: PlanIssue) => boolean;
   tagStreamLabelApprovalIssues: PlanIssue[];
-  issueDetailString: (issue: PlanIssue, key: string) => string;
-  issueHint: (issue: PlanIssue) => string;
-  issueLabel: (issue: PlanIssue) => string;
-  issueType: (issue: PlanIssue) => "error" | "warning" | "info";
   loading: boolean;
   mutationDisabledMessage: string;
   plan: PlanResponse;
@@ -102,8 +93,6 @@ const props = defineProps<{
   preflightTagRewriteNotice: string;
   preflightTitle: string;
   show: boolean;
-  staleDiagnosticDetail: (item: PlanCleanupItem) => string;
-  staleDiagnosticLabel: (item: PlanCleanupItem) => string;
   visiblePlanIssues: PlanIssue[];
 }>();
 
@@ -122,25 +111,15 @@ const reviewReasons = computed(() => {
   return [
     ...[...props.visiblePlanIssues, ...props.tagStreamDecisionIssues,
       ...props.tagStreamLabelApprovalIssues, ...props.digestPinLabelApprovalIssues].map(issue => [
-      props.issueLabel(issue),
-      props.issueHint(issue),
+      issueLabel(issue),
+      issueHint(issue),
     ].filter(Boolean).join(" — ")),
-    ...props.cleanupItems.map(item => `${item.image}: ${props.staleDiagnosticLabel(item)}. ${props.staleDiagnosticDetail(item)}`),
+    ...props.cleanupItems.map(item => `${item.image}: ${staleDiagnosticLabel(item)}. ${staleDiagnosticDetail(item)}`),
     ...props.plan.skipped.filter(item => !cleanupLines.has(item.line_no))
       .map(item => `${item.image}: skipped. ${item.reason}`),
     props.planMetadataWarning,
   ].filter(Boolean);
 });
-
-function releaseNoteProps(lineNo: number) {
-  const note = props.releaseNotes.find((item) => item.line_no === lineNo) ?? null;
-  const lookupError = note ? "" : props.releaseNotesError;
-  return {
-    releaseNote: note,
-    releaseNoteStatus: lookupError ? "Check failed" : releaseNoteStatus(note, props.releaseNotesLoading),
-    releaseNoteReason: releaseNoteReason(note) || lookupError,
-  };
-}
 
 function tagStreamDecisionsComplete(): boolean {
   return props.tagStreamDecisionIssues.every(
@@ -158,7 +137,7 @@ function selectedTagStreamUpdate(issue: PlanIssue): PlanTagStreamUpdate | undefi
 
 function tagStreamRulePreview(issue: PlanIssue): string {
   return selectedTagStreamUpdate(issue)?.proposed_label_regex
-    ?? props.issueDetailString(issue, "preserve_label_regex");
+    ?? issueDetailString(issue, "preserve_label_regex");
 }
 </script>
 
@@ -577,56 +556,13 @@ function tagStreamRulePreview(issue: PlanIssue): string {
           <strong id="preflight-impact-title">Services and images</strong>
           <n-tag size="small">{{ pluralize(planLines.length, "service") }}</n-tag>
         </div>
-        <div v-if="planLines.length" class="compact-list">
-          <div
-            v-for="{ stack, line } in planLines"
-            :key="`${stack}-${line.line_no}-${line.service}`"
-            class="list-row plan-line-row"
-          >
-            <span>#{{ line.line_no }}</span>
-            <strong class="plan-line-heading">
-              <span>{{ planLineServiceLabel(plan.summary.stack_count, stack, line) }}</span>
-              <n-tag
-                size="small"
-                :type="pendingMetadataStatusTagType(line)"
-                :title="pendingMetadataStatusTitle(line)"
-              >
-                {{ pendingMetadataStatusLabel(line) }} metadata
-              </n-tag>
-            </strong>
-            <em>
-              <span v-if="planLineTagRewriteLabel(line)" class="tag-rewrite-detail">
-                <n-tag size="small" type="warning">Tag rewrite</n-tag>
-                {{ planLineTagRewriteLabel(line) }}
-              </span>
-              <span
-                v-else-if="planLineDigestPinLabel(line)"
-                class="tag-rewrite-detail"
-              >
-                <n-tag size="small" type="info">Digest pin</n-tag>
-                {{ planLineDigestPinLabel(line) }}
-              </span>
-              <span
-                v-else-if="planLineDigestUnpinLabel(line)"
-                class="tag-rewrite-detail"
-              >
-                <n-tag size="small" type="info">Digest unpin</n-tag>
-                {{ planLineDigestUnpinLabel(line) }}
-              </span>
-              <template v-else>
-                <code>{{ line.compose_image }}</code>
-                <span aria-hidden="true"> -> </span>
-                <code>{{ line.target_image }}</code>
-              </template>
-            </em>
-            <PendingReleaseNotes class="plan-line-release"
-              :candidate-label="`${stack} / ${line.service} · ${line.target_image}`"
-              :candidate-tag="line.target_image.split('@')[0]?.split('/').pop()?.split(':')[1] || ''"
-              v-bind="releaseNoteProps(line.line_no)"
-            />
-          </div>
-        </div>
-        <div v-else class="empty-state">No matched services.</div>
+        <PendingPlanLineList
+          :plan-lines="planLines"
+          :stack-count="plan.summary.stack_count"
+          :release-notes="releaseNotes"
+          :release-notes-loading="releaseNotesLoading"
+          :release-notes-error="releaseNotesError"
+        />
       </section>
 
       <PreflightNoticeList
@@ -651,56 +587,13 @@ function tagStreamRulePreview(issue: PlanIssue): string {
           <summary class="disclosure-summary disclosure-summary-triangle">
             Services and images
           </summary>
-          <div v-if="planLines.length" class="compact-list">
-            <div
-              v-for="{ stack, line } in planLines"
-              :key="`${stack}-${line.line_no}-${line.service}`"
-              class="list-row plan-line-row"
-            >
-              <span>#{{ line.line_no }}</span>
-              <strong class="plan-line-heading">
-                <span>{{ planLineServiceLabel(plan.summary.stack_count, stack, line) }}</span>
-                <n-tag
-                  size="small"
-                  :type="pendingMetadataStatusTagType(line)"
-                  :title="pendingMetadataStatusTitle(line)"
-                >
-                  {{ pendingMetadataStatusLabel(line) }} metadata
-                </n-tag>
-              </strong>
-              <em>
-                <span v-if="planLineTagRewriteLabel(line)" class="tag-rewrite-detail">
-                  <n-tag size="small" type="warning">Tag rewrite</n-tag>
-                  {{ planLineTagRewriteLabel(line) }}
-                </span>
-                <span
-                  v-else-if="planLineDigestPinLabel(line)"
-                  class="tag-rewrite-detail"
-                >
-                  <n-tag size="small" type="info">Digest pin</n-tag>
-                  {{ planLineDigestPinLabel(line) }}
-                </span>
-                <span
-                  v-else-if="planLineDigestUnpinLabel(line)"
-                  class="tag-rewrite-detail"
-                >
-                  <n-tag size="small" type="info">Digest unpin</n-tag>
-                  {{ planLineDigestUnpinLabel(line) }}
-                </span>
-                <template v-else>
-                  <code>{{ line.compose_image }}</code>
-                  <span aria-hidden="true"> -> </span>
-                  <code>{{ line.target_image }}</code>
-                </template>
-              </em>
-              <PendingReleaseNotes class="plan-line-release"
-                :candidate-label="`${stack} / ${line.service} · ${line.target_image}`"
-                :candidate-tag="line.target_image.split('@')[0]?.split('/').pop()?.split(':')[1] || ''"
-                v-bind="releaseNoteProps(line.line_no)"
-              />
-            </div>
-          </div>
-          <div v-else class="empty-state">No matched services.</div>
+          <PendingPlanLineList
+            :plan-lines="planLines"
+            :stack-count="plan.summary.stack_count"
+            :release-notes="releaseNotes"
+            :release-notes-loading="releaseNotesLoading"
+            :release-notes-error="releaseNotesError"
+          />
         </details>
 
         <details v-if="planActions.length" class="preflight-details">
@@ -787,10 +680,6 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 </template>
 
 <style scoped>
-.plan-line-release {
-  grid-column: 2 / -1;
-}
-
 .plan-actions {
   display: grid;
   gap: 8px;
@@ -947,10 +836,6 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 }
 
 @media (--wud-compact) {
-  .plan-line-release {
-    grid-column: 1 / -1;
-  }
-
   .plan-action {
     grid-template-columns: 1fr;
   }
