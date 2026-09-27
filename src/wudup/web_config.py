@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import (
     web_auth,
+    web_effective_settings,
     web_models,
     web_pending_sources,
     web_security,
@@ -80,10 +81,10 @@ def load_web_settings(
         legacy_scripts_enabled=legacy_scripts_enabled,
         release_notes_enabled_env=(
             parse_bool_env(
-                web_settings.RELEASE_NOTES_ENABLED_ENV,
-                env.get(web_settings.RELEASE_NOTES_ENABLED_ENV),
+                web_effective_settings.RELEASE_NOTES_ENABLED_ENV,
+                env.get(web_effective_settings.RELEASE_NOTES_ENABLED_ENV),
             )
-            if web_settings.RELEASE_NOTES_ENABLED_ENV in env
+            if web_effective_settings.RELEASE_NOTES_ENABLED_ENV in env
             else None
         ),
         security_scan=web_security.configured_security_scan_config(env),

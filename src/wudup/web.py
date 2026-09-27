@@ -25,6 +25,7 @@ from . import (
     web_config,
     web_database,
     web_diagnostics,
+    web_effective_settings,
     web_health,
     web_jobs,
     web_models,
@@ -95,7 +96,7 @@ def create_app(
         app.state.web_auto_update_thread = web_scheduler.start_auto_update_scheduler(
             app,
             active_settings,
-            effective_config_loader=web_settings._effective_config,
+            effective_config_loader=web_effective_settings._effective_config,
         )
         app.state.web_release_notification_thread = (
             web_release_notifications.start_release_notification_scheduler(
@@ -131,14 +132,14 @@ def create_app(
         )
 
     web_health.configure(
-        effective_config_loader=web_settings._effective_config,
+        effective_config_loader=web_effective_settings._effective_config,
         static_spa_available_checker=web_static.static_spa_available,
     )
-    web_pending.configure(effective_config_loader=web_settings._effective_config)
-    web_plans.configure(effective_config_loader=web_settings._effective_config)
+    web_pending.configure(effective_config_loader=web_effective_settings._effective_config)
+    web_plans.configure(effective_config_loader=web_effective_settings._effective_config)
     web_retag_targets.configure(
-        effective_config_loader=web_settings._effective_config,
-        retag_digest_pins_loader=web_settings._effective_retag_digest_pins,
+        effective_config_loader=web_effective_settings._effective_config,
+        retag_digest_pins_loader=web_effective_settings._effective_retag_digest_pins,
     )
 
     app.add_api_route(
@@ -207,7 +208,7 @@ def create_app(
         dependencies=[Depends(web_auth.require_auth)],
     )
     web_self_update.configure(
-        effective_config_loader=web_settings._effective_config,
+        effective_config_loader=web_effective_settings._effective_config,
         plan_response_builder=web_plans.plan_response,
     )
     router.add_api_route(

@@ -12,6 +12,7 @@ from tests.web_test_helpers import (
     _store_web_setting,
 )
 
+from wudup import web_effective_settings as effective_settings_module
 from wudup import web_settings as settings_module
 from wudup import web_state as state_module
 from wudup.db import (
@@ -24,14 +25,15 @@ def test_discord_webhook_policy_loader_falls_back_when_file_is_missing(
     monkeypatch,
     caplog,
 ) -> None:
-    monkeypatch.setattr(settings_module, "files", lambda _package: tmp_path)
+    monkeypatch.setattr(effective_settings_module, "files", lambda _package: tmp_path)
 
-    with caplog.at_level(logging.WARNING, logger=settings_module.LOGGER.name):
-        hosts, path_prefix = settings_module._load_discord_webhook_policy()
+    with caplog.at_level(logging.WARNING, logger=effective_settings_module.LOGGER.name):
+        hosts, path_prefix = effective_settings_module._load_discord_webhook_policy()
 
-    assert hosts == frozenset(settings_module._DEFAULT_DISCORD_WEBHOOK_ALLOWED_HOSTS)
-    assert path_prefix == settings_module._DEFAULT_DISCORD_WEBHOOK_PATH_PREFIX
+    assert hosts == frozenset(effective_settings_module._DEFAULT_DISCORD_WEBHOOK_ALLOWED_HOSTS)
+    assert path_prefix == effective_settings_module._DEFAULT_DISCORD_WEBHOOK_PATH_PREFIX
     assert "using fallback Discord webhook policy" in caplog.text
+    assert {record.name for record in caplog.records} == {"wudup.web_settings"}
 
 
 def test_discord_webhook_policy_loader_falls_back_when_file_is_malformed(
@@ -39,14 +41,14 @@ def test_discord_webhook_policy_loader_falls_back_when_file_is_malformed(
     monkeypatch,
     caplog,
 ) -> None:
-    monkeypatch.setattr(settings_module, "files", lambda _package: tmp_path)
+    monkeypatch.setattr(effective_settings_module, "files", lambda _package: tmp_path)
     (tmp_path / "discord_webhook_policy.json").write_text("{", encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger=settings_module.LOGGER.name):
-        hosts, path_prefix = settings_module._load_discord_webhook_policy()
+    with caplog.at_level(logging.WARNING, logger=effective_settings_module.LOGGER.name):
+        hosts, path_prefix = effective_settings_module._load_discord_webhook_policy()
 
-    assert hosts == frozenset(settings_module._DEFAULT_DISCORD_WEBHOOK_ALLOWED_HOSTS)
-    assert path_prefix == settings_module._DEFAULT_DISCORD_WEBHOOK_PATH_PREFIX
+    assert hosts == frozenset(effective_settings_module._DEFAULT_DISCORD_WEBHOOK_ALLOWED_HOSTS)
+    assert path_prefix == effective_settings_module._DEFAULT_DISCORD_WEBHOOK_PATH_PREFIX
     assert "using fallback Discord webhook policy" in caplog.text
 
 
@@ -636,7 +638,7 @@ def test_effective_config_wraps_invalid_stored_compose_ignore_paths_error(
     _store_web_setting(tmp_path, "compose.ignore_paths", "old,,archive")
 
     try:
-        settings_module._effective_config(client.app.state.web_settings)
+        effective_settings_module._effective_config(client.app.state.web_settings)
     except HTTPException as exc:
         assert exc.status_code == 500
         assert exc.detail.startswith("stored compose_ignore_paths is invalid: ")
@@ -652,7 +654,7 @@ def test_effective_config_wraps_invalid_stored_digest_pin_error(
     _store_web_setting(tmp_path, "compose.digest_pin_updates", "maybe")
 
     try:
-        settings_module._effective_config(client.app.state.web_settings)
+        effective_settings_module._effective_config(client.app.state.web_settings)
     except HTTPException as exc:
         assert exc.status_code == 500
         assert exc.detail.startswith("stored digest_pin_updates is invalid: ")
