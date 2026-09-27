@@ -42,7 +42,8 @@ from .web_release_notification_state import (
     ReleaseNotificationConfig,
 )
 
-LOGGER = logging.getLogger(__name__)
+# Keep the pre-split logger name so operator log filters still match.
+LOGGER = logging.getLogger("wudup.web_settings")
 
 MANAGED_THEME_PREFERENCE_KEY = "theme_preference"
 MANAGED_THEME_PREFERENCE_DB_KEY = "ui.theme_preference"

@@ -33,6 +33,7 @@ def test_discord_webhook_policy_loader_falls_back_when_file_is_missing(
     assert hosts == frozenset(effective_settings_module._DEFAULT_DISCORD_WEBHOOK_ALLOWED_HOSTS)
     assert path_prefix == effective_settings_module._DEFAULT_DISCORD_WEBHOOK_PATH_PREFIX
     assert "using fallback Discord webhook policy" in caplog.text
+    assert {record.name for record in caplog.records} == {"wudup.web_settings"}
 
 
 def test_discord_webhook_policy_loader_falls_back_when_file_is_malformed(
