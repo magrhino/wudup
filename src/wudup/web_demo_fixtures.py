@@ -57,6 +57,7 @@ _WEB_FIXTURE_IMPORTS_READY = False
 Request: Any = None
 web_app: Any = None
 web_auth: Any = None
+web_config: Any = None
 web_diagnostics: Any = None
 web_health: Any = None
 web_jobs: Any = None
@@ -82,7 +83,7 @@ WebSettings: Any = None
 def _ensure_web_fixture_imports() -> None:
     global _WEB_FIXTURE_IMPORTS_READY
     global Request
-    global web_app, web_auth, web_diagnostics, web_health, web_jobs
+    global web_app, web_auth, web_config, web_diagnostics, web_health, web_jobs
     global web_onboarding, web_pending, web_plans, web_release_notes, web_retags
     global web_rollback, web_runs, web_self_update, web_settings, web_state, web_static
     global web_wud_api
@@ -97,6 +98,7 @@ def _ensure_web_fixture_imports() -> None:
 
     from wudup import web as _web_app
     from wudup import web_auth as _web_auth
+    from wudup import web_config as _web_config
     from wudup import web_diagnostics as _web_diagnostics
     from wudup import web_health as _web_health
     from wudup import web_jobs as _web_jobs
@@ -131,6 +133,7 @@ def _ensure_web_fixture_imports() -> None:
     Request = _Request
     web_app = _web_app
     web_auth = _web_auth
+    web_config = _web_config
     web_diagnostics = _web_diagnostics
     web_health = _web_health
     web_jobs = _web_jobs
@@ -969,7 +972,7 @@ def _demo_context(root: Path) -> SimpleNamespace:
     static_dir.mkdir(parents=True, exist_ok=True)
     (static_dir / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
     env = _demo_environ(paths, static_dir)
-    settings = web_app.load_web_settings(env)
+    settings = web_config.load_web_settings(env)
     _configure_backend_callbacks()
     _seed_wud_api_snapshot(settings)
     _seed_wud_api_configuration_diagnostics(settings)
