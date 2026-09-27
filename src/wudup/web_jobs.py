@@ -242,10 +242,6 @@ def _register_apply_job_unlocked(
     jobs[job.id] = job
 
 
-def _active_apply_job_exists(request: Request) -> bool:
-    return _active_apply_job_exists_in_state(request.app.state)
-
-
 def _active_apply_job_exists_in_state(state: Any) -> bool:
     return _active_mutation_error_in_state(state) != ""
 

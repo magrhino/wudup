@@ -106,9 +106,6 @@ from .web_retag_plans import (
     retag_update_service as _retag_update_service,
 )
 from .web_retag_preview import (
-    RETAG_PREVIEW_ACTIVE_STATUSES,  # noqa: F401 - compatibility re-export
-    RETAG_PREVIEW_EXECUTOR_MAX_WORKERS,  # noqa: F401 - compatibility re-export
-    RETAG_PREVIEW_JOB_LIMIT,  # noqa: F401 - compatibility re-export
     initialize_retag_preview_state,  # noqa: F401 - application lifecycle compatibility
     shutdown_retag_preview_state,  # noqa: F401 - application lifecycle compatibility
 )
