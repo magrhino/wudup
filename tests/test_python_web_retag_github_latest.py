@@ -20,6 +20,7 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
+from wudup import web_database, web_retag_targets
 from wudup import web_retags as web_retags_module
 from wudup.compose import ComposeStack, ServiceImage
 from wudup.db import init_db, open_db
@@ -842,3 +843,16 @@ def _patch_github_latest(
             return responses[request_url]
 
     monkeypatch.setattr(web_retags_module, "GitHubClient", FakeGitHubClient)
+
+
+def test_retag_target_records_require_resolver_for_github_latest_fallback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(web_database, "known_digest_state_by_service", lambda _settings: {})
+
+    with pytest.raises(ValueError, match="requires a candidate resolver"):
+        web_retag_targets._retag_target_records_for_stacks(
+            object(),
+            (),
+            github_latest_fallback=True,
+        )
