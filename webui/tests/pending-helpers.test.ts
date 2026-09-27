@@ -9,7 +9,6 @@ import type {
 } from "../src/api/client";
 import { DemoApiState } from "../src/api/demo/state";
 import PendingStackCard from "../src/components/pending/PendingStackCard.vue";
-import PendingEvidenceExplanation from "../src/components/pending/PendingEvidenceExplanation.vue";
 import PendingCleanupModal from "../src/components/pending/PendingCleanupModal.vue";
 import PendingPlanReviewModal from "../src/components/pending/PendingPlanReviewModal.vue";
 import PendingRemovalModal from "../src/components/pending/PendingRemovalModal.vue";
@@ -451,6 +450,30 @@ describe("pending helper modules", () => {
     expect(digestLabels).toContain("Mutable latest");
     expect(digestLabels).toContain("Stack restart");
     expect(digestLabels).toContain("No release notes");
+  });
+
+  it.each([
+    ["4.0.19.2979-ls321", "4.0.9.2244-ls257"],
+    ["2.0.0", "1.9.9"],
+    ["v1.4", "v1.3.9"],
+    ["2.6.5.5623", "2.6.5.5491"],
+  ])("flags %s -> %s as a downgrade instead of a bump", (current_tag, desired_tag) => {
+    const item = pendingGroupedItem({ line_no: 1, current_tag, desired_tag });
+    const cues = safetyCues(item, {
+      pending: pendingResponse([item]),
+      releaseNote: null,
+      releaseNotesLoaded: false,
+      releaseNotesLoading: false,
+      securityScan: null,
+      securityScansCurrent: false,
+      securityScansEnabled: false,
+      securityScansLoaded: false,
+      securityScansLoading: false,
+      servicePolicies: [],
+      snoozes: [],
+    });
+    expect(cues).toContainEqual({ key: "downgrade", label: "Downgrade", type: "error" });
+    expect(cues.some((cue) => cue.key.endsWith("-bump"))).toBe(false);
   });
 
   it("adds candidate security scan cues without implying safety", () => {
@@ -1383,10 +1406,7 @@ describe("pending helper modules", () => {
     expect(wrapper.text()).toContain("sha256:abcdef...789");
     expect(wrapper.text()).toContain("Major bump");
     expect(wrapper.text()).toContain("Candidate scan: unavailable");
-    const evidence = wrapper.find(".risk-badges-container .evidence-explanation");
-    expect(evidence.text()).toContain("published vulnerability evidence");
-    expect(evidence.text()).toContain("candidate scans inspect the proposed image");
-    expect(evidence.text()).toContain("not a guarantee of a safe update");
+    expect(wrapper.text()).not.toContain("not a guarantee of a safe update");
     expect(wrapper.text()).toContain("GitHub release");
     await wrapper.find('button[aria-haspopup="dialog"]').trigger("click");
     expect(wrapper.text()).toContain("Possible breaking change");
@@ -1614,19 +1634,7 @@ describe("pending helper modules", () => {
 });
 
 
-describe("queue evidence explanation", () => {
-  it.each(["verified-security", "security-review", "security-stale", "security-unknown", "security-none-reported", "security-not-scanned"])(
-    "keeps %s advisory and distinguishes its source from candidate scanning",
-    (key) => {
-      const wrapper = mount(PendingEvidenceExplanation, {
-        props: { cues: [{ key, label: "Evidence", type: "warning" }] },
-      });
-      expect(wrapper.text()).toContain("published vulnerability evidence");
-      expect(wrapper.text()).toContain("candidate scans inspect the proposed image");
-      expect(wrapper.text()).toContain("Both are advisory checks, not a guarantee of a safe update");
-    },
-  );
-
+describe("queue evidence cues", () => {
   it.each([
     ["security-none-reported", "Candidate scan: None reported", "success"],
     ["security-not-scanned", "Candidate scan: Not scanned", "default"],
@@ -1653,14 +1661,7 @@ describe("queue evidence explanation", () => {
       },
     });
     expect(wrapper.find(".stack-change-preview").text()).toContain(label);
-    expect(wrapper.find(".stack-change-preview .evidence-explanation").text()).toContain("Both are advisory checks");
+    expect(wrapper.find(".stack-change-preview").text()).not.toContain("not a guarantee of a safe update");
     expect(wrapper.find(".stack-details").attributes("open")).toBeUndefined();
-  });
-
-  it("omits security guidance when the row has only operational cues", () => {
-    const wrapper = mount(PendingEvidenceExplanation, {
-      props: { cues: [{ key: "major-bump", label: "Major bump", type: "error" }] },
-    });
-    expect(wrapper.find("p").exists()).toBe(false);
   });
 });

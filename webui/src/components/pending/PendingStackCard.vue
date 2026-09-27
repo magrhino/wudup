@@ -33,7 +33,6 @@ import {
   pendingSelectionKey,
 } from "../../views/pending/usePendingSelectionState";
 import { pluralize } from "../../views/pending/utils";
-import PendingEvidenceExplanation from "./PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
 import PendingUpdateRow from "./PendingUpdateRow.vue";
 
@@ -230,7 +229,6 @@ const previewDisabledMessage = computed(() =>
             Choose stream
           </n-button>
         </span>
-        <PendingEvidenceExplanation class="stack-change-evidence" :cues="riskCues(item)" />
         <PendingReleaseNotes
           class="stack-change-release"
           :candidate-label="`${groupedItemServices(item)} · ${groupedItemTarget(item)}`"
@@ -385,7 +383,6 @@ const previewDisabledMessage = computed(() =>
   line-height: 1.4;
 }
 
-.stack-change-evidence,
 .stack-change-release {
   grid-column: 2;
 }
@@ -474,7 +471,6 @@ const previewDisabledMessage = computed(() =>
 }
 
 @media (--wud-compact) {
-  .stack-change-evidence,
   .stack-change-release {
     grid-column: 1 / -1;
   }

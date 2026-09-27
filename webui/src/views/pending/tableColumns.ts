@@ -2,7 +2,6 @@ import { h, type VNodeChild } from "vue";
 import { NInput, NTag, type DataTableColumns } from "naive-ui";
 
 import type { PendingItem, ReleaseNoteInfo } from "../../api/client";
-import PendingEvidenceExplanation from "../../components/pending/PendingEvidenceExplanation.vue";
 import PendingReleaseNotes from "../../components/pending/PendingReleaseNotes.vue";
 import { digestProvenanceDisplay } from "../../utils/digestProvenance";
 import {
@@ -136,10 +135,7 @@ export function renderRiskBadges(
   if (badges.length === 0) {
     return h("span", { class: "risk-badges-muted" }, "None");
   }
-  return h("div", { class: "risk-badges-container" }, [
-    ...badges,
-    h(PendingEvidenceExplanation, { cues }),
-  ]);
+  return h("div", { class: "risk-badges-container" }, badges);
 }
 
 export function renderReleaseNotes(
