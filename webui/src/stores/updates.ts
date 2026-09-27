@@ -20,7 +20,6 @@ import {
   type PlanMutationOptions,
   type PlanSelectionRequest,
   type PendingResponse,
-  type ReleaseNoteInfo,
   type ReleaseNotesResponse,
   type ReleaseNotificationResponse,
   type ReleaseNotificationSource,
@@ -36,13 +35,14 @@ import {
 } from "../api/client";
 import { useAuthStore } from "./auth";
 import { errorMessage, runWithStoreState } from "./storeState";
-import {
-  fetchReleaseChangelog,
-  IDLE_RELEASE_CHANGELOG,
-  releaseChangelogKey,
-  type ReleaseChangelogState,
-} from "../utils/releaseChangelog";
 import { useRunsStore } from "./runs";
+import {
+  readApplyRecoveryStorage,
+  readRememberedApplyJobId,
+  removeRememberedApplyJobId,
+  writeApplyRecoveryStorage,
+  writeRememberedApplyJobId,
+} from "./applyJobSession";
 
 export const APPLY_JOB_RECOVERY_MESSAGE =
   "The update job is no longer available. The WebUI may have restarted. Review its run and log before applying more updates; the outcome is still unknown.";
@@ -61,7 +61,6 @@ type PendingLoadOptions = {
   freshAfterCurrent?: boolean;
 };
 
-const APPLY_JOB_STORAGE_KEY = "applyJobId";
 const TERMINAL_APPLY_JOB_STATUSES = new Set<ApplyJobResponse["status"]>([
   "success",
   "failure",
@@ -147,8 +146,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     return scans.items.filter((scan) => pendingLineNumbers.has(scan.line_no));
   });
   const securityScanJob = ref<SecurityScanJobResponse | null>(null);
-  const releaseChangelogs = ref<Record<string, ReleaseChangelogState>>({});
-  const releaseChangelogRequests = new Map<string, Promise<void>>();
   const plan = ref<PlanResponse | null>(null);
   const pendingCleanup = ref<PendingCleanupResponse | null>(null);
   const pendingRemovalPlan = ref<PendingRemovalPlanResponse | null>(null);
@@ -477,82 +474,6 @@ export const useUpdatesStore = defineStore("updates", () => {
       SECURITY_SCAN_POLL_MAX_ATTEMPTS,
       totalCount * SECURITY_SCAN_POLL_ATTEMPTS_PER_CANDIDATE,
     );
-  }
-
-  function releaseChangelogStateFor(
-    note: ReleaseNoteInfo | null,
-  ): ReleaseChangelogState {
-    const key = releaseChangelogKeyFor(note);
-    return key
-      ? releaseChangelogs.value[key] ?? IDLE_RELEASE_CHANGELOG
-      : IDLE_RELEASE_CHANGELOG;
-  }
-
-  async function loadReleaseChangelog(note: ReleaseNoteInfo | null): Promise<void> {
-    const link = releaseChangelogLinkFor(note);
-    if (link === "") {
-      return;
-    }
-    const key = releaseChangelogKey(link);
-    if (key === "") {
-      return;
-    }
-    const currentState = releaseChangelogs.value[key];
-    if (currentState?.status === "ready") {
-      return;
-    }
-    const pendingRequest = releaseChangelogRequests.get(key);
-    if (pendingRequest) {
-      await pendingRequest;
-      return;
-    }
-    setReleaseChangelogState(key, {
-      status: "loading",
-      body: "",
-      sourceUrl: "",
-      error: "",
-    });
-    const request = fetchReleaseChangelog(link, note?.release_tag ?? "")
-      .then((result) => {
-        if (result.status === "ready") {
-          setReleaseChangelogState(key, {
-            status: "ready",
-            body: result.body,
-            sourceUrl: result.sourceUrl,
-            error: "",
-          });
-          return;
-        }
-        setReleaseChangelogState(key, {
-          status: "unavailable",
-          body: "",
-          sourceUrl: "",
-          error: result.error,
-        });
-      })
-      .catch(() => {
-        setReleaseChangelogState(key, {
-          status: "error",
-          body: "",
-          sourceUrl: "",
-          error: "Could not load notes. Try again or open the GitHub release.",
-        });
-      })
-      .finally(() => {
-        releaseChangelogRequests.delete(key);
-      });
-    releaseChangelogRequests.set(key, request);
-    await request;
-  }
-
-  function setReleaseChangelogState(
-    key: string,
-    state: ReleaseChangelogState,
-  ): void {
-    releaseChangelogs.value = {
-      ...releaseChangelogs.value,
-      [key]: state,
-    };
   }
 
   async function createPlan(
@@ -996,7 +917,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     securityScansCurrent,
     currentSecurityScanItems,
     securityScanJob,
-    releaseChangelogs,
     plan,
     pendingCleanup,
     pendingRemovalPlan,
@@ -1028,9 +948,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     loadSecurityScans,
     refreshSecurityScans,
     securityScanFor,
-    releaseChangelogStateFor,
-    releaseChangelogCanLoad,
-    loadReleaseChangelog,
     createPlan,
     cleanupPending,
     createRemovalPlan,
@@ -1048,81 +965,8 @@ export const useUpdatesStore = defineStore("updates", () => {
   };
 });
 
-function releaseChangelogKeyFor(note: ReleaseNoteInfo | null): string {
-  const link = releaseChangelogLinkFor(note);
-  return link ? releaseChangelogKey(link) : "";
-}
-
-function releaseChangelogCanLoad(note: ReleaseNoteInfo | null): boolean {
-  const link = releaseChangelogLinkFor(note);
-  return Boolean(link && releaseChangelogKey(link));
-}
-
-function releaseChangelogLinkFor(note: ReleaseNoteInfo | null): string {
-  return note?.links.find((link) => link.kind === "github_release")?.url ?? "";
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
-}
-
-function readRememberedApplyJobId(): string {
-  const storage = sessionStorageAvailable();
-  try {
-    return storage?.getItem(APPLY_JOB_STORAGE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function readApplyRecoveryStorage<T>(key: string, fallback: T): T {
-  try {
-    const value = JSON.parse(sessionStorageAvailable()?.getItem(key) ?? "null");
-    if (key === "applyJobRun") {
-      return (value?.jobId === readRememberedApplyJobId() &&
-        Number.isSafeInteger(value?.runId) && value.runId > 0 ? value.runId : fallback) as T;
-    }
-    return (Array.isArray(value) ? value.filter((entry) =>
-      entry && typeof entry.jobId === "string" && entry.jobId &&
-      (entry.runId === null || (Number.isSafeInteger(entry.runId) && entry.runId > 0)) &&
-      typeof entry.acknowledged === "boolean") : fallback) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeApplyRecoveryStorage(key: string, value: unknown): void {
-  try {
-    sessionStorageAvailable()?.setItem(key, JSON.stringify(value));
-  } catch {
-    // Recovery remains available in memory if session storage is unavailable.
-  }
-}
-
-function writeRememberedApplyJobId(jobId: string): void {
-  const storage = sessionStorageAvailable();
-  try {
-    storage?.setItem(APPLY_JOB_STORAGE_KEY, jobId);
-  } catch {
-    // Remembering a transient job id is best-effort.
-  }
-}
-
-function removeRememberedApplyJobId(): void {
-  const storage = sessionStorageAvailable();
-  try {
-    storage?.removeItem(APPLY_JOB_STORAGE_KEY);
-  } catch {
-    // Remembering a transient job id is best-effort.
-  }
-}
-
-function sessionStorageAvailable(): Storage | null {
-  try {
-    return "sessionStorage" in globalThis ? globalThis.sessionStorage : null;
-  } catch {
-    return null;
-  }
 }
