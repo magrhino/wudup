@@ -18,6 +18,7 @@ import { useConnectionStore } from "../src/stores/connection";
 import { useSettingsStore } from "../src/stores/settings";
 import { useUpdatesStore, APPLY_JOB_RECOVERY_MESSAGE } from "../src/stores/updates";
 import { useRunsStore } from "../src/stores/runs";
+import { useReleaseChangelogStore } from "../src/stores/releaseChangelog";
 import {
   applyPreflightResponse,
   applyJobLogResponse,
@@ -919,7 +920,7 @@ describe("pending view fallback and release notes", () => {
     vi.spyOn(updates, "loadReleaseNotes").mockResolvedValue();
     vi.spyOn(updates, "refreshReleaseNotes").mockResolvedValue();
     const loadChangelog = vi
-      .spyOn(updates, "loadReleaseChangelog")
+      .spyOn(useReleaseChangelogStore(pinia), "loadReleaseChangelog")
       .mockResolvedValue();
     const wrapper = mountPendingView(pinia);
 

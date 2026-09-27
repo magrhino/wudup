@@ -19,8 +19,7 @@ from tests.web_test_helpers import (
     _wud_api_container,
 )
 
-from wudup import web as web_module
-from wudup import web_effective_settings, web_scheduler
+from wudup import web_config, web_effective_settings, web_scheduler
 from wudup.db import init_db, open_db, upsert_known_image
 from wudup.digest_provenance import DigestTagProvenance
 
@@ -409,7 +408,7 @@ def test_auto_update_candidate_reuses_effective_config_snapshot(
             "WUD_PENDING_SOURCE": "file",
         },
     )
-    settings = web_module.load_web_settings(env)
+    settings = web_config.load_web_settings(env)
     settings.config.wud_out_file.write_text("repo/app:latest\n", encoding="utf-8")
     now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
     first_config = replace(settings.config, docker_base=tmp_path / "first")
