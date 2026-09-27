@@ -211,6 +211,7 @@ function runReviewPromptRules() {
     "src/wudup/updater_lifecycle*.py",
     "src/wudup/updater_runner_*.py",
     "src/wudup/web_health.py",
+    "src/wudup/web_job_registry.py",
     "src/wudup/web_jobs.py",
     "src/wudup/web_scheduler.py",
     "src/wudup/web_self_update.py",
