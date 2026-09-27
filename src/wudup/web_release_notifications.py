@@ -42,6 +42,10 @@ from .web_discord import (
     SEMVER_PARTS_RE,  # noqa: F401 - compatibility re-export
     _NotificationTarget,
 )
+from .web_effective_settings import (
+    effective_release_notes_enabled,
+    effective_release_notification_config,
+)
 from .web_metadata import json_object
 from .web_models import (
     PendingSourceInfo,
@@ -71,10 +75,6 @@ from .web_release_notification_state import (
     RELEASE_NOTIFICATIONS_DELIVERY_MODE_ON_DEMAND,
 )
 from .web_request_context import request_settings as _settings
-from .web_settings import (
-    effective_release_notes_enabled,
-    effective_release_notification_config,
-)
 from .wud_file import WudTarget, parse_wud_text
 
 RUN_NOTIFICATION_STATUS_REASON = "updated"

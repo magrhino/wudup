@@ -12,7 +12,15 @@ from typing import Any, Literal, get_args, get_origin
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from . import __version__, web_jobs, web_pending, web_runs, web_settings, web_wud_api
+from . import (
+    __version__,
+    web_effective_settings,
+    web_jobs,
+    web_pending,
+    web_runs,
+    web_settings,
+    web_wud_api,
+)
 from .db import DatabaseError
 from .plans import DryRunPlan
 from .web_database import (
@@ -113,7 +121,7 @@ def api_diagnostics_support_bundle(request: Request) -> DiagnosticsSupportBundle
         discovery_warnings=discovery_warnings,
         log_tail=log_tail,
     )
-    extra_secrets = web_settings.release_notification_webhook_redaction_values(
+    extra_secrets = web_effective_settings.release_notification_webhook_redaction_values(
         settings,
     )
     return _sanitize_support_bundle_response(

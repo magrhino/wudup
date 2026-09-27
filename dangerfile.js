@@ -65,6 +65,7 @@ const COMPANION_TEST_RULES = [
       src/wudup/web.py
       src/wudup/web_auth.py
       src/wudup/web_diagnostics.py
+      src/wudup/web_effective_settings.py
       src/wudup/web_job_registry.py
       src/wudup/web_jobs.py
       src/wudup/web_pending.py

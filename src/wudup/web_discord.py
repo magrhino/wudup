@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from . import web_wud_api
 from .images import image_repo_ref, image_tag
+from .web_effective_settings import effective_release_notification_webhook
 from .web_models import (
     ReleaseNoteInfo,
     ReleaseNoteLink,
@@ -23,7 +24,6 @@ from .web_models import (
     WebSettings,
 )
 from .web_redaction import redact_sensitive_text as _redact_sensitive_text
-from .web_settings import effective_release_notification_webhook
 from .wud_file import WudTarget, is_digest_target_line
 
 DISCORD_MESSAGE_CONTENT_LIMIT = 2000
