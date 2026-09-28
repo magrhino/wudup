@@ -96,9 +96,11 @@ Each candidate shows **Release notes** and available GitHub/source links beside
 its target, outside **Details**. Release notes open directly in a compact panel
 with version, source, and breaking/security evidence. The release body is shown
 as text; **Read changelog** optionally loads a linked changelog. Source links stay
-available if changelog loading fails. **Matched to candidate** means the release
-version matches the candidate tag; **Upstream context** is general information,
-not confirmation of what a mutable tag or digest contains. The same panel is
+available if changelog loading fails. When the release version does not match
+the candidate tag, the row shows **Upstream notes for** the release version: the
+notes are general upstream information, not confirmation of what a mutable tag
+or digest contains. The release notes panel states whether the release matched
+the candidate. The same panel is
 available under **Services and images** during plan review. Close it or press
 Escape to return to the review without changing selection.
 
