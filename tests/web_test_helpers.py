@@ -6,12 +6,16 @@ import re
 import time
 import urllib.error
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TypeVar
 
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from wudup import web as web_module
 from wudup import web_discord as discord_module
 from wudup import web_release_notifications as notifications_module
 from wudup import web_wud_transport
@@ -81,6 +85,31 @@ def _web_env(
     if env:
         values.update(env)
     return values
+
+
+@contextmanager
+def _shutdown_created_web_apps() -> Iterator[None]:
+    """Run the shutdown handlers of every WebUI app created inside the block.
+
+    Tests never enter their ``TestClient``, so app shutdown does not run on its
+    own. Mutation-enabled apps would otherwise leave scheduler threads polling,
+    through whatever a later test has monkeypatched, for the rest of the worker.
+    """
+    apps: list[FastAPI] = []
+
+    class TrackedFastAPI(FastAPI):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            apps.append(self)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(web_module, "FastAPI", TrackedFastAPI)
+        try:
+            yield
+        finally:
+            for app in apps:
+                for handler in app.router.on_shutdown:
+                    handler()
 
 
 def _client(

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from tests.web_scheduler_test_helpers import _auto_update_tick
 from tests.web_test_helpers import (
     _client,
+    _shutdown_created_web_apps,
 )
 
 from wudup import web_scheduler
@@ -79,6 +80,26 @@ def test_auto_update_scheduler_start_initializes_database(tmp_path: Path) -> Non
         web_scheduler.shutdown_auto_update_scheduler_state(client.app.state)
 
     assert row is not None
+
+
+def test_shutdown_helper_stops_scheduler_threads_of_created_apps(tmp_path: Path) -> None:
+    with _shutdown_created_web_apps():
+        client = _client(
+            tmp_path,
+            {
+                "WUD_WEB_DEV_NO_AUTH": "true",
+                "WUD_WEB_MUTATIONS_ENABLED": "true",
+            },
+        )
+        threads = (
+            client.app.state.web_auto_update_thread,
+            client.app.state.web_release_notification_thread,
+        )
+        assert all(thread is not None and thread.is_alive() for thread in threads)
+
+    for thread in threads:
+        thread.join(timeout=5.0)
+    assert not any(thread.is_alive() for thread in threads)
 
 
 def test_auto_update_scheduler_start_refuses_duplicate_thread(tmp_path: Path) -> None:

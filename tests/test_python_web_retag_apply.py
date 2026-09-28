@@ -576,6 +576,9 @@ def test_retag_apply_cleans_up_job_when_executor_submit_fails(
         def submit(self, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("queue failed")
 
+        def shutdown(self, **_kwargs: object) -> None:
+            pass
+
     client.app.state.web_apply_executor = FailingExecutor()
 
     with pytest.raises(RuntimeError, match="queue failed"):
