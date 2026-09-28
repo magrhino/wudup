@@ -3,6 +3,7 @@ import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ApiError,
   webApi,
   type PendingResponse,
   type PendingRescanResponse,
@@ -946,7 +947,7 @@ describe("updates store", () => {
 
   it.each([
     ["finished", () => Promise.resolve(securityScanJobResponse({ status: "failure", result: null }))],
-    ["missing", () => Promise.reject(new Error("Not found"))],
+    ["missing", () => Promise.reject(new ApiError(404, "security scan job not found"))],
   ])("starts a new scan when the job it lost track of is %s", async (_state, lookup) => {
     vi.useFakeTimers();
     const updates = useUpdatesStore();
@@ -968,6 +969,41 @@ describe("updates store", () => {
       expect(refreshApi).toHaveBeenCalledTimes(2);
       expect(updates.securityScanJob?.status).toBe("success");
       expect(updates.securityScansError).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a lost scan job when its status lookup fails for another reason", async () => {
+    vi.useFakeTimers();
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    const refreshApi = vi.spyOn(webApi, "refreshSecurityScans")
+      .mockResolvedValue(securityScanJobResponse({ status: "running", result: null }));
+    const jobApi = vi.spyOn(webApi, "securityScanJob")
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockRejectedValueOnce(new Error("Network error again"))
+      .mockResolvedValueOnce(securityScanJobResponse({ status: "running", result: null }))
+      .mockResolvedValueOnce(securityScanJobResponse());
+
+    try {
+      const refresh = updates.refreshSecurityScans().catch((error) => error);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(SECURITY_SCAN_POLL_INTERVAL_MS);
+      await refresh;
+
+      const lookupFailure = await updates.refreshSecurityScans().catch((error) => error);
+      expect(lookupFailure.message).toBe("Network error again");
+      expect(updates.securityScansError).toBe("Network error again");
+      expect(refreshApi).toHaveBeenCalledTimes(1);
+
+      const retry = updates.refreshSecurityScans();
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(SECURITY_SCAN_POLL_INTERVAL_MS);
+      await retry;
+      expect(refreshApi).toHaveBeenCalledTimes(1);
+      expect(jobApi).toHaveBeenLastCalledWith("security-scan-test");
+      expect(updates.securityScanJob?.status).toBe("success");
     } finally {
       vi.useRealTimers();
     }

@@ -476,9 +476,12 @@ export const useUpdatesStore = defineStore("updates", () => {
     try {
       const job = await webApi.securityScanJob(jobId);
       return TERMINAL_SECURITY_SCAN_STATUSES.has(job.status) ? null : job;
-    } catch {
+    } catch (caughtError) {
       // The job is gone (for example after a WebUI restart); start a new scan instead.
-      return null;
+      if (caughtError instanceof ApiError && caughtError.status === 404) return null;
+      // Otherwise the job may still be running, so keep it for the next retry.
+      unreconciledSecurityScanJobId = jobId;
+      throw caughtError;
     }
   }
 
