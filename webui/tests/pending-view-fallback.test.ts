@@ -185,6 +185,8 @@ describe("pending view fallback and release notes", () => {
     expect(card.find(".stack-card-tags").text()).not.toContain(
       "radarr, wudup",
     );
+    // Tag rewrites are confirmed in plan review, so the stack header does not count them.
+    expect(card.find(".stack-card-tags").text()).not.toContain("tag rewrite");
   });
 
   it.each([

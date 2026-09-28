@@ -16,7 +16,6 @@ import {
   groupedItemActionTagType,
   groupedItemServices,
   groupedItemTarget,
-  groupTagChangeCount,
   itemsBreakingCount,
   itemsVerifiedSecurityCount,
   pendingMetadataStatusLabel,
@@ -119,9 +118,6 @@ const previewDisabledMessage = computed(() =>
       <div class="stack-card-side">
         <div class="stack-card-tags">
           <n-tag size="small">{{ pluralize(group.items.length, "update") }}</n-tag>
-          <n-tag v-if="groupTagChangeCount(group)" size="small" type="warning">
-            {{ pluralize(groupTagChangeCount(group), "tag rewrite") }}
-          </n-tag>
           <n-tag
             v-if="itemsVerifiedSecurityCount(group.items, releaseNoteFor)"
             class="stack-advisory-tag"
