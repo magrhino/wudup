@@ -254,7 +254,7 @@ function compareLsioBuild(left: string, right: string): number {
   if (!leftMatch || !rightMatch || leftMatch[1] !== rightMatch[1]) {
     return 0;
   }
-  return Number.parseInt(leftMatch[2] ?? "0", 10) - Number.parseInt(rightMatch[2] ?? "0", 10);
+  return Number(leftMatch[2]) - Number(rightMatch[2]);
 }
 
 function compareVersionParts(left: number[], right: number[]): number {
