@@ -92,9 +92,9 @@ warnings from update blockers. Scan-request feedback clears when a newer WUD obs
 request acceptance alone does not mean the scan or update succeeded. Partial scan
 requests retain a warning and request details even when current health is good.
 
-Each candidate shows **Release notes** and available GitHub/source links beside
-its target, outside **Details**. Release notes open directly in a compact panel
-with version, source, and breaking/security evidence. The release body is shown
+Each candidate shows **Release notes** beside its target, outside **Details**.
+Release notes open directly in a compact panel with version, GitHub/source links,
+and breaking/security evidence. The release body is shown
 as text; **Read changelog** optionally loads a linked changelog. Source links stay
 available if changelog loading fails. **Matched to candidate** means the release
 version matches the candidate tag; **Upstream context** is general information,

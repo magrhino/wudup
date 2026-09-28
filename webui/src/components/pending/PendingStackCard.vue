@@ -15,7 +15,6 @@ import {
   groupedItemActionLabel,
   groupedItemActionTagType,
   groupedItemServices,
-  groupedItemTagRewriteLabel,
   groupedItemTarget,
   groupTagChangeCount,
   itemsBreakingCount,
@@ -25,7 +24,7 @@ import {
   pendingMetadataStatusTagType,
   pendingMetadataStatusTitle,
   type PendingTagInputProps,
-  previewImageLabel,
+  previewChangeLabels,
 } from "../../views/pending/pendingDisplay";
 import type { SafetyCue } from "../../views/pending/safetyCues";
 import {
@@ -174,7 +173,7 @@ const previewDisabledMessage = computed(() =>
             data-label="Current"
             :title="item.image"
           >
-            {{ previewImageLabel(item.image, displayDigest) }}
+            {{ previewChangeLabels(item.image, groupedItemTarget(item), displayDigest).current }}
           </code>
           <span aria-hidden="true">-&gt;</span>
           <code
@@ -182,9 +181,10 @@ const previewDisabledMessage = computed(() =>
             data-label="Target"
             :title="groupedItemTarget(item)"
           >
-            {{ previewImageLabel(groupedItemTarget(item), displayDigest) }}
+            {{ previewChangeLabels(item.image, groupedItemTarget(item), displayDigest).target }}
           </code>
           <n-tag
+            v-if="item.action !== 'tag-update'"
             size="small"
             :type="groupedItemActionTagType(item)"
           >
@@ -257,7 +257,6 @@ const previewDisabledMessage = computed(() =>
           :status-label="groupedItemActionLabel(item)"
           :status-tag-type="groupedItemActionTagType(item)"
           :risk-cues="riskCues(item)"
-          :tag-rewrite-label="groupedItemTagRewriteLabel(item)"
           :security-scan="securityScanFor(item)"
           :show-diagnostic="Boolean(item.diagnostic)"
           :tag-override-value="tagOverrideValue(item)"

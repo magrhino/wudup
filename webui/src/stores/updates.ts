@@ -450,6 +450,11 @@ export const useUpdatesStore = defineStore("updates", () => {
       const response = job.result ?? await webApi.securityScans();
       if (requestId === securityScanRequestId) securityScans.value = response;
     } catch (caughtError) {
+      // A job left queued/running after a failed poll or timeout is no longer tracked, so drop it
+      // rather than let later scan reads present it as in progress.
+      if (securityScanJob.value && !TERMINAL_SECURITY_SCAN_STATUSES.has(securityScanJob.value.status)) {
+        securityScanJob.value = null;
+      }
       if (requestId === securityScanRequestId) securityScansError.value = errorMessage(caughtError);
       throw caughtError;
     } finally {

@@ -106,10 +106,13 @@ const emit = defineEmits<{
         <p v-if="selectedCount && removeSelectedDisabledMessage">{{ removeSelectedDisabledMessage }}</p>
       </div>
     </details>
-    <n-button size="small" quaternary :disabled="!selectableCount" @click="emit('selectAll')">
-      <template #icon><Check :size="16" /></template>
-      {{ selectAllLabel }}
-    </n-button>
+    <div class="selection-tools-actions">
+      <slot name="scan" />
+      <n-button size="small" quaternary :disabled="!selectableCount" @click="emit('selectAll')">
+        <template #icon><Check :size="16" /></template>
+        {{ selectAllLabel }}
+      </n-button>
+    </div>
   </div>
 
   <section v-if="pendingLoaded" class="batch-action-bar" :class="{ 'has-selection': selectedCount }" aria-label="Review updates">
@@ -151,6 +154,15 @@ const emit = defineEmits<{
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.selection-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
 
 .queue-tools {
@@ -217,6 +229,14 @@ const emit = defineEmits<{
 }
 
 @media (--wud-compact) {
+  .selection-tools {
+    display: grid;
+  }
+
+  .selection-tools-actions {
+    justify-content: flex-start;
+  }
+
   .batch-action-bar {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

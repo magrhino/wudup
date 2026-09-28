@@ -32,7 +32,6 @@ withDefaults(defineProps<{
   statusTagType: TagType;
   groupName?: string;
   riskCues?: RiskCue[];
-  tagRewriteLabel?: string;
   releaseNote?: ReleaseNoteInfo | null;
   releaseNoteStatus?: string;
   releaseNoteReason?: string;
@@ -46,7 +45,6 @@ withDefaults(defineProps<{
 }>(), {
   groupName: "",
   riskCues: () => [],
-  tagRewriteLabel: "",
   releaseNote: null,
   releaseNoteStatus: "",
   releaseNoteReason: "",
@@ -121,10 +119,6 @@ function groupedItemTarget(item: PendingGroupedItem): string {
         >
           {{ cue.label }}
         </n-tag>
-      </span>
-      <span v-if="tagRewriteLabel" class="tag-rewrite-detail wrap-anywhere">
-        <n-tag size="small" type="warning">Tag rewrite</n-tag>
-        {{ tagRewriteLabel }}
       </span>
       <span v-if="item.tag_stream" class="tag-stream-detail wrap-anywhere">
         {{ item.tag_stream.current_stream }} → {{ item.tag_stream.reported_stream }}

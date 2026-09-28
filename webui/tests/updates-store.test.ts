@@ -908,6 +908,28 @@ describe("updates store", () => {
     expect(updates.securityScansLoading).toBe(false);
   });
 
+  it("drops an untracked running scan job when polling fails", async () => {
+    vi.useFakeTimers();
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    vi.spyOn(webApi, "refreshSecurityScans").mockResolvedValue(
+      securityScanJobResponse({ status: "running", total_count: 18, completed_count: 3, result: null }),
+    );
+    vi.spyOn(webApi, "securityScanJob").mockRejectedValue(new Error("Network error"));
+
+    try {
+      const refresh = updates.refreshSecurityScans().catch((error) => error);
+      await flushPromises();
+      expect(updates.securityScanJob?.status).toBe("running");
+      await vi.advanceTimersByTimeAsync(SECURITY_SCAN_POLL_INTERVAL_MS);
+      expect((await refresh).message).toBe("Network error");
+      expect(updates.securityScanJob).toBeNull();
+      expect(updates.securityScansError).toBe("Network error");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a refresh loading through its fallback scan read", async () => {
     const updates = useUpdatesStore();
     vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
@@ -1011,6 +1033,7 @@ describe("updates store", () => {
       );
       expect(updates.securityScansLoading).toBe(false);
       expect(updates.securityScansError).toBe("Security scan refresh timed out");
+      expect(updates.securityScanJob).toBeNull();
       expect(
         fetchMock.mock.calls.filter(
           (call) => call[0] === "/api/v1/security-scans/jobs/security-scan-test",

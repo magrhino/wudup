@@ -160,10 +160,15 @@ describe("pending view fallback and release notes", () => {
     expect(previewText).toContain("radarr");
     expect(previewText).toContain("Recreate service");
     expect(previewText).toContain("No release notes");
-    expect(previewText).toContain("lscr.io/linuxserver/radarr:5.0");
-    expect(previewText).toContain("lscr.io/linuxserver/radarr:5.1");
+    const previewValues = card
+      .findAll(".stack-change-preview .stack-change-value")
+      .map((value) => [value.text(), value.attributes("title")]);
+    expect(previewValues).toContainEqual(["5.0", "lscr.io/linuxserver/radarr:5.0"]);
+    expect(previewValues).toContainEqual(["5.1", "lscr.io/linuxserver/radarr:5.1"]);
+    expect(previewValues).toContainEqual(["latest@sha256:abc", "redis:latest@sha256:abc"]);
     expect(previewText).toContain("wudup");
-    expect(previewText).toContain("Tag update");
+    expect(previewText).not.toContain("Tag update");
+    expect(card.find(".stack-details").text()).toContain("Tag update");
     expect(previewText).toContain("Major bump");
     expect(previewText).toContain("Possible breaking");
     expect(previewText).not.toContain("Auto-update");
@@ -171,8 +176,8 @@ describe("pending view fallback and release notes", () => {
     expect(previewText).not.toContain("Fresh metadata");
     expect(card.find(".stack-details").text()).toContain("Fresh metadata");
     expect(previewText).toContain("Stack restart");
-    expect(previewText).toContain("ghcr.io/example/wudup:1.0");
-    expect(previewText).toContain("ghcr.io/example/wudup:2.0");
+    expect(previewValues).toContainEqual(["1.0", "ghcr.io/example/wudup:1.0"]);
+    expect(previewValues).toContainEqual(["2.0", "ghcr.io/example/wudup:2.0"]);
     expect(card.text()).toContain("Recreate stack");
     expect(card.text()).toContain("Mutable latest");
     expect(card.text()).toContain("Digest-only");
@@ -919,8 +924,9 @@ describe("pending view fallback and release notes", () => {
       .mockResolvedValue();
     const wrapper = mountPendingView(pinia);
 
-    expect(wrapper.text()).toContain("GitHub release");
+    expect(wrapper.find(".stack-change-release a").exists()).toBe(false);
     await wrapper.find('button[aria-label^="Release notes for"]').trigger("click");
+    expect(wrapper.text()).toContain("GitHub release");
     expect(wrapper.text()).toContain("Possible breaking change");
     expect(wrapper.text()).toContain("Verified High security update");
     expect(wrapper.text()).toContain("1 verified high/critical release update");
@@ -1048,7 +1054,7 @@ describe("pending view fallback and release notes", () => {
     expect(wrapper.text()).toContain("mousehole");
   });
 
-  it("renders both LSIO and upstream release-note links", () => {
+  it("renders both LSIO and upstream release-note links in release details", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(false);
     updates.pending = pendingResponse([pendingItem({ image: "linuxserver/radarr:latest" })]);
     updates.releaseNotes = releaseNotesResponse([
@@ -1077,11 +1083,13 @@ describe("pending view fallback and release notes", () => {
     vi.spyOn(settings, "loadPendingSafetyCues").mockResolvedValue();
     const wrapper = mountPendingView(pinia);
 
-    expect(wrapper.text()).toContain("LSIO release");
-    expect(wrapper.text()).toContain("Upstream release");
+    expect(wrapper.find(".stack-change-release a").exists()).toBe(false);
+    await wrapper.find('button[aria-label^="Release notes for"]').trigger("click");
+    expect(wrapper.find(".release-panel").text()).toContain("LSIO release");
+    expect(wrapper.find(".release-panel").text()).toContain("Upstream release");
   });
 
-  it("renders unavailable release-note reasons without hiding LSIO links", () => {
+  it("renders unavailable release-note reasons without hiding LSIO links", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(false);
     updates.pending = pendingResponse([
       pendingItem({
@@ -1135,7 +1143,8 @@ describe("pending view fallback and release notes", () => {
     expect(wrapper.text()).toContain(
       "Only GHCR and mapped LinuxServer.io images have release-note links.",
     );
-    expect(wrapper.text()).toContain("LSIO release");
-    expect(wrapper.text()).toContain("Upstream project");
+    await wrapper.find('button[aria-label*="linuxserver/calibre"]').trigger("click");
+    expect(wrapper.find(".release-panel").text()).toContain("LSIO release");
+    expect(wrapper.find(".release-panel").text()).toContain("Upstream project");
   });
 });
