@@ -129,7 +129,9 @@ function addVersionBumpCue(
   if (!current || !desired) {
     return;
   }
-  if (compareVersionParts(desired.parts, current.parts) < 0) {
+  const direction = compareVersionParts(desired.parts, current.parts) ||
+    compareLsioBuild(row.desired_tag, row.current_tag);
+  if (direction < 0) {
     addCue("downgrade", "Downgrade", "error");
   } else if (current.major !== desired.major) {
     addCue("major-bump", "Major bump", "error");
@@ -238,6 +240,16 @@ function parseVersion(tag: string): ParsedVersion | null {
     patch: parts[2] ?? 0,
     parts,
   };
+}
+
+// LinuxServer.io tags append "-lsNNN"; with the same app version, a lower build is a downgrade.
+function compareLsioBuild(left: string, right: string): number {
+  const leftBuild = left.match(/-ls(\d+)$/)?.[1];
+  const rightBuild = right.match(/-ls(\d+)$/)?.[1];
+  if (leftBuild === undefined || rightBuild === undefined) {
+    return 0;
+  }
+  return parseInt(leftBuild, 10) - parseInt(rightBuild, 10);
 }
 
 function compareVersionParts(left: number[], right: number[]): number {
