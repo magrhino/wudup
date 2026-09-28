@@ -22,6 +22,7 @@ describe("candidate release panel", () => {
     const body = '<img src=x onerror="alert(1)"> Useful release notes';
     const { wrapper, load } = setup({ body, links: [{ kind: "github_release", label: "Unsafe", url: "javascript:alert(1)" }] });
     expect(wrapper.findAll("a")).toHaveLength(0);
+    expect(wrapper.find(".release-notes-reason").exists()).toBe(false);
     expect(wrapper.find(".release-panel").exists()).toBe(false);
     await wrapper.find("button").trigger("click");
     expect(wrapper.find("dialog[open][aria-modal=true]").exists()).toBe(true);
@@ -36,9 +37,15 @@ describe("candidate release panel", () => {
 
   it.each(["latest", "16", "", "3.0.0"])("labels %s as upstream context", async (tag) => {
     const { wrapper } = setup({}, tag);
+    expect(wrapper.find(".release-notes-reason").text()).toBe("Upstream notes for v2.0.0");
     await wrapper.find("button").trigger("click");
     expect(wrapper.text()).toContain("not confirmed for this candidate or digest");
     expect(wrapper.text()).not.toContain("Matched to candidate");
+  });
+
+  it("keeps a quiet upstream hint when the release has no tag", () => {
+    const { wrapper } = setup({ release_tag: "" });
+    expect(wrapper.find(".release-notes-reason").text()).toBe("Upstream notes");
   });
 
   it("keeps source access during loading, errors, empty and ready changelog states", async () => {

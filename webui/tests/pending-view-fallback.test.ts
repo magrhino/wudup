@@ -212,8 +212,12 @@ describe("pending view fallback and release notes", () => {
     const wrapper = mountPendingView(pinia);
     const release = wrapper.find(".stack-change-release");
 
-    expect(release.text()).toContain(matched ? "Matched to candidate" : "Upstream context");
-    expect(release.text()).not.toContain(matched ? "Upstream context" : "Matched to candidate");
+    expect(release.text()).not.toContain("Matched to candidate");
+    if (matched) {
+      expect(release.find(".release-notes-reason").exists()).toBe(false);
+    } else {
+      expect(release.find(".release-notes-reason").text()).toBe(`Upstream notes for ${releaseTag}`);
+    }
   });
 
   it("shows release access for every candidate while retaining risks and precise advisory scope", () => {

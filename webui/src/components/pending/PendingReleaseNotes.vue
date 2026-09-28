@@ -44,6 +44,12 @@ const matched = computed(() => {
   return props.releaseNote?.status === "ready" && /^\d+\.\d+\.\d+(?:[-+].+)?$/.test(tag) && tag === release;
 });
 const contextLabel = computed(() => matched.value ? "Matched to candidate" : "Upstream context");
+// Matching is the expected case, so the row only calls out notes that may not describe the candidate tag.
+const rowContextHint = computed(() => {
+  if (matched.value) return "";
+  const releaseTag = props.releaseNote?.release_tag;
+  return releaseTag ? `Upstream notes for ${releaseTag}` : "Upstream notes";
+});
 const unavailableReason = computed(() => props.releaseNoteReason || props.releaseNote?.error ||
   (props.releaseNoteStatus === "Checking..." ? "Loading release information…" : "Release notes are not available for this candidate."));
 
@@ -110,7 +116,10 @@ function readChangelog(): Promise<void> {
         <template #icon><FileText :size="14" aria-hidden="true" /></template>
         Release notes
       </n-button>
-      <span v-if="releaseNote?.status === 'ready'" class="release-notes-reason">{{ contextLabel }}</span>
+      <template v-if="releaseNote?.status === 'ready'">
+        <span v-if="rowContextHint" class="release-notes-reason"
+          title="These notes are not confirmed for this candidate tag or digest.">{{ rowContextHint }}</span>
+      </template>
       <output v-else class="release-notes-reason">
         <strong v-if="releaseNoteStatus">{{ releaseNoteStatus }}. </strong>{{ unavailableReason }}
       </output>
