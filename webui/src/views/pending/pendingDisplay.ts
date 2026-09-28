@@ -173,12 +173,6 @@ export function tagInputProps(
   return { "aria-label": `New tag for ${item.image}` };
 }
 
-export function groupTagChangeCount(group: PendingStackGroup): number {
-  return group.items.filter(
-    (item) => item.desired_tag || item.action === "tag-update",
-  ).length;
-}
-
 export function itemsBreakingCount(
   items: PendingGroupedItem[],
   releaseNoteFor: (item: PendingGroupedItem) => ReleaseNoteInfo | null,
