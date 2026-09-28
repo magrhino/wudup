@@ -124,6 +124,10 @@ function addVersionBumpCue(
   if (!row.current_tag || !row.desired_tag || row.current_tag === row.desired_tag) {
     return;
   }
+  if (compareLsioBuild(row.desired_tag, row.current_tag) < 0) {
+    addCue("downgrade", "Downgrade", "error");
+    return;
+  }
   const current = parseVersion(row.current_tag);
   const desired = parseVersion(row.desired_tag);
   if (!current || !desired) {
@@ -238,6 +242,19 @@ function parseVersion(tag: string): ParsedVersion | null {
     patch: parts[2] ?? 0,
     parts,
   };
+}
+
+// LinuxServer.io tags end in "-lsNNN". Builds are only comparable when everything before that
+// suffix is identical (same prefix, app version, and stream); then a lower build is a downgrade.
+const LSIO_BUILD_PATTERN = /^(.*)-ls(\d+)$/;
+
+function compareLsioBuild(left: string, right: string): number {
+  const leftMatch = LSIO_BUILD_PATTERN.exec(left);
+  const rightMatch = LSIO_BUILD_PATTERN.exec(right);
+  if (!leftMatch || !rightMatch || leftMatch[1] !== rightMatch[1]) {
+    return 0;
+  }
+  return Number(leftMatch[2]) - Number(rightMatch[2]);
 }
 
 function compareVersionParts(left: number[], right: number[]): number {
