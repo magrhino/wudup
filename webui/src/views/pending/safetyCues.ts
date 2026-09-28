@@ -25,6 +25,8 @@ export type SafetyCueContext = {
   securityScansEnabled: boolean;
   securityScansLoaded: boolean;
   securityScansLoading: boolean;
+  // The queue summary already says "No candidate scans yet" once, so rows skip the same cue.
+  securityScansAllUnscanned?: boolean;
   servicePolicies: Pick<ServicePolicyRecord, "auto_update" | "service_key">[];
   snoozes: Pick<SnoozeRecord, "service_key">[];
 };
@@ -175,6 +177,7 @@ function addSecurityScanCues(
     SafetyCueContext,
     | "releaseNote"
     | "securityScan"
+    | "securityScansAllUnscanned"
     | "securityScansCurrent"
     | "securityScansEnabled"
     | "securityScansLoaded"
@@ -199,6 +202,9 @@ function addSecurityScanCues(
     return;
   }
   const display = securityScanCueDisplay(scan);
+  if (display?.key === "security-not-scanned" && context.securityScansAllUnscanned) {
+    return;
+  }
   if (display) {
     addCue(display.key, `Candidate scan: ${display.key === "security-stale" ? "stale" : display.label}`, display.type);
   }

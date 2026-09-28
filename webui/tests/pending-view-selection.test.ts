@@ -13,6 +13,7 @@ import {
   pendingSnoozedCandidate,
   pendingSourceInfo,
   planResponse,
+  securityScanInfo,
   snooze,
   statusResponse,
   wudApiStatus,
@@ -457,15 +458,107 @@ describe("pending view selection actions", () => {
 
     const refreshButton = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Refresh security scans"));
+      .find((button) => button.text().includes("Scan candidate images"));
 
     expect(refreshButton?.exists()).toBe(true);
     expect(refreshButton?.attributes("disabled")).toBeDefined();
     expect(refreshButton?.attributes("title")).toBe(
-      "Wait for the active WebUI mutation to finish before refreshing candidate security scans.",
+      "Wait for the active WebUI mutation to finish before scanning candidate images.",
     );
     await refreshButton?.trigger("click");
     expect(refreshSecurityScans).not.toHaveBeenCalled();
+  });
+
+  function scannedQueue(states: Array<"not_scanned" | "complete">) {
+    const { pinia, settings, updates } = setupStores(true);
+    const items = states.map((_state, index) =>
+      pendingItem({ line_no: index + 1, image: `repo/app${index + 1}:1.0`, repo: `repo/app${index + 1}` }),
+    );
+    const pending = pendingResponse(items);
+    updates.pending = pending;
+    updates.securityScans = {
+      source_file: pending.source_file,
+      source: pending.source,
+      source_hash: pending.source_hash ?? "",
+      scanning_enabled: true,
+      scanner: "trivy",
+      scan_mode: "registry",
+      count: states.length,
+      items: states.map((state, index) =>
+        securityScanInfo({
+          line_no: index + 1,
+          state,
+          verdict: state === "complete" ? "none_reported" : "unknown",
+        }),
+      ),
+      warnings: [],
+    };
+    mockPendingLifecycle(settings, updates);
+    return { pinia, updates };
+  }
+
+  it("shows the candidate scan action and status once outside queue tools", () => {
+    const { pinia } = scannedQueue(["not_scanned", "not_scanned"]);
+    const wrapper = mountPendingView(pinia);
+
+    const controls = wrapper.find(".candidate-scan-controls");
+    expect(controls.exists()).toBe(true);
+    expect(wrapper.find(".queue-tools .candidate-scan-controls").exists()).toBe(false);
+    expect(controls.text()).toContain("No candidate scans yet");
+    expect(controls.find('[aria-live="polite"]').text()).toBe("No candidate scans yet");
+    expect(controls.text()).toContain("Scan candidate images");
+    expect(wrapper.text().split("No candidate scans yet")).toHaveLength(2);
+    expect(wrapper.text()).not.toContain("Candidate scan: Not scanned");
+  });
+
+  it("keeps row scan cues when candidate scan results differ", () => {
+    const { pinia } = scannedQueue(["complete", "not_scanned"]);
+    const wrapper = mountPendingView(pinia);
+
+    expect(wrapper.find(".stack-change-preview").text()).toContain("Candidate scan: Not scanned");
+    expect(wrapper.find(".candidate-scan-controls").text()).toContain("1 candidate scanned");
+  });
+
+  it("shows candidate scan progress and failures beside the scan action", async () => {
+    const { pinia, updates } = scannedQueue(["not_scanned"]);
+    const wrapper = mountPendingView(pinia);
+
+    updates.securityScansLoading = true;
+    updates.securityScanJob = {
+      job_id: "job-1",
+      status: "queued",
+      total_count: 0,
+      completed_count: 0,
+      result: null,
+      error: "",
+    };
+    await flushPromises();
+    expect(wrapper.find(".candidate-scan-controls").text()).toContain(
+      "Starting candidate image scans…",
+    );
+
+    updates.securityScanJob = {
+      job_id: "job-1",
+      status: "running",
+      total_count: 18,
+      completed_count: 3,
+      result: null,
+      error: "",
+    };
+    await flushPromises();
+    expect(wrapper.find(".candidate-scan-controls").text()).toContain(
+      "Scanning 3 of 18 candidate images…",
+    );
+
+    updates.securityScansLoading = false;
+    updates.securityScanJob = { ...updates.securityScanJob, status: "failure", error: "scanner crashed" };
+    updates.securityScansError = "scanner crashed";
+    await flushPromises();
+    const controls = wrapper.find(".candidate-scan-controls");
+    expect(controls.text()).not.toContain("Scanning");
+    expect(controls.find('[role="alert"]').text()).toBe(
+      "Candidate security scan metadata is unavailable: scanner crashed",
+    );
   });
 
   it("shows security scans unavailable after metadata load fails", () => {

@@ -198,6 +198,11 @@ export function usePendingQueueState() {
     return releaseChangelog.releaseChangelogStateFor(note);
   }
 
+  const securityScansAllUnscanned = computed(() => {
+    const scans = updates.currentSecurityScanItems;
+    return scans.length > 0 && scans.every((scan) => scan.state === "not_scanned");
+  });
+
   function riskCues(row: PendingItem): SafetyCue[] {
     return buildSafetyCues(row, {
       pending: updates.pending,
@@ -205,6 +210,7 @@ export function usePendingQueueState() {
       releaseNotesLoaded: Boolean(updates.releaseNotes),
       releaseNotesLoading: updates.releaseNotesLoading,
       securityScan: updates.securityScanFor(row),
+      securityScansAllUnscanned: securityScansAllUnscanned.value,
       securityScansCurrent: updates.securityScansCurrent,
       securityScansEnabled: updates.securityScans?.scanning_enabled ?? false,
       securityScansLoaded: Boolean(updates.securityScans),

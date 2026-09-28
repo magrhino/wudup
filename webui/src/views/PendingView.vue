@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ShieldCheck } from "@lucide/vue";
 import {
   NAlert,
   NButton,
@@ -22,6 +21,7 @@ import PendingRemovalModal from "../components/pending/PendingRemovalModal.vue";
 import PendingReleaseNotificationModal from "../components/pending/PendingReleaseNotificationModal.vue";
 import PendingSearchEmptyState from "../components/pending/PendingSearchEmptyState.vue";
 import PendingSearchPanel from "../components/pending/PendingSearchPanel.vue";
+import PendingCandidateScanControls from "../components/pending/PendingCandidateScanControls.vue";
 import PendingSelectionToolbar from "../components/pending/PendingSelectionToolbar.vue";
 import PendingStackSelection from "../components/pending/PendingStackSelection.vue";
 import { useDataCardsBreakpoint } from "../responsive";
@@ -146,10 +146,10 @@ let loadPendingAndReleaseNotesHandler: (
 ) => Promise<void> = async () => undefined;
 const securityScanRefreshReadOnlyMessage =
   "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server " +
-  "to refresh candidate security scans.";
+  "to scan candidate images.";
 const securityScanRefreshMutationMessage =
-  "Wait for the active WebUI mutation to finish before refreshing candidate " +
-  "security scans.";
+  "Wait for the active WebUI mutation to finish before scanning candidate " +
+  "images.";
 const PENDING_METADATA_REFRESH_INTERVAL_MS = 30_000;
 const pendingMetadataRefreshInterval =
   ref<ReturnType<typeof globalThis.setInterval> | null>(null);
@@ -244,6 +244,15 @@ const securityScanSummary = computed(() => {
   });
 });
 const securityScanSummaryLabel = computed(() => securityScanSummary.value.label);
+const securityScanProgressLabel = computed(() => {
+  const job = updates.securityScanJob;
+  if (!updates.securityScansLoading || !job || (job.status !== "queued" && job.status !== "running")) {
+    return "";
+  }
+  return job.total_count
+    ? `Scanning ${job.completed_count} of ${job.total_count} candidate images…`
+    : "Starting candidate image scans…";
+});
 const securityScanSummaryType = computed(() => securityScanSummary.value.type);
 
 const {
@@ -543,9 +552,6 @@ onBeforeUnmount(() => {
     <n-alert v-if="updates.releaseNotificationError" type="warning">
       Release-note notification is unavailable: {{ updates.releaseNotificationError }}
     </n-alert>
-    <n-alert v-if="updates.securityScansError" type="warning">
-      Candidate security scan metadata is unavailable: {{ updates.securityScansError }}
-    </n-alert>
     <n-alert v-if="pendingRescanMessage" :type="pendingRescanAlertType">
       {{ pendingRescanMessage }}
       <n-flex
@@ -765,26 +771,20 @@ onBeforeUnmount(() => {
       @start-removal="startSelectedRemoval"
       @start-update="startSelectedUpdate"
     >
+      <template #scan>
+        <PendingCandidateScanControls
+          :can-scan="securityScanRefreshVisible"
+          :disabled="securityScanRefreshDisabled"
+          :disabled-message="securityScanRefreshDisabledMessage"
+          :error="updates.securityScansError"
+          :loading="updates.securityScansLoading"
+          :progress-label="securityScanProgressLabel"
+          :summary-label="securityScanSummaryLabel"
+          :summary-type="securityScanSummaryType"
+          @scan="refreshSecurityScans"
+        />
+      </template>
       <template #tools>
-        <n-flex align="center" :size="8">
-          <n-tag size="small" :type="securityScanSummaryType">
-            {{ securityScanSummaryLabel }}
-          </n-tag>
-          <n-button
-            v-if="securityScanRefreshVisible"
-            size="small"
-            secondary
-            :loading="updates.securityScansLoading"
-            :disabled="securityScanRefreshDisabled"
-            :title="securityScanRefreshDisabledMessage || undefined"
-            @click="refreshSecurityScans"
-          >
-            <template #icon>
-              <ShieldCheck :size="16" aria-hidden="true" />
-            </template>
-            Refresh security scans
-          </n-button>
-        </n-flex>
         <p>Release advisory evidence and candidate-image scans are separate checks. Neither guarantees an update is safe.</p>
       </template>
     </PendingSelectionToolbar>

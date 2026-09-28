@@ -37,7 +37,6 @@ const links = computed(() => (props.releaseNote?.links ?? [])
     return { ...link, label };
   }),
 );
-const sourceLinks = computed(() => links.value.filter((link) => link.kind !== "security_advisory"));
 const matched = computed(() => {
   const tag = props.candidateTag.replace(/^v(?=\d)/, "");
   const release = (props.releaseNote?.release_tag ?? "").replace(/^v(?=\d)/, "");
@@ -117,11 +116,6 @@ function readChangelog(): Promise<void> {
         <template #icon><FileText :size="14" aria-hidden="true" /></template>
         Release notes
       </n-button>
-      <a v-for="link in sourceLinks" :key="link.url" class="release-note-link"
-        :href="link.url" target="_blank" rel="noopener noreferrer">
-        {{ link.label }}
-        <ExternalLink :size="14" aria-hidden="true" />
-      </a>
       <template v-if="releaseNote?.status === 'ready'">
         <span v-if="rowContextHint" class="release-notes-reason"
           title="These notes are not confirmed for this candidate tag or digest.">{{ rowContextHint }}</span>

@@ -30,6 +30,7 @@ import {
   groupedItemTarget,
   itemsBreakingCount,
   pendingSourceFileName,
+  previewChangeLabels,
   releaseNoteReason,
   releaseNoteStatus,
   tagInputProps,
@@ -208,6 +209,37 @@ async function emitModalShowUpdate(wrapper: VueWrapper, value: boolean): Promise
 }
 
 describe("pending helper modules", () => {
+  it.each([
+    ["repo/app:1.0", "repo/app:1.1", "1.0", "1.1"],
+    ["registry.example:5000/acme/app:v2", "registry.example:5000/acme/app:v3", "v2", "v3"],
+    ["redis:latest@sha256:abc", "redis:latest@sha256:def", "latest@sha256:abc", "latest@sha256:def"],
+    ["linuxserver/radarr:latest", "repo/app:1.1", "linuxserver/radarr:latest", "repo/app:1.1"],
+    ["repo/app", "repo/app:1.1", "repo/app", "repo/app:1.1"],
+  ])("labels %s -> %s as a version change", (current, target, currentLabel, targetLabel) => {
+    expect(previewChangeLabels(current, target, (value) => value)).toEqual({
+      current: currentLabel,
+      target: targetLabel,
+    });
+  });
+
+  it("keeps long pinned tags whole and shortens only the digest", () => {
+    const digest = `sha256:${"a".repeat(60)}1234`;
+    expect(
+      previewChangeLabels(
+        `ghcr.io/example/app:2.33.5-distroless@${digest}`,
+        "ghcr.io/example/app:2.34.4",
+        displayDigest,
+      ),
+    ).toEqual({
+      current: `2.33.5-distroless@${displayDigest(digest)}`,
+      target: "2.34.4",
+    });
+    expect(
+      previewChangeLabels(`ghcr.io/example/app@${digest}`, "ghcr.io/example/app:2.34.4", displayDigest)
+        .current,
+    ).toBe(displayDigest(digest));
+  });
+
   it("formats digest provenance with tag context and truncated digest detail", () => {
     const digest = "sha256:abcdefghijklmnopqrstuvwxyz0123456789";
     const provenance = {
@@ -474,6 +506,28 @@ describe("pending helper modules", () => {
     });
     expect(cues).toContainEqual({ key: "downgrade", label: "Downgrade", type: "error" });
     expect(cues.some((cue) => cue.key.endsWith("-bump"))).toBe(false);
+  });
+
+  it.each([
+    [true, false],
+    [false, true],
+  ])("with every candidate unscanned=%s shows the row not-scanned cue=%s", (allUnscanned, shown) => {
+    const item = pendingGroupedItem({ line_no: 1 });
+    const cues = safetyCues(item, {
+      pending: pendingResponse([item]),
+      releaseNote: null,
+      releaseNotesLoaded: false,
+      releaseNotesLoading: false,
+      securityScan: securityScanInfo({ line_no: 1, state: "not_scanned" }),
+      securityScansAllUnscanned: allUnscanned,
+      securityScansCurrent: true,
+      securityScansEnabled: true,
+      securityScansLoaded: true,
+      securityScansLoading: false,
+      servicePolicies: [],
+      snoozes: [],
+    });
+    expect(cues.some((cue) => cue.key === "security-not-scanned")).toBe(shown);
   });
 
   it("adds candidate security scan cues without implying safety", () => {
@@ -1407,8 +1461,9 @@ describe("pending helper modules", () => {
     expect(wrapper.text()).toContain("Major bump");
     expect(wrapper.text()).toContain("Candidate scan: unavailable");
     expect(wrapper.text()).not.toContain("not a guarantee of a safe update");
-    expect(wrapper.text()).toContain("GitHub release");
+    expect(wrapper.find(".candidate-release-actions a").exists()).toBe(false);
     await wrapper.find('button[aria-haspopup="dialog"]').trigger("click");
+    expect(wrapper.text()).toContain("GitHub release");
     expect(wrapper.text()).toContain("Possible breaking change");
     expect(wrapper.find(".release-note-link").attributes("rel")).toBe(
       "noopener noreferrer",

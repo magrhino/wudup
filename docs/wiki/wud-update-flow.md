@@ -101,13 +101,17 @@ Stopped/unverified services are excluded from bulk selection. Stale metadata can
 still block a selected update from review. Counts can overlap or use different
 units, so detected, pending and selectable counts are not additive.
 
-Stack summaries prioritize services, current and target images, operational impact
-and actionable risks. Details retains routine metadata and the full evidence.
+Stack summaries prioritize services, current and target versions, operational
+impact and actionable risks. Details retains full image references, routine
+metadata and the full evidence.
 Release advisory cues describe release security evidence; candidate scan cues
 describe image scan results. Neither is a guarantee that an update is safe.
 
 **Refresh current view status** reads current state. **Rescan WUD** asks WUD to
-check registries; **Refresh security scans** requests candidate-image scans.
+check registries. **Scan candidate images**, beside **Select all**, scans every
+candidate image in the queue and shows progress and failures next to the button.
+When no candidate has been scanned, the queue says so once there instead of on
+every row.
 After applying, use **History** to inspect the result.
 
 ## Todo File Format

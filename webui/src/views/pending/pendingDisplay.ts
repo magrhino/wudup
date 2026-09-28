@@ -55,6 +55,50 @@ export function previewImageLabel(
   return value.includes("sha256:") ? displayDigest(value) : value;
 }
 
+function splitImageReference(value: string): { repository: string; reference: string } {
+  const at = value.indexOf("@");
+  const name = at >= 0 ? value.slice(0, at) : value;
+  const digest = at >= 0 ? value.slice(at + 1) : "";
+  const colon = name.lastIndexOf(":");
+  if (colon <= name.lastIndexOf("/")) {
+    return { repository: name, reference: digest };
+  }
+  const tag = name.slice(colon + 1);
+  return { repository: name.slice(0, colon), reference: digest ? `${tag}@${digest}` : tag };
+}
+
+// Show only the tag or digest when both sides share a repository, so rows read as version changes.
+export function previewChangeLabels(
+  current: string,
+  target: string,
+  displayDigest: (digest: string) => string,
+): { current: string; target: string } {
+  const from = splitImageReference(current);
+  const to = splitImageReference(target);
+  if (from.repository !== to.repository || !from.reference || !to.reference) {
+    return {
+      current: previewImageLabel(current, displayDigest),
+      target: previewImageLabel(target, displayDigest),
+    };
+  }
+  return {
+    current: previewReferenceLabel(from.reference, displayDigest),
+    target: previewReferenceLabel(to.reference, displayDigest),
+  };
+}
+
+// Shorten only the digest of a pinned "tag@digest" reference so the tag stays readable.
+function previewReferenceLabel(
+  reference: string,
+  displayDigest: (digest: string) => string,
+): string {
+  const at = reference.indexOf("@");
+  if (at <= 0) {
+    return previewImageLabel(reference, displayDigest);
+  }
+  return `${reference.slice(0, at)}@${displayDigest(reference.slice(at + 1))}`;
+}
+
 export function uniqueSorted(values: number[]): number[] {
   return [...new Set(values)].sort((left, right) => left - right);
 }
@@ -199,9 +243,3 @@ export function groupedItemActionTagType(
   }
 }
 
-export function groupedItemTagRewriteLabel(item: PendingGroupedItem): string {
-  if (!item.desired_tag) {
-    return "";
-  }
-  return `${item.image} -> ${groupedItemTarget(item)}`;
-}
