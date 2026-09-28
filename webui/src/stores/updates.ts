@@ -166,6 +166,8 @@ export const useUpdatesStore = defineStore("updates", () => {
   let activeSecurityScanRequests = 0;
   let securityScanRequestId = 0;
   let securityScanRefreshInFlight: Promise<void> | null = null;
+  // A job the server may still be running after this client lost track of it.
+  let unreconciledSecurityScanJobId = "";
   const securityScansError = ref("");
   const error = ref("");
   let pendingLoadInFlight: Promise<void> | null = null;
@@ -430,8 +432,10 @@ export const useUpdatesStore = defineStore("updates", () => {
     activeSecurityScanRequests += 1;
     securityScansLoading.value = true;
     securityScansError.value = "";
+    let job: SecurityScanJobResponse | null = null;
     try {
-      let job = await webApi.refreshSecurityScans(await auth.ensureCsrf());
+      job = await resumeUnreconciledSecurityScanJob()
+        ?? await webApi.refreshSecurityScans(await auth.ensureCsrf());
       securityScanJob.value = job;
       let pollAttempts = 0;
       while (!TERMINAL_SECURITY_SCAN_STATUSES.has(job.status)) {
@@ -450,9 +454,11 @@ export const useUpdatesStore = defineStore("updates", () => {
       const response = job.result ?? await webApi.securityScans();
       if (requestId === securityScanRequestId) securityScans.value = response;
     } catch (caughtError) {
-      // A job left queued/running after a failed poll or timeout is no longer tracked, so drop it
-      // rather than let later scan reads present it as in progress.
-      if (securityScanJob.value && !TERMINAL_SECURITY_SCAN_STATUSES.has(securityScanJob.value.status)) {
+      // A job left queued/running after a failed poll or timeout is no longer tracked: hide it so
+      // later scan reads do not present it as in progress, but keep its id so a retry resumes it
+      // instead of asking the server to start a scan while that one is still active.
+      if (job && !TERMINAL_SECURITY_SCAN_STATUSES.has(job.status)) {
+        unreconciledSecurityScanJobId = job.job_id;
         securityScanJob.value = null;
       }
       if (requestId === securityScanRequestId) securityScansError.value = errorMessage(caughtError);
@@ -460,6 +466,19 @@ export const useUpdatesStore = defineStore("updates", () => {
     } finally {
       activeSecurityScanRequests -= 1;
       securityScansLoading.value = activeSecurityScanRequests > 0;
+    }
+  }
+
+  async function resumeUnreconciledSecurityScanJob(): Promise<SecurityScanJobResponse | null> {
+    const jobId = unreconciledSecurityScanJobId;
+    if (!jobId) return null;
+    unreconciledSecurityScanJobId = "";
+    try {
+      const job = await webApi.securityScanJob(jobId);
+      return TERMINAL_SECURITY_SCAN_STATUSES.has(job.status) ? null : job;
+    } catch {
+      // The job is gone (for example after a WebUI restart); start a new scan instead.
+      return null;
     }
   }
 

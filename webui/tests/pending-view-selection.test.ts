@@ -505,6 +505,7 @@ describe("pending view selection actions", () => {
     expect(controls.exists()).toBe(true);
     expect(wrapper.find(".queue-tools .candidate-scan-controls").exists()).toBe(false);
     expect(controls.text()).toContain("No candidate scans yet");
+    expect(controls.find('[aria-live="polite"]').text()).toBe("No candidate scans yet");
     expect(controls.text()).toContain("Scan candidate images");
     expect(wrapper.text().split("No candidate scans yet")).toHaveLength(2);
     expect(wrapper.text()).not.toContain("Candidate scan: Not scanned");

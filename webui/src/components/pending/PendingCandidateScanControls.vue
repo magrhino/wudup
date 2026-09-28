@@ -23,7 +23,9 @@ const emit = defineEmits<{
 <template>
   <div class="candidate-scan-controls">
     <div class="candidate-scan-actions">
-      <n-tag size="small" :type="summaryType">{{ summaryLabel }}</n-tag>
+      <span aria-live="polite">
+        <n-tag size="small" :type="summaryType">{{ summaryLabel }}</n-tag>
+      </span>
       <n-button
         v-if="canScan"
         size="small"

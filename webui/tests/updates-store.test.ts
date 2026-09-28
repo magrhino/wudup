@@ -908,14 +908,14 @@ describe("updates store", () => {
     expect(updates.securityScansLoading).toBe(false);
   });
 
-  it("drops an untracked running scan job when polling fails", async () => {
+  it("hides a scan job it lost track of and resumes it on retry", async () => {
     vi.useFakeTimers();
     const updates = useUpdatesStore();
     vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
-    vi.spyOn(webApi, "refreshSecurityScans").mockResolvedValue(
+    const refreshApi = vi.spyOn(webApi, "refreshSecurityScans").mockResolvedValue(
       securityScanJobResponse({ status: "running", total_count: 18, completed_count: 3, result: null }),
     );
-    vi.spyOn(webApi, "securityScanJob").mockRejectedValue(new Error("Network error"));
+    const jobApi = vi.spyOn(webApi, "securityScanJob").mockRejectedValueOnce(new Error("Network error"));
 
     try {
       const refresh = updates.refreshSecurityScans().catch((error) => error);
@@ -925,6 +925,49 @@ describe("updates store", () => {
       expect((await refresh).message).toBe("Network error");
       expect(updates.securityScanJob).toBeNull();
       expect(updates.securityScansError).toBe("Network error");
+
+      const result = securityScansResponse([completeSecurityScanInfo()]);
+      jobApi
+        .mockResolvedValueOnce(securityScanJobResponse({ status: "running", total_count: 18, completed_count: 9, result: null }))
+        .mockResolvedValueOnce(securityScanJobResponse({ result }));
+      const retry = updates.refreshSecurityScans();
+      await flushPromises();
+      expect(updates.securityScanJob?.completed_count).toBe(9);
+      await vi.advanceTimersByTimeAsync(SECURITY_SCAN_POLL_INTERVAL_MS);
+      await retry;
+      expect(refreshApi).toHaveBeenCalledTimes(1);
+      expect(jobApi).toHaveBeenCalledWith("security-scan-test");
+      expect(updates.securityScans).toEqual(result);
+      expect(updates.securityScansError).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["finished", () => Promise.resolve(securityScanJobResponse({ status: "failure", result: null }))],
+    ["missing", () => Promise.reject(new Error("Not found"))],
+  ])("starts a new scan when the job it lost track of is %s", async (_state, lookup) => {
+    vi.useFakeTimers();
+    const updates = useUpdatesStore();
+    vi.spyOn(useAuthStore(), "ensureCsrf").mockResolvedValue("csrf-security");
+    const refreshApi = vi.spyOn(webApi, "refreshSecurityScans")
+      .mockResolvedValueOnce(securityScanJobResponse({ status: "running", result: null }))
+      .mockResolvedValueOnce(securityScanJobResponse());
+    vi.spyOn(webApi, "securityScanJob")
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockImplementationOnce(lookup);
+
+    try {
+      const refresh = updates.refreshSecurityScans().catch((error) => error);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(SECURITY_SCAN_POLL_INTERVAL_MS);
+      await refresh;
+
+      await updates.refreshSecurityScans();
+      expect(refreshApi).toHaveBeenCalledTimes(2);
+      expect(updates.securityScanJob?.status).toBe("success");
+      expect(updates.securityScansError).toBe("");
     } finally {
       vi.useRealTimers();
     }
