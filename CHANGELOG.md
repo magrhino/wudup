@@ -4,6 +4,29 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.65.0](https://github.com/magrhino/wudup/compare/v0.64.0...v0.65.0) (2026-09-28)
+
+
+### Features
+
+* **webui:** surface candidate scan action and trim pending queue rows ([#787](https://github.com/magrhino/wudup/issues/787)) ([85624c9](https://github.com/magrhino/wudup/commit/85624c964d96f3bae2db8c8df2b585ff9d8da4e5))
+
+
+### Bug Fixes
+
+* **webui:** drop tag rewrite count from stack headers ([#789](https://github.com/magrhino/wudup/issues/789)) ([f9787ad](https://github.com/magrhino/wudup/commit/f9787ad01971e15b10bb5dc88acfee663ccd99a6))
+* **webui:** flag LinuxServer.io build downgrades ([#788](https://github.com/magrhino/wudup/issues/788)) ([53a29a4](https://github.com/magrhino/wudup/commit/53a29a45f3e47e5dc57df2884e63633a470c32de))
+* **webui:** flag version downgrades and drop per-row scan disclaimer ([#778](https://github.com/magrhino/wudup/issues/778)) ([3b85be7](https://github.com/magrhino/wudup/commit/3b85be774be40c9c857662bfb6b709678e530afb))
+* **webui:** hide matched release label and name upstream notes version ([#779](https://github.com/magrhino/wudup/issues/779)) ([b249a0a](https://github.com/magrhino/wudup/commit/b249a0a4e51c33efee9fe8c3a4bb8e3d6ddc6fc8))
+
+
+### Dependencies
+
+* **deps-dev:** bump ruff ([#782](https://github.com/magrhino/wudup/issues/782)) ([1916222](https://github.com/magrhino/wudup/commit/1916222a72e5b1c9c5f2dc6f4bb6f3501a6af806))
+* **deps-dev:** bump the npm-development group across 1 directory with 4 updates ([#786](https://github.com/magrhino/wudup/issues/786)) ([f2a7b28](https://github.com/magrhino/wudup/commit/f2a7b28d6b07b2d2881eb87b93f1d4e8f808b40c))
+* **deps:** bump idna from 3.19 to 3.20 in the python-production group ([#781](https://github.com/magrhino/wudup/issues/781)) ([a85dc4c](https://github.com/magrhino/wudup/commit/a85dc4cd7b658368d0bb468abc27a1646e307707))
+* **deps:** bump the github-actions group across 1 directory with 6 updates ([#784](https://github.com/magrhino/wudup/issues/784)) ([cd557cc](https://github.com/magrhino/wudup/commit/cd557cc9de6b8b2ee5a742e55351d503107cdacb))
+
 ## [0.64.0](https://github.com/magrhino/wudup/compare/v0.63.0...v0.64.0) (2026-09-27)
 
 
