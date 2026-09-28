@@ -525,6 +525,19 @@ describe("pending view selection actions", () => {
     updates.securityScansLoading = true;
     updates.securityScanJob = {
       job_id: "job-1",
+      status: "queued",
+      total_count: 0,
+      completed_count: 0,
+      result: null,
+      error: "",
+    };
+    await flushPromises();
+    expect(wrapper.find(".candidate-scan-controls").text()).toContain(
+      "Starting candidate image scans…",
+    );
+
+    updates.securityScanJob = {
+      job_id: "job-1",
       status: "running",
       total_count: 18,
       completed_count: 3,

@@ -153,16 +153,17 @@ test("changelog uses native fetch and recovers from failed or unavailable notes"
   const stack = page.locator("article").filter({
     has: page.getByLabel("Details for home", { exact: true }),
   });
-  const releaseLink = stack.getByRole("link", { name: "GitHub release", exact: true });
-  const releaseUrl = await releaseLink.getAttribute("href");
-  expect(releaseUrl).toMatch(/^https:\/\/github\.com\/.+\/releases\/tag\//);
-  expect(releaseRequests).toBe(0);
+  // Release source links live in the release notes dialog, not on the queue row.
+  await expect(stack.getByRole("link", { name: "GitHub release", exact: true })).toHaveCount(0);
 
   await stack.getByRole("button", { name: /^Release notes for/ }).click();
   const panel = page.getByRole("dialog", { name: "Release notes", exact: true });
+  const fallbackLink = panel.getByRole("link", { name: "GitHub release", exact: true });
+  const releaseUrl = await fallbackLink.getAttribute("href");
+  expect(releaseUrl).toMatch(/^https:\/\/github\.com\/.+\/releases\/tag\//);
+  expect(releaseRequests).toBe(0);
   await panel.getByRole("button", { name: "Read changelog", exact: true }).click();
   await expect(panel.getByRole("status").filter({ hasText: "Could not load notes." })).toBeVisible();
-  const fallbackLink = panel.getByRole("link", { name: "GitHub release", exact: true });
   await expect(fallbackLink).toHaveAttribute("href", releaseUrl!);
   await expect(fallbackLink).toHaveAttribute("target", "_blank");
   await expect(fallbackLink).toHaveAttribute("rel", "noopener noreferrer");
