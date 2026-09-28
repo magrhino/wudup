@@ -490,6 +490,7 @@ describe("pending helper modules", () => {
     ["v1.4", "v1.3.9"],
     ["2.6.5.5623", "2.6.5.5491"],
     ["v1.6.2-ls366", "v1.6.2-ls357"],
+    ["amd64-nightly-4.7.2.7675-ls481", "amd64-nightly-4.7.2.7675-ls470"],
   ])("flags %s -> %s as a downgrade instead of a bump", (current_tag, desired_tag) => {
     const item = pendingGroupedItem({ line_no: 1, current_tag, desired_tag });
     const cues = safetyCues(item, {
@@ -513,6 +514,8 @@ describe("pending helper modules", () => {
     ["v1.6.2-ls357", "v1.6.2-ls366", []],
     ["v1.6.2-ls366", "v1.7.0-ls10", ["minor-bump"]],
     ["4.0.19.2979-ls321", "4.0.20.3001-ls300", ["patch-bump"]],
+    ["1.6.2-ls366", "1.6.2-rc1-ls13", []],
+    ["1.6-ls5", "1.6.0-ls4", []],
   ])("does not flag %s -> %s as a downgrade", (current_tag, desired_tag, bumpKeys) => {
     const item = pendingGroupedItem({ line_no: 1, current_tag, desired_tag });
     const cues = safetyCues(item, {
