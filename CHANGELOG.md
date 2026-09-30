@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.65.1](https://github.com/magrhino/wudup/compare/v0.65.0...v0.65.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **webui:** add wud.tag.transform for four-part version tracking ([#792](https://github.com/magrhino/wudup/issues/792)) ([a3cb2cd](https://github.com/magrhino/wudup/commit/a3cb2cdc03eb8bfddbf3f71358767b339b5643b5))
+
 ## [0.65.0](https://github.com/magrhino/wudup/compare/v0.64.0...v0.65.0) (2026-09-28)
 
 
