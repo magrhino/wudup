@@ -818,6 +818,7 @@ class TrackingRepairPlan(BaseModel):
     image: str
     current_regex: str
     proposed_regex: str
+    proposed_transform: str = ""
     compose_diff: str
     will_recreate: bool
     can_apply: bool
@@ -891,6 +892,7 @@ class RetagPlanDigestPinUpdate(BaseModel):
     label_key: str
     label_value: str
     label_rewrites: list[RetagPlanLabelRewrite] = Field(default_factory=list)
+    transform_label_value: str = ""
     digest_provenance: DigestTagProvenance | None = None
 
 
@@ -905,6 +907,7 @@ class RetagPlanTagUpdate(BaseModel):
     label_key: str
     label_value: str
     label_rewrites: list[RetagPlanLabelRewrite] = Field(default_factory=list)
+    transform_label_value: str = ""
 
 
 class RetagPlanStack(BaseModel):

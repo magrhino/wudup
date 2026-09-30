@@ -30,11 +30,13 @@ from .compose import (
     compose_runtime_service_key_matches,
 )
 from .compose_rewrite import (
+    WUD_TAG_TRANSFORM_LABEL,
     _atomic_replace_compose,
     _backup_compose,
     apply_compose_tracking_label,
     compose_unescape_dollars,
     exact_tags_regex,
+    planned_wud_tag_transform,
     render_compose_tracking_label,
 )
 from .db import init_db, insert_update_event, insert_update_run, open_db, utc_timestamp
@@ -138,7 +140,20 @@ def _wud_containers_by_key(
     return by_key, unkeyed
 
 
-def _tracking_health(image: str, tag: str, regex: str, suggested: str) -> tuple[str, str, str]:
+def _tracking_health(
+    image: str, tag: str, regex: str, suggested: str, transform: str = ""
+) -> tuple[str, str, str]:
+    health, detail, suggested = _tracking_filter_health(image, tag, regex, suggested)
+    if health in {"version-pattern", "custom"} and planned_wud_tag_transform(tag, regex, transform):
+        return (
+            "needs-transform",
+            "WUD misorders this four-part version tag and can offer older releases as updates; repair adds a wud.tag.transform label.",
+            suggested,
+        )
+    return health, detail, suggested
+
+
+def _tracking_filter_health(image: str, tag: str, regex: str, suggested: str) -> tuple[str, str, str]:
     if _DIGEST_MARKER in image:
         return "digest-pinned", "Digest-pinned image; review tracking manually.", ""
     if not regex:
@@ -181,7 +196,10 @@ def _tracked_record_item(
     item = record.item
     tag = image_tag(item.image)
     regex = compose_unescape_dollars(item.label_value)
-    health, detail, suggested = _tracking_health(item.image, tag, regex, _suggested_regex(tag, item.image))
+    transform = _service_transform(record)
+    health, detail, suggested = _tracking_health(
+        item.image, tag, regex, _suggested_regex(tag, item.image), transform
+    )
     candidates = wud_by_key.get((record.stack.project_name, item.service), [])
     matches = [
         container for container in candidates
@@ -295,6 +313,12 @@ def _history_timestamps(
         ) from exc
 
 
+def _service_transform(record: web_retag_targets._RetagTargetRecord) -> str:
+    return compose_unescape_dollars(
+        web_retag_targets._label_value(record.service_image.labels, WUD_TAG_TRANSFORM_LABEL)
+    )
+
+
 def _suggested_regex(tag: str, image: str) -> str:
     if _DIGEST_MARKER in image or not tag_value_valid(tag) or not _release_shaped_tag(tag):
         return ""
@@ -395,7 +419,9 @@ def build_tracking_repair_plan(
     tag = image_tag(item.image)
     _validated_regex(payload.regex, tag)
     current = compose_unescape_dollars(item.label_value)
-    if current == payload.regex:
+    current_transform = _service_transform(record)
+    transform = planned_wud_tag_transform(tag, payload.regex, current_transform)
+    if current == payload.regex and not transform:
         raise HTTPException(status_code=422, detail="Tracking regex is already set to this value.")
     compose_path = record.stack.directory / record.stack.file
     try:
@@ -403,17 +429,14 @@ def build_tracking_repair_plan(
         source_hash = hashlib.sha256(source.encode()).hexdigest()
         rendered = render_compose_tracking_label(
             compose_path, item.service, item.image, current, payload.regex,
-            expected_source_hash=source_hash,
+            expected_source_hash=source_hash, expected_transform=current_transform,
         )
     except (OSError, ComposeTagRewriteError) as exc:
         raise HTTPException(
             status_code=409,
             detail=_safe_exception_detail(settings, "could not preview tracking repair", exc),
         ) from exc
-    old_label = f"(set) {current}" if current else "(not set)"
-    if current and not current.isprintable():
-        old_label = f"(set) {current!r}"
-    diff = f"wud.tag.include:\n- {old_label}\n+ (set) {payload.regex}\n"
+    diff = _tracking_repair_diff(current, payload.regex, transform)
     issues = []
     if record.service_key_ambiguous:
         issues.append("Duplicate service identity; choose an unambiguous Compose service.")
@@ -425,8 +448,13 @@ def build_tracking_repair_plan(
     )
     if item.runtime_state == "running" and not runtime_image_id:
         issues.append("Running image differs from the local Compose image or could not be verified; repair tracking only after the image is reconciled.")
+    # The transform decision reads resolved Compose config (extends, .env), which the
+    # source hash does not cover, so bind it to the plan explicitly.
     plan_id = hashlib.sha256(
-        "\0".join((payload.target_id, payload.regex, item.image, current, source, runtime_image_id)).encode()
+        "\0".join((
+            payload.target_id, payload.regex, item.image, current, source, runtime_image_id,
+            current_transform, transform,
+        )).encode()
     ).hexdigest()
     return TrackingRepairPlan(
         plan_id=plan_id,
@@ -439,11 +467,24 @@ def build_tracking_repair_plan(
         image=item.image,
         current_regex=current,
         proposed_regex=payload.regex,
+        proposed_transform=transform,
         compose_diff=diff,
         will_recreate=True,
         can_apply=not issues,
         issues=issues,
     ), record
+
+
+def _tracking_repair_diff(current: str, regex: str, transform: str) -> str:
+    diff = ""
+    if current != regex:
+        old_label = f"(set) {current}" if current else "(not set)"
+        if current and not current.isprintable():
+            old_label = f"(set) {current!r}"
+        diff = f"wud.tag.include:\n- {old_label}\n+ (set) {regex}\n"
+    if transform:
+        diff += f"wud.tag.transform:\n- (not set)\n+ (set) {transform}\n"
+    return diff
 
 
 def api_apply_tracking_repair(
@@ -589,7 +630,7 @@ def _run_tracking_repair(
         )
         apply_compose_tracking_label(
             path, item.service, item.image, plan.current_regex, plan.proposed_regex,
-            expected_source_hash=plan.source_hash,
+            expected_source_hash=plan.source_hash, expected_transform=_service_transform(record),
         )
         changed = True
         web_job_registry._append_apply_job_progress(
@@ -695,7 +736,7 @@ def _finish_tracking_audit(
                 conn, run_id=run_id, created_at=now, service_name=plan.service,
                 stack_name=plan.stack, image=plan.image, target_image=plan.image,
                 status=status, commit=False,
-                metadata_json=json_object({"source": "webui", "operation": "tracking-repair", "target_id": plan.target_id, "old_regex": plan.current_regex, "new_regex": plan.proposed_regex, "error": error}),
+                metadata_json=json_object({"source": "webui", "operation": "tracking-repair", "target_id": plan.target_id, "old_regex": plan.current_regex, "new_regex": plan.proposed_regex, "new_transform": plan.proposed_transform, "error": error}),
             )
             conn.execute(
                 "UPDATE update_runs SET finished_at = ?, status = ? WHERE id = ?",

@@ -47,6 +47,7 @@ from .web_retag_plans import (
 from .web_retag_plans import (
     ordered_retag_stacks as _ordered_retag_stacks,
 )
+from .web_retag_plans import retag_config_transforms
 from .web_retag_plans import (
     retag_update_service as _retag_update_service,
 )
@@ -308,18 +309,23 @@ def _apply_retag_stack(
         )
         backup = _backup_compose(compose_path)
         backup_hash = _compose_source_hash(backup)
-        applier = (
-            apply_compose_digest_pins
-            if stack_updates[0].digest_pin
-            else apply_compose_retag_updates
-        )
-        applied = applier(
-            compose_path,
-            tuple(item.update for item in stack_updates),
-            stack_name=stack.name,
-            written_hashes=written_hashes,
-            expected_source_hash=backup_hash,
-        )
+        if stack_updates[0].digest_pin:
+            applied = apply_compose_digest_pins(
+                compose_path,
+                tuple(item.update for item in stack_updates),
+                stack_name=stack.name,
+                written_hashes=written_hashes,
+                expected_source_hash=backup_hash,
+            )
+        else:
+            applied = apply_compose_retag_updates(
+                compose_path,
+                tuple(item.update for item in stack_updates),
+                stack_name=stack.name,
+                written_hashes=written_hashes,
+                expected_source_hash=backup_hash,
+                config_transforms=retag_config_transforms(stack),
+            )
         if not applied:
             raise RuntimeError("no Compose image lines were retagged")
         _progress(
