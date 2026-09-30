@@ -35,6 +35,7 @@ from .compose_source import (
     _service_comment_token_lists,
     _service_comment_tokens,
     _service_image_scalar_span,
+    _service_label_present,
     _service_label_source_rewrite,
     _set_service_label_value,
     _unique_image_rewrite,
@@ -682,16 +683,11 @@ def _render_compose_retag_updates(
                 update.label_key,
                 next_label_value,
             )
-            if config_transforms is not None:
-                added_transform = _add_managed_wud_tag_transform(
-                    service_config,
-                    service,
-                    update.watch_tag,
-                    compose_unescape_dollars(next_label_value),
-                    config_transforms.get(service, ""),
+            added_transforms[id(update)].extend(
+                _managed_transform_addition(
+                    service_config, service, update.watch_tag, next_label_value, config_transforms
                 )
-                if added_transform:
-                    added_transforms[id(update)].append((service, added_transform))
+            )
             service_config["image"] = update.final_image
             _update_service_resolved_tag_marker(
                 services,
@@ -1328,15 +1324,37 @@ def _add_managed_wud_tag_transform(
     transform = planned_wud_tag_transform(tag, include_regex, config_transform)
     if not transform:
         return ""
-    if _get_service_label_value(service_config, WUD_TAG_TRANSFORM_LABEL):
+    if _service_label_present(service_config, WUD_TAG_TRANSFORM_LABEL):
         raise ComposeTagRewriteError(
             f"Service {service} has a wud.tag.transform label that resolves to an empty "
-            "value (it may use an unset variable); set or remove it in Compose, then preview again."
+            "value (it may be blank or use an unset variable); set or remove it in Compose, "
+            "then preview again."
         )
     _set_service_label_value(
         service_config, WUD_TAG_TRANSFORM_LABEL, compose_escape_dollars(transform)
     )
     return transform
+
+
+def _managed_transform_addition(
+    service_config: CommentedMap,
+    service: str,
+    watch_tag: str,
+    include_label_value: str,
+    config_transforms: Mapping[str, str] | None,
+) -> tuple[tuple[str, str], ...]:
+    """Add a managed transform when the caller opted in; return the (service, transform) added."""
+
+    if config_transforms is None:
+        return ()
+    transform = _add_managed_wud_tag_transform(
+        service_config,
+        service,
+        watch_tag,
+        compose_unescape_dollars(include_label_value),
+        config_transforms.get(service, ""),
+    )
+    return ((service, transform),) if transform else ()
 
 
 def js_regex_escape(value: str) -> str:

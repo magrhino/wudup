@@ -436,12 +436,7 @@ def build_tracking_repair_plan(
             status_code=409,
             detail=_safe_exception_detail(settings, "could not preview tracking repair", exc),
         ) from exc
-    old_label = f"(set) {current}" if current else "(not set)"
-    if current and not current.isprintable():
-        old_label = f"(set) {current!r}"
-    diff = "" if current == payload.regex else f"wud.tag.include:\n- {old_label}\n+ (set) {payload.regex}\n"
-    if transform:
-        diff += f"wud.tag.transform:\n- (not set)\n+ (set) {transform}\n"
+    diff = _tracking_repair_diff(current, payload.regex, transform)
     issues = []
     if record.service_key_ambiguous:
         issues.append("Duplicate service identity; choose an unambiguous Compose service.")
@@ -478,6 +473,18 @@ def build_tracking_repair_plan(
         can_apply=not issues,
         issues=issues,
     ), record
+
+
+def _tracking_repair_diff(current: str, regex: str, transform: str) -> str:
+    diff = ""
+    if current != regex:
+        old_label = f"(set) {current}" if current else "(not set)"
+        if current and not current.isprintable():
+            old_label = f"(set) {current!r}"
+        diff = f"wud.tag.include:\n- {old_label}\n+ (set) {regex}\n"
+    if transform:
+        diff += f"wud.tag.transform:\n- (not set)\n+ (set) {transform}\n"
+    return diff
 
 
 def api_apply_tracking_repair(

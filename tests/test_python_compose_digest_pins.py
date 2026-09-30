@@ -189,6 +189,29 @@ class ComposeDigestPinTests(ComposeRewriteTestCase):
         with self.assertRaisesRegex(ComposeTagRewriteError, "wud.tag.transform"):
             render_compose_retag_updates(compose_file, (update,), config_transforms={"app": ""})
 
+    def test_retag_does_not_overwrite_explicitly_empty_transform_label(self) -> None:
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="4.0.19.2979-ls321"),
+            final_image="repo/app:4.0.19.2979-ls321",
+            marker="",
+            label_value=r"^\d+\.\d+\.\d+\.\d+-ls\d+$$",
+        )
+        sources = (
+            "    labels:\n    - wud.tag.include=^latest$$\n    - wud.tag.transform=\n",
+            "    labels:\n    - wud.tag.include=^latest$$\n    - wud.tag.transform\n",
+            '    labels:\n      wud.tag.include: ^latest$$\n      wud.tag.transform: ""\n',
+            "    labels:\n      wud.tag.include: ^latest$$\n      wud.tag.transform:\n",
+        )
+        for labels in sources:
+            with self.subTest(labels=labels):
+                compose_file = self.write_compose(
+                    "services:\n  app:\n    image: repo/app:latest\n" + labels
+                )
+                with self.assertRaisesRegex(ComposeTagRewriteError, "wud.tag.transform"):
+                    render_compose_retag_updates(
+                        compose_file, (update,), config_transforms={"app": ""}
+                    )
+
     def test_render_retag_clears_conflicting_resolved_tag_markers(self) -> None:
         compose_file = self.write_compose(
             "services:\n"
