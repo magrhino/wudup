@@ -197,6 +197,20 @@ describe("TrackedContainersView", () => {
     expect(wrapper.text()).toContain("Matches only the tag “latest”");
     expect(wrapper.text()).toContain("This is already the current filter; there is no label change to preview.");
     expect(wrapper.text()).not.toContain("This pattern cannot be safely tested here.");
+
+    tracking.inventory.items[0] = {
+      ...item,
+      image: "repo/sonarr:4.0.19.2979-ls321",
+      current_tag: "4.0.19.2979-ls321",
+      tracking_regex: String.raw`^\d+\.\d+\.\d+\.\d+-ls\d+$`,
+      tracking_health: "needs-transform",
+      tracking_detail: "WUD misorders this four-part version tag.",
+      suggested_regex: "",
+    };
+    await flushPromises();
+    expect(wrapper.text()).toContain("Needs transform");
+    expect(wrapper.text()).not.toContain("This is already the current filter; there is no label change to preview.");
+    expect(wrapper.findAll("button").find((button) => button.text().includes("Preview repair"))?.attributes("disabled")).toBeUndefined();
   });
 
   it("does not present WUD-dependent zeros as confirmed when inventory is unavailable", async () => {

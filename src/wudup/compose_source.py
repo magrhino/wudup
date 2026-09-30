@@ -965,6 +965,21 @@ def _get_service_label_value(service_config: CommentedMap, key: str) -> str:
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
 
 
+def _service_label_present(service_config: CommentedMap, key: str) -> bool:
+    """Return whether the label is declared at all, including with an empty value."""
+
+    labels = service_config.get("labels")
+    if labels is None:
+        return False
+    if isinstance(labels, CommentedMap):
+        return key in labels
+    if isinstance(labels, CommentedSeq):
+        return any(
+            isinstance(item, str) and item.partition("=")[0] == key for item in labels
+        )
+    raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
+
+
 def _sequence_label_value(labels: CommentedSeq, key: str) -> str:
     for item in labels:
         if not isinstance(item, str):

@@ -391,6 +391,11 @@ compose_cmd(){
               emit_failure_output "$id" config_json
               return 16
             fi
+            # Resolved config (extends, .env) that differs from the raw file.
+            if [[ -f "$ROOT/stacks/$id/config_json" ]]; then
+              cat "$ROOT/stacks/$id/config_json"
+              return 0
+            fi
             compose_config_json_from_file "$file" "$project_directory"
           else
             return 1

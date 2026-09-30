@@ -84,6 +84,7 @@ export interface TrackingRepairPlan {
   image: string;
   current_regex: string;
   proposed_regex: string;
+  proposed_transform?: string;
   compose_diff: string;
   will_recreate: boolean;
   can_apply: boolean;
@@ -578,6 +579,7 @@ export interface RetagPlanDigestPinUpdate {
   label_key: string;
   label_value: string;
   label_rewrites: RetagPlanLabelRewrite[];
+  transform_label_value?: string;
   digest_provenance?: DigestTagProvenance | null;
 }
 
@@ -592,6 +594,7 @@ export interface RetagPlanTagUpdate {
   label_key: string;
   label_value: string;
   label_rewrites: RetagPlanLabelRewrite[];
+  transform_label_value?: string;
 }
 
 export interface RetagPlanStack {

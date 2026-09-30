@@ -65,7 +65,7 @@ const updateCount = computed(() => items.value.filter((item) => item.wud_update_
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase();
   return items.value.filter((item) => {
-    if (filter.value === "attention" && !["frozen", "digest-pinned", "custom", "no-image", "image-unresolved"].includes(item.tracking_health)) return false;
+    if (filter.value === "attention" && !["frozen", "needs-transform", "digest-pinned", "custom", "no-image", "image-unresolved"].includes(item.tracking_health)) return false;
     if (filter.value === "update" && item.wud_update_available !== true) return false;
     if (filter.value === "untracked" && item.wud_match_state !== "untracked") return false;
     if (filter.value === "unknown" && !hasUnknownWudStatus(item)) return false;
@@ -79,9 +79,13 @@ const canPreview = computed(() =>
   !["digest-pinned", "no-image", "image-unresolved"].includes(selected.value?.tracking_health ?? "") &&
   Boolean(editor.value.trim()) &&
   patternGuide.value?.matches(selected.value?.current_tag ?? "") === true &&
-  editor.value.trim() !== selected.value?.tracking_regex,
+  (editor.value.trim() !== selected.value?.tracking_regex || selected.value?.tracking_health === "needs-transform"),
 );
-const sameAsCurrent = computed(() => Boolean(editor.value.trim()) && editor.value.trim() === selected.value?.tracking_regex);
+const sameAsCurrent = computed(() =>
+  Boolean(editor.value.trim()) &&
+  editor.value.trim() === selected.value?.tracking_regex &&
+  selected.value?.tracking_health !== "needs-transform",
+);
 const patternGuide = computed(() => explainTrackingPattern(editor.value.trim(), selected.value?.current_tag));
 const sampleMatch = computed(() => patternGuide.value?.matches(sampleTag.value) ?? null);
 const samplePlaceholder = computed(() => {
@@ -143,7 +147,7 @@ function dateLabel(value: string): string {
 }
 
 function trackingTagType(item: TrackedContainerItem): "warning" | "error" | "success" | "default" {
-  if (item.tracking_health === "frozen") return "error";
+  if (["frozen", "needs-transform"].includes(item.tracking_health)) return "error";
   if (["digest-pinned", "custom", "no-image", "image-unresolved"].includes(item.tracking_health)) return "warning";
   if (item.tracking_health === "version-pattern") return "success";
   return "default";
@@ -152,6 +156,7 @@ function trackingTagType(item: TrackedContainerItem): "warning" | "error" | "suc
 function trackingLabel(item: TrackedContainerItem): string {
   return {
     frozen: "Frozen filter",
+    "needs-transform": "Needs transform",
     "exact-tag": "Exact tag",
     "digest-pinned": "Digest pinned",
     "version-pattern": "Version pattern",
@@ -262,7 +267,7 @@ async function apply(): Promise<void> {
         <div><span>Last image recorded</span><strong>{{ dateLabel(selected.last_image_recorded_at) }}</strong></div>
         <div><span>Last WUDup action</span><strong>{{ dateLabel(selected.last_action_at) }}<template v-if="selected.last_action_status"> · {{ selected.last_action_status }}</template></strong></div>
       </div>
-      <p class="tracked-diagnosis"><AlertTriangle v-if="selected.tracking_health === 'frozen'" :size="16" aria-hidden="true" />{{ selected.tracking_detail }}</p>
+      <p class="tracked-diagnosis"><AlertTriangle v-if="selected.tracking_health === 'frozen' || selected.tracking_health === 'needs-transform'" :size="16" aria-hidden="true" />{{ selected.tracking_detail }}</p>
       <div class="tracked-regex"><span>Current WUD tag filter</span><code>{{ selected.tracking_regex || "(none)" }}</code></div>
       <div v-if="selected.wud" class="tracked-wud"><span>WUD observed {{ selected.wud.local_tag || "unknown tag" }}</span><span v-if="selected.wud_update_available">Candidate {{ selected.wud.remote_tag || selected.wud.remote_digest }} · {{ selected.wud.update_kind || "update" }}</span><span v-if="selected.wud.error">{{ selected.wud.error }}</span></div>
       <nav class="tracked-links" aria-label="Related workflows">

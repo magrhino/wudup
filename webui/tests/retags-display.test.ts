@@ -182,6 +182,13 @@ describe("retag display helpers", () => {
     expect(labelRewriteSummary({ ...update, label_rewrites: [] })).toBe(
       "No label rewrite",
     );
+    const transform = String.raw`^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5`;
+    expect(labelRewriteSummary({ ...tagUpdate, transform_label_value: transform })).toBe(
+      `wud.tag.transform: (not set) -> ${transform}`,
+    );
+    expect(labelRewriteSummary({ ...update, transform_label_value: transform })).toBe(
+      String.raw`wud.tag.include: ^latest$$ -> ^1\.1$$; ` + `wud.tag.transform: (not set) -> ${transform}`,
+    );
     expect(pluralize(1, "service")).toBe("1 service");
     expect(pluralize(2, "policy", "policies")).toBe("2 policies");
   });

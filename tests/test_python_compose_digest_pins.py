@@ -66,6 +66,152 @@ class ComposeDigestPinTests(ComposeRewriteTestCase):
         self.assertNotIn("wudup.resolved-tag", rendered)
         self.assertIn("image: repo/app:v1.33.2", rendered)
 
+    def test_retag_to_four_part_version_pattern_adds_wud_tag_transform(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:latest\n"
+            "    labels:\n"
+            "    - wud.tag.include=^latest$$\n"
+        )
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="4.0.19.2979-ls321"),
+            final_image="repo/app:4.0.19.2979-ls321",
+            marker="",
+            label_value=r"^\d+\.\d+\.\d+\.\d+-ls\d+$$",
+        )
+
+        rendered, applied = render_compose_retag_updates(
+            compose_file, (update,), config_transforms={}
+        )
+
+        self.assertIn(
+            r"- wud.tag.transform=^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$$ => $$1.$$2.$$3-$$4.$$5",
+            rendered,
+        )
+        self.assertEqual(
+            applied[0].added_transforms,
+            (("app", r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"),),
+        )
+
+    def test_retag_adds_wud_tag_transform_to_map_style_labels(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:latest\n"
+            "    labels:\n"
+            "      wud.tag.include: ^latest$$\n"
+        )
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="v5.26.2.10099"),
+            final_image="repo/app:v5.26.2.10099",
+            marker="",
+            label_value=r"^v\d+(?:\.\d+)+$$",
+        )
+
+        rendered, _applied = render_compose_retag_updates(
+            compose_file, (update,), config_transforms={}
+        )
+
+        self.assertIn(
+            r"wud.tag.transform: ^v(\d+)\.(\d+)\.(\d+)\.(\d+)$$ => $$1.$$2.$$3-$$4",
+            rendered,
+        )
+        self.assertNotIn("- wud.tag.transform", rendered)
+
+    def test_digest_pin_exact_filter_and_custom_transform_skip_managed_transform(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:4.0.9.2244-ls257\n"
+            "    labels:\n"
+            "    - wud.tag.include=^4\\.0\\.9\\.2244-ls257$$\n"
+        )
+        rendered, _applied = render_compose_digest_pins(
+            compose_file,
+            (self.digest_pin_update(old_image="repo/app:4.0.9.2244-ls257", resolved_tag="4.0.19.2979-ls321"),),
+        )
+        self.assertNotIn("wud.tag.transform", rendered)
+
+        compose_file.write_text(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:latest\n"
+            "    labels:\n"
+            "    - wud.tag.include=^latest$$\n"
+            "    - wud.tag.transform=^custom$$ => $$0\n",
+            encoding="utf-8",
+        )
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="4.0.19.2979-ls321"),
+            final_image="repo/app:4.0.19.2979-ls321",
+            marker="",
+            label_value=r"^\d+\.\d+\.\d+\.\d+-ls\d+$$",
+        )
+        rendered, _applied = render_compose_retag_updates(
+            compose_file, (update,), config_transforms={"app": "^custom$ => $0"}
+        )
+        self.assertEqual(rendered.count("wud.tag.transform="), 1)
+        self.assertIn("- wud.tag.transform=^custom$$ => $$0", rendered)
+
+    def test_retag_transform_is_opt_in_and_follows_resolved_config(self) -> None:
+        source = (
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:latest\n"
+            "    labels:\n"
+            "    - wud.tag.include=^latest$$\n"
+        )
+        compose_file = self.write_compose(source)
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="4.0.19.2979-ls321"),
+            final_image="repo/app:4.0.19.2979-ls321",
+            marker="",
+            label_value=r"^\d+\.\d+\.\d+\.\d+-ls\d+$$",
+        )
+
+        # Digest-pin and CLI callers never pass config transforms, so nothing undisclosed is added.
+        rendered, applied = render_compose_retag_updates(compose_file, (update,))
+        self.assertNotIn("wud.tag.transform", rendered)
+        self.assertEqual(applied[0].added_transforms, ())
+
+        # An inherited (extends) transform shows only in resolved config; keep it.
+        rendered, applied = render_compose_retag_updates(
+            compose_file, (update,), config_transforms={"app": "^inherited$ => $0"}
+        )
+        self.assertNotIn("wud.tag.transform", rendered)
+        self.assertEqual(applied[0].added_transforms, ())
+
+        # A raw label that resolves empty (unset variable) must not be overwritten.
+        compose_file.write_text(
+            source + "    - wud.tag.transform=${WUD_TRANSFORM}\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ComposeTagRewriteError, "wud.tag.transform"):
+            render_compose_retag_updates(compose_file, (update,), config_transforms={"app": ""})
+
+    def test_retag_does_not_overwrite_explicitly_empty_transform_label(self) -> None:
+        update = replace(
+            self.digest_pin_update(old_image="repo/app:latest", resolved_tag="4.0.19.2979-ls321"),
+            final_image="repo/app:4.0.19.2979-ls321",
+            marker="",
+            label_value=r"^\d+\.\d+\.\d+\.\d+-ls\d+$$",
+        )
+        sources = (
+            "    labels:\n    - wud.tag.include=^latest$$\n    - wud.tag.transform=\n",
+            "    labels:\n    - wud.tag.include=^latest$$\n    - wud.tag.transform\n",
+            '    labels:\n      wud.tag.include: ^latest$$\n      wud.tag.transform: ""\n',
+            "    labels:\n      wud.tag.include: ^latest$$\n      wud.tag.transform:\n",
+        )
+        for labels in sources:
+            with self.subTest(labels=labels):
+                compose_file = self.write_compose(
+                    "services:\n  app:\n    image: repo/app:latest\n" + labels
+                )
+                with self.assertRaisesRegex(ComposeTagRewriteError, "wud.tag.transform"):
+                    render_compose_retag_updates(
+                        compose_file, (update,), config_transforms={"app": ""}
+                    )
+
     def test_render_retag_clears_conflicting_resolved_tag_markers(self) -> None:
         compose_file = self.write_compose(
             "services:\n"

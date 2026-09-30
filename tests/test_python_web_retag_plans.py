@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
+from wudup import web_retags
 from wudup.compose import ComposeStack
 from wudup.digest_provenance import DigestTagProvenance
-from wudup.updater_models import DigestPinUpdate
+from wudup.updater_models import AppliedDigestPinUpdate, DigestPinUpdate
 from wudup.web_models import RetagPlanIssue, RetagPlanResponse
 from wudup.web_retag_identity import retag_target_id
 from wudup.web_retag_plans import (
@@ -77,6 +78,24 @@ def test_retag_plan_helpers_render_ordered_stacks_and_stable_ids(
         updates=(replace(running, allow_start=True),),
         compose_hashes={"alpha": "1"},
     )
+
+
+def test_retag_plan_discloses_added_wud_tag_transform(tmp_path: Path) -> None:
+    item = _update(tmp_path, stack_index=1, stack_name="arr", service="sonarr")
+    transform = r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"
+    applied = AppliedDigestPinUpdate(
+        **{field.name: getattr(item.update, field.name) for field in fields(item.update)},
+        replacements=1,
+        added_transforms=(("sonarr", transform), ("other", "ignored")),
+    )
+
+    disclosed = web_retags._retag_update_with_label_rewrites(item, applied)
+    stack = retag_plan_stacks((disclosed,))[0]
+
+    assert disclosed.transform_label_value == transform
+    assert stack.tag_updates[0].transform_label_value == transform
+    assert stack.digest_pin_updates[0].transform_label_value == transform
+    assert retag_plan_stacks((item,))[0].tag_updates[0].transform_label_value == ""
 
 
 def test_retag_plan_status_reports_empty_and_blocked_states(

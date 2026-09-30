@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 
 from .compose import ComposeStack
+from .compose_rewrite import WUD_TAG_TRANSFORM_LABEL, compose_unescape_dollars
 from .digest_provenance import DigestTagProvenance
 from .updater_models import DigestPinUpdate
 from .web_models import (
@@ -35,6 +36,7 @@ class RetagPlanUpdate:
     allow_start: bool = False
     known_image_service_key_ambiguous: bool = False
     label_rewrites: tuple[RetagPlanLabelRewrite, ...] = ()
+    transform_label_value: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,17 @@ class RetagPlanBuild:
 
 def retag_update_identity(item: RetagPlanUpdate) -> str:
     return item.target_id
+
+
+def retag_config_transforms(stack: ComposeStack) -> dict[str, str]:
+    """Each service's wud.tag.transform as resolved by Compose config (extends, variables)."""
+
+    return {
+        service_image.service: compose_unescape_dollars(
+            dict(service_image.labels).get(WUD_TAG_TRANSFORM_LABEL, "")
+        )
+        for service_image in stack.service_images
+    }
 
 
 def retag_update_service(item: RetagPlanUpdate) -> str:
@@ -126,6 +139,7 @@ def retag_plan_digest_update(
         label_key=update.label_key,
         label_value=update.label_value,
         label_rewrites=list(item.label_rewrites),
+        transform_label_value=item.transform_label_value,
         digest_provenance=asdict(item.provenance),
     )
 
@@ -145,6 +159,7 @@ def retag_plan_tag_update(
         label_key=update.label_key,
         label_value=update.label_value,
         label_rewrites=list(item.label_rewrites),
+        transform_label_value=item.transform_label_value,
     )
 
 
@@ -182,6 +197,8 @@ def retag_plan_id(
                 "final_image": item.update.final_image,
                 "digest_pin": item.digest_pin,
                 "label_value": item.update.label_value,
+                # Decided from resolved Compose config, which compose_hashes do not cover.
+                "transform_label_value": item.transform_label_value,
                 "provenance": asdict(item.provenance),
                 "runtime_state": item.runtime_state,
                 "allow_start": item.allow_start,
