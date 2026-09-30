@@ -105,6 +105,11 @@ def test_inventory_includes_compose_service_without_wud(
         ("2.33.5-distroless", r"^2\.33\.5-distroless$", "frozen", r"^\d+\.\d+\.\d+-distroless$"),
         ("2.7-alpine", r"^2\.7-alpine$", "frozen", r"^2(?:\.\d+)+-alpine$"),
         ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
+        ("2026-07-24", r"^2026-07-24$", "frozen", r"^\d+-\d+-\d+$"),
+        ("2026-07-24-r1", r"^2026-07-24-r1$", "frozen", r"^\d+-\d+-\d+-r\d+$"),
+        ("2026-06-07-b2", r"^2026-06-07-b2$", "frozen", r"^\d+-\d+-\d+-b\d+$"),
+        ("2026-07-24-r1", r"^\d{4}-\d{2}-\d{2}-r[1-9]\d*$", "custom", r"^\d+-\d+-\d+-r\d+$"),
+        ("2026-07-24-r1", r"^\d+-\d+-\d+-r\d+$", "version-pattern", ""),
     ],
 )
 def test_inventory_distinguishes_exact_channels_from_version_releases(
@@ -340,10 +345,29 @@ def test_alpine_repair_preview_accepts_major_pinned_suggestion(tmp_path: Path) -
     assert compose_path.read_bytes() == original
 
 
+def test_date_release_repair_preview_accepts_suggestion(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag="2026-07-24-r1", regex=r"^2026-07-24-r1$"
+    )
+    original = compose_path.read_bytes()
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["suggested_regex"] == r"^\d+-\d+-\d+-r\d+$"
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": item["target_id"], "regex": item["suggested_regex"]},
+        headers=_csrf_headers(client),
+    )
+    assert response.status_code == 200
+    assert response.json()["can_apply"] is True
+    assert compose_path.read_bytes() == original
+
+
 @pytest.mark.parametrize(
     ("tag", "release_shaped"),
     [("v1.2", True), ("1.2.3", True), ("v1.2.3rc", True),
-     ("v1.2.3..foo", True), ("v1.2._foo", False), ("latest", False)],
+     ("v1.2.3..foo", True), ("v1.2._foo", False), ("latest", False),
+     ("2026-07-24", True), ("2026-07-24-r1", True), ("2026-07-24-b2", True),
+     ("2026-07-245", False), ("2026-7-24", False), ("20260724", False)],
 )
 def test_release_shape_keeps_dotted_suffix_rules(tag: str, release_shaped: bool) -> None:
     assert web_tracking._release_shaped_tag(tag) is release_shaped

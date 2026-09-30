@@ -26,7 +26,9 @@ async function rejectStaticDemoMutationAsync(): Promise<never> {
 }
 
 function demoSuggestedTrackingRegex(tag: string): string {
-  if (!/^v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(tag)) return "";
+  const dottedRelease = /^v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+  const dateRelease = /^\d{4}-\d{2}-\d{2}(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+  if (!dottedRelease.test(tag) && !dateRelease.test(tag)) return "";
   const alpineVersion = /^(v?\d+)(?:\.\d+)+-alpine$/.exec(tag);
   if (alpineVersion) return `^${alpineVersion[1]}(?:\\.\\d+)+-alpine$`;
   if (/^v?\d+(?:\.\d+)+$/.test(tag)) {

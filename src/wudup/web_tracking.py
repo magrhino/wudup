@@ -62,7 +62,7 @@ from .web_request_context import request_settings as _settings
 # A deliberately small JS/Python-common subset. It prevents catastrophic regexes,
 # lookarounds, backreferences, and syntax that WUD might interpret differently.
 _REGEX_TOKEN = re.compile(r"(?:[A-Za-z0-9_-]|\\\.|\\d\+|\(\?:\\\.\\d\+\)\+)")
-_RELEASE_PREFIX = re.compile(r"v?\d+\.\d+", re.ASCII)
+_RELEASE_PREFIX = re.compile(r"v?\d+\.\d+|\d{4}-\d{2}-\d{2}", re.ASCII)
 _DIGEST_MARKER = "@sha256:"
 
 
