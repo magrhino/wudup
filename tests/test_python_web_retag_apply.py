@@ -133,6 +133,92 @@ def test_retag_selected_tag_tracks_numeric_tag_shape(tmp_path: Path) -> None:
     assert r"wud.tag.include=^v\d+(?:\.\d+)+$$" in content
 
 
+def test_retag_to_four_part_tag_previews_writes_and_audits_wud_tag_transform(
+    tmp_path: Path,
+) -> None:
+    transform = r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+        resolved_tag="4.0.19.2979-ls321",
+    )
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+
+    update = plan["stacks"][0]["tag_updates"][0]
+    assert update["label_value"] == r"^\d+\.\d+\.\d+\.\d+-ls\d+$$"
+    assert update["transform_label_value"] == transform
+
+    response = _apply_retag_plan(fixture.client, headers, plan)
+
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "success"
+    content = (fixture.compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "wud.tag.transform=" + transform.replace("$", "$$") in content
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        run = conn.execute(
+            "SELECT metadata_json FROM update_runs WHERE id = ?", (job["run_id"],)
+        ).fetchone()
+        event = conn.execute(
+            "SELECT metadata_json FROM update_events WHERE run_id = ?", (job["run_id"],)
+        ).fetchone()
+    assert json.loads(run["metadata_json"])["tag_updates"][0]["transform_label_value"] == transform
+    assert json.loads(event["metadata_json"])["new_transform"] == transform
+
+
+def test_retag_keeps_inherited_transform_and_binds_it_to_the_plan(tmp_path: Path) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+        resolved_tag="4.0.19.2979-ls321",
+    )
+    headers = _csrf_headers(fixture.client)
+    ready_plan = _create_retag_plan(fixture.client, headers)
+    compose_file = fixture.compose_dir / "docker-compose.yml"
+    original = compose_file.read_bytes()
+    # Resolved Compose config shows an inherited (extends/.env) transform the raw file lacks.
+    config = fixture.fake_root / "stacks" / "stack" / "config_json"
+    config.write_text(
+        json.dumps({
+            "name": "stack",
+            "services": {"app": {
+                "image": "repo/app@sha256:old",
+                "labels": {
+                    "wud.tag.include": "^latest$$",
+                    "wud.tag.transform": "^inherited$$ => $$0",
+                },
+            }},
+        }),
+        encoding="utf-8",
+    )
+
+    inherited_plan = _create_retag_plan(fixture.client, headers)
+
+    assert ready_plan["stacks"][0]["tag_updates"][0]["transform_label_value"]
+    assert inherited_plan["stacks"][0]["tag_updates"][0]["transform_label_value"] == ""
+    assert inherited_plan["plan_id"] != ready_plan["plan_id"]
+    stale = _apply_retag_plan(fixture.client, headers, ready_plan)
+    assert stale.status_code == 202
+    stale_job = _wait_apply_job(fixture.client, stale.json()["job_id"])
+    assert stale_job["status"] == "failure"
+    assert stale_job["error"] == "retag apply failed: retag plan is stale"
+    assert compose_file.read_bytes() == original
+
+    response = _apply_retag_plan(fixture.client, headers, inherited_plan)
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "success"
+    assert "wud.tag.transform" not in compose_file.read_text(encoding="utf-8")
+
+
 def test_retag_digest_pin_setting_preserves_digest_rewrites(tmp_path: Path) -> None:
     fixture = _make_retag_fixture(
         tmp_path,

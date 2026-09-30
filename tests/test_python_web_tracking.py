@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import replace
@@ -115,6 +116,207 @@ def test_inventory_distinguishes_exact_channels_from_version_releases(
 
     assert item["tracking_health"] == health
     assert item["suggested_regex"] == suggested
+
+
+_LSIO_FOUR_PART_TAG = "4.0.19.2979-ls321"
+_LSIO_FOUR_PART_REGEX = r"^\d+\.\d+\.\d+\.\d+-ls\d+$"
+_LSIO_FOUR_PART_TRANSFORM = r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"
+
+
+@pytest.mark.parametrize(
+    ("tag", "transform"),
+    [
+        ("4.0.19.2979-ls321", r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"),
+        ("v5.26.2.10099", r"^v(\d+)\.(\d+)\.(\d+)\.(\d+)$ => $1.$2.$3-$4"),
+        ("1.6.2-ls366", ""),
+        ("v1.36.2", ""),
+        ("4.0.19.2979-ls321-rc", ""),
+    ],
+)
+def test_managed_wud_tag_transform_only_targets_four_part_versions(tag: str, transform: str) -> None:
+    assert compose_rewrite.managed_wud_tag_transform(tag) == transform
+
+
+def test_inventory_flags_four_part_pattern_without_wud_tag_transform(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag=_LSIO_FOUR_PART_TAG, regex=_LSIO_FOUR_PART_REGEX
+    )
+
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+
+    assert item["tracking_health"] == "needs-transform"
+    assert item["tracking_regex"] == _LSIO_FOUR_PART_REGEX
+
+    compose_path.write_text(
+        compose_path.read_text(encoding="utf-8")
+        + "      - wud.tag.transform=^custom$$ => $$0\n",
+        encoding="utf-8",
+    )
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["tracking_health"] == "version-pattern"
+
+
+def test_repair_adds_wud_tag_transform_when_pattern_is_already_set(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag=_LSIO_FOUR_PART_TAG, regex=_LSIO_FOUR_PART_REGEX
+    )
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": _LSIO_FOUR_PART_REGEX}
+
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers)
+
+    assert preview.status_code == 200
+    plan = preview.json()
+    assert plan["can_apply"] is True
+    assert plan["proposed_transform"] == _LSIO_FOUR_PART_TRANSFORM
+    assert plan["compose_diff"].splitlines() == [
+        "wud.tag.transform:", "- (not set)", f"+ (set) {_LSIO_FOUR_PART_TRANSFORM}",
+    ]
+    apply = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": plan["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+    assert apply.status_code == 202
+    job = _wait_apply_job(client, apply.json()["job_id"])
+    assert job["status"] == "success", job["error"]
+    assert (
+        "wud.tag.transform=" + _LSIO_FOUR_PART_TRANSFORM.replace("$", "$$")
+        in compose_path.read_text(encoding="utf-8")
+    )
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        metadata = conn.execute(
+            "SELECT metadata_json FROM update_events WHERE run_id = ?", (job["run_id"],)
+        ).fetchone()["metadata_json"]
+    assert '"new_transform"' in metadata
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["tracking_health"] == "version-pattern"
+    again = client.post("/api/v1/tracking-repairs", json=payload, headers=headers)
+    assert again.status_code == 422
+
+
+def _write_resolved_config(fake_root: Path, *, tag: str, labels: dict[str, str]) -> Path:
+    """Fake `docker compose config` output that differs from the raw file (extends, .env)."""
+
+    path = fake_root / "stacks" / "bindery" / "config_json"
+    path.write_text(
+        json.dumps({
+            "name": "bindery",
+            "services": {"bindery": {"image": f"repo/bindery:{tag}", "labels": labels}},
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_repair_keeps_transform_inherited_from_resolved_compose_config(tmp_path: Path) -> None:
+    raw_regex = r"^4\.0\.19\.2979-ls321$"
+    client, fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag=_LSIO_FOUR_PART_TAG, regex=raw_regex
+    )
+    # The service inherits its transform (e.g. via extends), so it appears only in
+    # resolved Compose config, dollar-escaped as `docker compose config` prints it.
+    _write_resolved_config(fake_root, tag=_LSIO_FOUR_PART_TAG, labels={
+        "wud.tag.include": raw_regex.replace("$", "$$"),
+        "wud.tag.transform": "^inherited$$ => $$0",
+    })
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["tracking_health"] == "frozen"
+    headers = _csrf_headers(client)
+    payload = {"target_id": item["target_id"], "regex": _LSIO_FOUR_PART_REGEX}
+
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers)
+
+    assert preview.status_code == 200
+    plan = preview.json()
+    assert plan["proposed_transform"] == ""
+    assert "wud.tag.transform" not in plan["compose_diff"]
+    apply = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": plan["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+    job = _wait_apply_job(client, apply.json()["job_id"])
+    assert job["status"] == "success", job["error"]
+    content = compose_path.read_text(encoding="utf-8")
+    assert "wud.tag.transform" not in content
+    assert "wud.tag.include=" + _LSIO_FOUR_PART_REGEX.replace("$", "$$") in content
+
+
+def test_repair_plan_goes_stale_when_resolved_transform_changes(tmp_path: Path) -> None:
+    raw_regex = r"^4\.0\.19\.2979-ls321$"
+    client, fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag=_LSIO_FOUR_PART_TAG, regex=raw_regex
+    )
+    config = _write_resolved_config(fake_root, tag=_LSIO_FOUR_PART_TAG, labels={
+        "wud.tag.include": raw_regex.replace("$", "$$"),
+        "wud.tag.transform": "^inherited$$ => $$0",
+    })
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": _LSIO_FOUR_PART_REGEX}
+    inherited_plan = client.post("/api/v1/tracking-repairs", json=payload, headers=headers).json()
+    original = compose_path.read_bytes()
+
+    # The base file or .env drops the inherited transform; the Compose file is unchanged.
+    config.unlink()
+    current_plan = client.post("/api/v1/tracking-repairs", json=payload, headers=headers).json()
+    response = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": inherited_plan["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+
+    assert inherited_plan["source_hash"] == current_plan["source_hash"]
+    assert current_plan["proposed_transform"] == _LSIO_FOUR_PART_TRANSFORM
+    assert current_plan["plan_id"] != inherited_plan["plan_id"]
+    assert response.status_code == 409
+    assert compose_path.read_bytes() == original
+
+
+def test_tracking_label_writer_rejects_unexpected_transform(tmp_path: Path) -> None:
+    compose_path = tmp_path / "compose.yml"
+    compose_path.write_text(
+        f"services:\n  app:\n    image: repo/app:{_LSIO_FOUR_PART_TAG}\n    labels:\n"
+        "      - wud.tag.transform=${WUD_TRANSFORM}\n",
+        encoding="utf-8",
+    )
+
+    # The variable resolves empty, so a transform would be planned over the raw label.
+    with pytest.raises(ComposeTagRewriteError, match="wud.tag.transform"):
+        compose_rewrite.render_compose_tracking_label(
+            compose_path, "app", f"repo/app:{_LSIO_FOUR_PART_TAG}", "", _LSIO_FOUR_PART_REGEX,
+        )
+    rendered = compose_rewrite.render_compose_tracking_label(
+        compose_path, "app", f"repo/app:{_LSIO_FOUR_PART_TAG}", "", _LSIO_FOUR_PART_REGEX,
+        expected_transform="^resolved$ => $0",
+    )
+    assert rendered.count("wud.tag.transform=") == 1
+    assert "wud.tag.transform=${WUD_TRANSFORM}" in rendered
+
+
+def test_frozen_four_part_repair_adds_include_and_transform(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag=_LSIO_FOUR_PART_TAG, regex=r"^4\.0\.19\.2979-ls321$"
+    )
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["tracking_health"] == "frozen"
+    assert item["suggested_regex"] == _LSIO_FOUR_PART_REGEX
+    original = compose_path.read_bytes()
+
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": item["target_id"], "regex": item["suggested_regex"]},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["compose_diff"].splitlines() == [
+        "wud.tag.include:", r"- (set) ^4\.0\.19\.2979-ls321$", f"+ (set) {_LSIO_FOUR_PART_REGEX}",
+        "wud.tag.transform:", "- (not set)", f"+ (set) {_LSIO_FOUR_PART_TRANSFORM}",
+    ]
+    assert compose_path.read_bytes() == original
 
 
 def test_suggested_regex_rejects_oversized_compose_tag_before_release_match() -> None:

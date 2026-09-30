@@ -208,6 +208,8 @@ def _finish_retag_audit_run(
                     and not item.known_image_service_key_ambiguous
                 ),
             }
+            if item.transform_label_value:
+                event_metadata["new_transform"] = item.transform_label_value
             if item_status == "success" and item.known_image_service_key_ambiguous:
                 event_metadata["known_image_skip_reason"] = (
                     "duplicate service_key"

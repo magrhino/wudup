@@ -257,6 +257,8 @@ class AppliedTagUpdate(TagUpdate):
 class AppliedDigestPinUpdate(DigestPinUpdate):
     replacements: int
     label_rewrites: tuple[DigestPinLabelRewrite, ...] = ()
+    # (service, wud.tag.transform) pairs added beside a version-pattern include.
+    added_transforms: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

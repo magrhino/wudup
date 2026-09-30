@@ -68,7 +68,11 @@ RESOLVED_TAG_MARKER_PREFIXES = (
     LEGACY_DIGEST_PIN_MARKER_PREFIX,
 )
 WUD_TAG_INCLUDE_LABEL = "wud.tag.include"
+WUD_TAG_TRANSFORM_LABEL = "wud.tag.transform"
 _JS_REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
+# WUD parses tags with loose semver, which misreads 4.0.19.2979-ls321 as
+# 4.0.1-9.2979-ls321 and ranks older 4.0.9.x tags above it.
+_FOUR_PART_VERSION_TAG_RE = re.compile(r"(v?)\d+\.\d+\.\d+\.\d+(-ls\d+)?", re.ASCII)
 
 
 def _require_update_services(old_image: str, services: Sequence[str]) -> None:
@@ -522,6 +526,7 @@ def apply_compose_retag_updates(
     stack_name: str = "",
     written_hashes: list[str] | None = None,
     expected_source_hash: str | None = None,
+    config_transforms: Mapping[str, str] | None = None,
 ) -> tuple[AppliedDigestPinUpdate, ...]:
     """Write retagged images plus exact WUD tag tracking metadata."""
 
@@ -530,6 +535,7 @@ def apply_compose_retag_updates(
         compose_path,
         updates,
         stack_name=stack_name,
+        config_transforms=config_transforms,
     )
     if updates and not rendered:
         raise ComposeTagRewriteError("Compose retag rewrite produced no output.")
@@ -589,13 +595,19 @@ def render_compose_retag_updates(
     updates: Sequence[DigestPinUpdate],
     *,
     stack_name: str = "",
+    config_transforms: Mapping[str, str] | None = None,
 ) -> tuple[str, tuple[AppliedDigestPinUpdate, ...]]:
-    """Return Compose YAML with tag retags and WUD watch metadata applied."""
+    """Return Compose YAML with tag retags and WUD watch metadata applied.
+
+    ``config_transforms`` maps each service to its resolved ``wud.tag.transform``;
+    only when it is given are managed transforms added beside version patterns.
+    """
 
     return _render_compose_retag_updates(
         compose_path,
         updates,
         stack_name=stack_name,
+        config_transforms=config_transforms,
     )
 
 
@@ -606,6 +618,7 @@ def _render_compose_retag_updates(
     label_rewrite_approvals: Sequence[DigestPinLabelRewriteApproval] = (),
     tag_stream_updates: Sequence[TagStreamUpdate] = (),
     stack_name: str = "",
+    config_transforms: Mapping[str, str] | None = None,
 ) -> tuple[str, tuple[AppliedDigestPinUpdate, ...]]:
 
     if not updates:
@@ -615,6 +628,7 @@ def _render_compose_retag_updates(
     line_offsets = _line_start_offsets(source)
     counts = {id(update): 0 for update in updates}
     label_rewrites = {id(update): [] for update in updates}
+    added_transforms: dict[int, list[tuple[str, str]]] = {id(update): [] for update in updates}
     seen_spans: set[tuple[int, int]] = set()
     stream_by_service = _tag_stream_updates_by_service(
         compose_path,
@@ -668,6 +682,16 @@ def _render_compose_retag_updates(
                 update.label_key,
                 next_label_value,
             )
+            if config_transforms is not None:
+                added_transform = _add_managed_wud_tag_transform(
+                    service_config,
+                    service,
+                    update.watch_tag,
+                    compose_unescape_dollars(next_label_value),
+                    config_transforms.get(service, ""),
+                )
+                if added_transform:
+                    added_transforms[id(update)].append((service, added_transform))
             service_config["image"] = update.final_image
             _update_service_resolved_tag_marker(
                 services,
@@ -698,6 +722,7 @@ def _render_compose_retag_updates(
             services=update.services,
             replacements=counts[id(update)],
             label_rewrites=tuple(label_rewrites[id(update)]),
+            added_transforms=tuple(added_transforms[id(update)]),
         )
         for update in updates
     )
@@ -1205,6 +1230,7 @@ def render_compose_tracking_label(
     proposed_regex: str,
     *,
     expected_source_hash: str | None = None,
+    expected_transform: str = "",
 ) -> str:
     """Preview a single service's WUD tracking-label change without touching its image."""
 
@@ -1239,6 +1265,9 @@ def render_compose_tracking_label(
         WUD_TAG_INCLUDE_LABEL,
         compose_escape_dollars(proposed_regex),
     )
+    _add_managed_wud_tag_transform(
+        service_config, service, image_tag(expected_image), proposed_regex, expected_transform
+    )
     return _dump_compose_yaml(yaml, parsed)
 
 
@@ -1250,15 +1279,64 @@ def apply_compose_tracking_label(
     proposed_regex: str,
     *,
     expected_source_hash: str | None = None,
+    expected_transform: str = "",
 ) -> None:
     rendered = render_compose_tracking_label(
         compose_path, service, expected_image, expected_label, proposed_regex,
         expected_source_hash=expected_source_hash,
+        expected_transform=expected_transform,
     )
     _atomic_replace_compose(
         compose_path, rendered, prefix="tracking-repair",
         expected_source_hash=expected_source_hash,
     )
+
+
+def managed_wud_tag_transform(tag: str) -> str:
+    """Return the WUD transform that keeps a four-part version tag ordered numerically."""
+
+    match = _FOUR_PART_VERSION_TAG_RE.fullmatch(tag)
+    if match is None:
+        return ""
+    prefix = match.group(1)
+    if match.group(2):
+        return rf"^{prefix}(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"
+    return rf"^{prefix}(\d+)\.(\d+)\.(\d+)\.(\d+)$ => $1.$2.$3-$4"
+
+
+def planned_wud_tag_transform(tag: str, include_regex: str, current_transform: str) -> str:
+    """Return the transform to add beside a version-pattern include, or ""; never replaces one."""
+
+    if current_transform or not include_regex or include_regex == exact_tags_regex((tag,)):
+        return ""
+    return managed_wud_tag_transform(tag)
+
+
+def _add_managed_wud_tag_transform(
+    service_config: CommentedMap,
+    service: str,
+    tag: str,
+    include_regex: str,
+    config_transform: str,
+) -> str:
+    """Add the planned transform, deciding from the resolved Compose config value.
+
+    The config value includes inherited (extends) and interpolated labels that the
+    service's own YAML may lack, so it is what WUD actually sees.
+    """
+
+    transform = planned_wud_tag_transform(tag, include_regex, config_transform)
+    if not transform:
+        return ""
+    if _get_service_label_value(service_config, WUD_TAG_TRANSFORM_LABEL):
+        raise ComposeTagRewriteError(
+            f"Service {service} has a wud.tag.transform label that resolves to an empty "
+            "value (it may use an unset variable); set or remove it in Compose, then preview again."
+        )
+    _set_service_label_value(
+        service_config, WUD_TAG_TRANSFORM_LABEL, compose_escape_dollars(transform)
+    )
+    return transform
 
 
 def js_regex_escape(value: str) -> str:

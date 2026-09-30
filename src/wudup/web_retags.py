@@ -81,6 +81,7 @@ from .web_retag_plans import (
 from .web_retag_plans import (
     retag_compose_hashes as _compose_hashes,
 )
+from .web_retag_plans import retag_config_transforms
 from .web_retag_plans import (
     retag_plan_id as _retag_plan_id,
 )
@@ -832,16 +833,19 @@ def _preview_retag_stack(
     issues: list[RetagPlanIssue] = []
     updated: list[_RetagPlanUpdate] = []
     try:
-        renderer = (
-            render_compose_digest_pins
-            if stack_updates[0].digest_pin
-            else render_compose_retag_updates
-        )
-        _rendered, applied = renderer(
-            stack.directory / stack.file,
-            tuple(item.update for item in stack_updates),
-            stack_name=stack.name,
-        )
+        if stack_updates[0].digest_pin:
+            _rendered, applied = render_compose_digest_pins(
+                stack.directory / stack.file,
+                tuple(item.update for item in stack_updates),
+                stack_name=stack.name,
+            )
+        else:
+            _rendered, applied = render_compose_retag_updates(
+                stack.directory / stack.file,
+                tuple(item.update for item in stack_updates),
+                stack_name=stack.name,
+                config_transforms=retag_config_transforms(stack),
+            )
     except Exception as exc:  # noqa: BLE001 - renderer failures become preview issues.
         return [], _retag_preview_failed_issues(settings, stack, stack_updates, exc)
 
@@ -929,5 +933,8 @@ def _retag_update_with_label_rewrites(
                 reason=rewrite.reason,
             )
             for rewrite in applied_item.label_rewrites
+        ),
+        transform_label_value=dict(applied_item.added_transforms).get(
+            item.update.services[0] if item.update.services else "", ""
         ),
     )

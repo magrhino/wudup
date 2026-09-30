@@ -223,15 +223,14 @@ export function retagUpdateModeLabel(update: RetagPlanImageUpdate): string {
 }
 
 export function labelRewriteSummary(update: RetagPlanImageUpdate): string {
-  if (!update.label_rewrites.length) {
-    return "No label rewrite";
+  const changes = update.label_rewrites.map(
+    (rewrite) =>
+      `${rewrite.label_key}: ${rewrite.current_label_value} -> ${rewrite.proposed_label_value}`,
+  );
+  if (update.transform_label_value) {
+    changes.push(`wud.tag.transform: (not set) -> ${update.transform_label_value}`);
   }
-  return update.label_rewrites
-    .map(
-      (rewrite) =>
-        `${rewrite.label_key}: ${rewrite.current_label_value} -> ${rewrite.proposed_label_value}`,
-    )
-    .join("; ");
+  return changes.length ? changes.join("; ") : "No label rewrite";
 }
 
 export function pluralize(count: number, noun: string, plural = `${noun}s`): string {
