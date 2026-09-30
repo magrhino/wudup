@@ -107,6 +107,7 @@ def test_inventory_includes_compose_service_without_wud(
         ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
         ("2026-07-24", r"^2026-07-24$", "frozen", r"^\d+-\d+-\d+$"),
         ("2026-07-24-r1", r"^2026-07-24-r1$", "frozen", r"^\d+-\d+-\d+-r\d+$"),
+        ("2026-06-07-b2", r"^2026-06-07-b2$", "frozen", r"^\d+-\d+-\d+-b\d+$"),
         ("2026-07-24-r1", r"^\d{4}-\d{2}-\d{2}-r[1-9]\d*$", "custom", r"^\d+-\d+-\d+-r\d+$"),
         ("2026-07-24-r1", r"^\d+-\d+-\d+-r\d+$", "version-pattern", ""),
     ],

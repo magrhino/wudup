@@ -23,6 +23,23 @@ describe("demo web API", () => {
     }
   });
 
+  it("keeps date-release demo suggestions aligned with the backend rule", async () => {
+    const api = createDemoWebApi();
+    const targets = await api.retagTargets();
+    const target = targets.items[0]!;
+    const stub = vi.spyOn(DemoApiState.prototype, "retagTargets").mockReturnValue({
+      ...targets, count: 1,
+      items: [{ ...target, current_tag: "2026-07-24-r1", label_value: "^2026-07-24-r1$$" }],
+    });
+    try {
+      const item = (await api.trackedContainers()).items[0];
+      expect(item?.suggested_regex).toBe(String.raw`^\d+-\d+-\d+-r\d+$`);
+      expect(item?.tracking_health).toBe("frozen");
+    } finally {
+      stub.mockRestore();
+    }
+  });
+
   it("serves read-only sanitized fixture state", async () => {
     const api = createDemoWebApi();
 
