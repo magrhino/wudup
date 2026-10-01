@@ -14,8 +14,12 @@ _SCRIPT = """
 import importlib
 import pkgutil
 import sys
+from pathlib import Path
 
 import wudup
+
+if not Path(wudup.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()):
+    sys.exit(f"imported wudup from {wudup.__file__}, not {sys.argv[1]}")
 
 failures = []
 for info in sorted(pkgutil.iter_modules(wudup.__path__), key=lambda info: info.name):
@@ -39,7 +43,7 @@ class ModuleImportTests(unittest.TestCase):
         )
 
         result = subprocess.run(
-            [sys.executable, "-c", _SCRIPT],
+            [sys.executable, "-c", _SCRIPT, str(SRC)],
             capture_output=True,
             check=False,
             env=env,
