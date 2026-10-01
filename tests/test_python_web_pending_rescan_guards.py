@@ -137,12 +137,13 @@ def test_pending_rescan_records_unexpected_watch_failure_in_audit(
         raise RuntimeError("watch exploded")
 
     monkeypatch.setattr(web_wud_api, "watch_all", crash)
+    headers = _csrf_headers(client)
 
     with pytest.raises(RuntimeError, match="watch exploded"):
         client.post(
             "/api/v1/pending/rescan",
             json=rescan_payload(),
-            headers=_csrf_headers(client),
+            headers=headers,
         )
 
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
