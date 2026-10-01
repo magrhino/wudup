@@ -474,6 +474,17 @@ def test_apply_job_finishes_before_raising_private_copy_cleanup_error(
 
     monkeypatch.setattr(web_jobs, "UpdateFromWudRunner", FakeRunner)
     monkeypatch.setattr(web_jobs.tempfile.TemporaryDirectory, "cleanup", fail_cleanup)
+    condition = web_jobs.Condition()
+    run_context = web_jobs.ApplyJobRunContext(
+        pending_source_active="file",
+        pending_source_text="repo/app:latest\n",
+    )
+
+    def config_loader(active):
+        return active.config
+
+    def record_schedule_update(*_args, **_kwargs) -> None:
+        return None
 
     with pytest.raises(OSError, match="private copy cleanup failed"):
         web_jobs._run_apply_job(
@@ -486,14 +497,11 @@ def test_apply_job_finishes_before_raising_private_copy_cleanup_error(
             (),
             (),
             jobs,
-            web_jobs.Condition(),
+            condition,
             "job",
-            lambda settings: settings.config,
-            lambda *_args, **_kwargs: None,
-            web_jobs.ApplyJobRunContext(
-                pending_source_active="file",
-                pending_source_text="repo/app:latest\n",
-            ),
+            config_loader,
+            record_schedule_update,
+            run_context,
         )
 
     job = jobs["job"]
