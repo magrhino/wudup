@@ -31,7 +31,7 @@ def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     if not client_is_trusted_proxy(request, settings):
         return ""
     # Proxies that only set X-Forwarded-* pass a client's own Forwarded header
-    # through unchanged, so the X-Forwarded-* values win when present.
+    # through unchanged, so Forwarded is used only without X-Forwarded-*.
     proto = last_forwarded_header_value(
         request.headers.get("x-forwarded-proto", "")
     )
@@ -40,6 +40,8 @@ def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     )
     if proto and host:
         return normalize_origin(f"{proto}://{host}")
+    if proto or host:
+        return ""
     return origin_from_forwarded_header(request.headers.get("forwarded", ""))
 
 
@@ -59,11 +61,11 @@ def trusted_forwarded_client_address(
     if not client_is_trusted_proxy(request, settings):
         return ""
     # See trusted_forwarded_origin: X-Forwarded-For wins over Forwarded.
-    forwarded_for = normalize_forwarded_client_address(
-        last_forwarded_header_value(request.headers.get("x-forwarded-for", ""))
+    forwarded_for = last_forwarded_header_value(
+        request.headers.get("x-forwarded-for", "")
     )
     if forwarded_for:
-        return forwarded_for
+        return ip_address_or_empty(normalize_forwarded_client_address(forwarded_for))
     return client_address_from_forwarded_header(
         request.headers.get("forwarded", "")
     )
@@ -84,13 +86,16 @@ def client_address_from_forwarded_header(value: str) -> str:
     for segment in hop.split(";"):
         key, separator, raw = segment.strip().partition("=")
         if separator and key.lower() == "for":
-            address = normalize_forwarded_client_address(raw)
-            try:
-                ipaddress.ip_address(address)
-            except ValueError:
-                return ""
-            return address
+            return ip_address_or_empty(normalize_forwarded_client_address(raw))
     return ""
+
+
+def ip_address_or_empty(value: str) -> str:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return ""
+    return value
 
 
 def normalize_forwarded_client_address(value: str) -> str:
@@ -100,6 +105,9 @@ def normalize_forwarded_client_address(value: str) -> str:
     if raw.startswith("["):
         host, separator, _port = raw[1:].partition("]")
         return host if separator else raw
+    # A bare IPv6 address can end in ":<digits>"; it has no port to strip.
+    if ip_address_or_empty(raw):
+        return raw
     host, separator, port = raw.rpartition(":")
     if separator and port.isdigit():
         try:

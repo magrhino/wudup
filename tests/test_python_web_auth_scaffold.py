@@ -600,6 +600,54 @@ def test_trusted_forwarded_for_must_be_an_ip_address(tmp_path: Path) -> None:
     )
 
 
+def test_partial_x_forwarded_headers_disable_client_forwarded_fallback(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+    client_forwarded = f"for={_DOC_FORWARDED_CLIENT_ALT_V4};proto=https;host=evil.test"
+    proto_only = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": client_forwarded, "x-forwarded-proto": "https"},
+    )
+    unusable_forwarded_for = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": client_forwarded, "x-forwarded-for": "unknown"},
+    )
+
+    assert web_auth_module._trusted_forwarded_origin(proto_only, settings) == ""
+    assert web_auth_module._request_client_address(
+        unusable_forwarded_for, settings
+    ) == _DOC_PROXY_V4
+
+
+def test_forwarded_client_address_keeps_bare_ipv6_suffix(tmp_path: Path) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+
+    for header, value, expected in (
+        ("x-forwarded-for", "2001:db8::5:1234", "2001:db8::5:1234"),
+        ("x-forwarded-for", f"{_DOC_FORWARDED_CLIENT_V4}:4711", _DOC_FORWARDED_CLIENT_V4),
+        ("forwarded", 'for="2001:db8::5:1234"', "2001:db8::5:1234"),
+        ("forwarded", f"for={_DOC_FORWARDED_CLIENT_V4}:4711", _DOC_FORWARDED_CLIENT_V4),
+    ):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={header: value},
+        )
+        assert web_auth_module._request_client_address(request, settings) == expected
+
+
 def test_secure_cookie_auto_follows_effective_origin(tmp_path: Path) -> None:
     http_client = _client(tmp_path)
     https_client = _client(
