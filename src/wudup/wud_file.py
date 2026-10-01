@@ -163,52 +163,6 @@ def remove_lines_before_run(
     return True
 
 
-def cleanup_successful_lines(
-    path: str | Path,
-    parsed: ParsedWudFile,
-    successful_lines: Iterable[int],
-    *,
-    lock: DirectoryLock | None = None,
-    lock_timeout: int | str = 30,
-    owner: OwnerConfig | None = None,
-    encoding: str = "utf-8",
-) -> bool:
-    """Remove successfully processed raw WUD entries from the current file."""
-
-    successful = set(successful_lines)
-    if not successful:
-        return False
-
-    drop_count: dict[str, int] = {}
-    for line in parsed.lines:
-        if line.line_no in successful:
-            drop_count[line.raw] = drop_count.get(line.raw, 0) + 1
-
-    if not drop_count:
-        return False
-
-    def transform(current_lines: list[str]) -> list[str]:
-        dropped: dict[str, int] = {}
-        result: list[str] = []
-        for raw in current_lines:
-            seen = dropped.get(raw, 0)
-            if seen < drop_count.get(raw, 0):
-                dropped[raw] = seen + 1
-                continue
-            result.append(raw)
-        return result
-
-    _rewrite_wud_file(
-        path,
-        transform,
-        lock=lock,
-        lock_timeout=lock_timeout,
-        owner=owner,
-        encoding=encoding,
-    )
-    return True
-
-
 def restore_failed_lines(
     path: str | Path,
     parsed: ParsedWudFile,

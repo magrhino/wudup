@@ -309,22 +309,6 @@ def _wud_api_status(source: web_pending_sources.PendingSourceResult) -> WudApiSt
     )
 
 
-def release_notes_disabled_response(settings: WebSettings) -> ReleaseNotesResponse:
-    disabled = release_notes_disabled_state(settings)
-    return ReleaseNotesResponse(
-        source_file=str(settings.config.wud_out_file),
-        source=disabled.source,
-        count=0,
-        items=[],
-        enabled=False,
-        disabled_reason=disabled.reason,
-        notifications_enabled=False,
-        notifications_disabled_reason=disabled.reason,
-        wud_api=disabled.wud_api,
-        warnings=[],
-    )
-
-
 def release_notes_disabled_state(settings: WebSettings) -> ReleaseNotesDisabledState:
     return ReleaseNotesDisabledState(
         reason=RELEASE_NOTES_DISABLED_DETAIL,

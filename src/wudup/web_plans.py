@@ -36,6 +36,7 @@ from .updater_models import (
     TagStreamLabelRewriteApproval,
     UpdateSelection,
 )
+from .web_job_registry import plan_can_apply
 from .web_models import (
     ApplyJobResponse,
     ApplyPlanRequest,
@@ -376,16 +377,6 @@ def digest_pin_label_rewrite_approvals_from_payload(
         )
         seen.add(key)
     return tuple(approvals)
-
-
-def plan_can_apply(plan: DryRunPlan, settings: WebSettings) -> bool:
-    return (
-        settings.mutations_enabled
-        and plan.status == "ready"
-        and all(status == "fresh" for status in plan.selected_metadata_statuses())
-        and not plan.skipped
-        and not any(issue.severity == "error" for issue in plan.issues)
-    )
 
 
 def plan_response(

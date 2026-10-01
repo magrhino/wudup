@@ -81,6 +81,7 @@ from .web_models import (
     WebSettings,
     WudApiStatus,
 )
+from .web_pending_rescan_payload import _selected_line_numbers
 from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
 from .wud_file import (
@@ -573,7 +574,7 @@ def pending_removal_plan(
     *,
     parsed: ParsedWudFile,
 ) -> PendingRemovalPlanResponse:
-    selected = _selected_removal_line_numbers(line_numbers)
+    selected = _selected_line_numbers(line_numbers)
     targets_by_line = {target.line_no: target for target in parsed.targets}
     missing = [line_no for line_no in selected if line_no not in targets_by_line]
     if missing:
@@ -933,19 +934,6 @@ def _validated_cleanup_lines(
     if requested != set(available):
         raise HTTPException(status_code=409, detail="cleanup is stale")
     return tuple(available[key] for key in sorted(available))
-
-
-def _selected_removal_line_numbers(line_numbers: Sequence[int]) -> tuple[int, ...]:
-    seen: set[int] = set()
-    selected: list[int] = []
-    for line_no in line_numbers:
-        if line_no in seen:
-            raise PlanInputError(
-                f"line_numbers line {line_no} was provided more than once"
-            )
-        seen.add(line_no)
-        selected.append(line_no)
-    return tuple(sorted(selected))
 
 
 def _pending_removal_id(

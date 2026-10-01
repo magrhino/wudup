@@ -1171,13 +1171,6 @@ def parse_registry_image(image: str) -> RegistryImageRef | None:
     )
 
 
-def parse_ghcr_image(image: str) -> RegistryImageRef | None:
-    parsed = parse_registry_image(image)
-    if parsed is None or not parsed.is_ghcr():
-        return None
-    return parsed
-
-
 def _failure_status(image: RegistryImageRef) -> str:
     return _STATUS_FAILED if image.is_ghcr() else _STATUS_UNTRUSTED
 

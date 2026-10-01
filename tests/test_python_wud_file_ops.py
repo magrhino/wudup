@@ -13,7 +13,6 @@ from wudup.file_ops import (
 )
 from wudup.locks import DirectoryLock, WudLockTimeout, lock_dir_for
 from wudup.wud_file import (
-    cleanup_successful_lines,
     parse_wud_file,
     remove_lines_before_run,
 )
@@ -34,7 +33,7 @@ class WudFileCleanupTests(unittest.TestCase):
                 remove_lines_before_run(path, parsed, [1, 3], lock=lock)
                 self.assertTrue(lock_dir_for(path).is_dir())
 
-                cleanup_successful_lines(path, parsed, [2], lock=lock)
+                remove_lines_before_run(path, parsed, [1, 2, 3], lock=lock)
                 self.assertEqual(path.read_text(encoding="utf-8"), "")
                 self.assertTrue(lock_dir_for(path).is_dir())
             finally:
@@ -68,7 +67,7 @@ class WudFileCleanupTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), "repo/app:two\n")
             self.assertTrue(lock_dir_for(path).is_dir())
 
-            cleanup_successful_lines(path, parsed, [2], lock=lock)
+            remove_lines_before_run(path, parsed, [1, 2, 3], lock=lock)
             self.assertEqual(path.read_text(encoding="utf-8"), "")
             self.assertTrue(lock_dir_for(path).is_dir())
 
@@ -83,18 +82,18 @@ class WudFileCleanupTests(unittest.TestCase):
             lock_dir_for(path).mkdir()
 
             with self.assertRaisesRegex(WudLockTimeout, "Timed out waiting"):
-                cleanup_successful_lines(path, parsed, [1], lock_timeout=0)
+                remove_lines_before_run(path, parsed, [1], lock_timeout=0)
 
             self.assertEqual(path.read_text(encoding="utf-8"), "repo/old:latest\n")
             self.assertTrue(lock_dir_for(path).is_dir())
 
-    def test_selected_line_cleanup_keeps_unselected_lines(self) -> None:
+    def test_selected_line_removal_keeps_unselected_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:one\nrepo/app:two\n", encoding="utf-8")
             parsed = parse_wud_file(path, selected_lines=[2])
 
-            cleanup_successful_lines(
+            remove_lines_before_run(
                 path,
                 parsed,
                 [target.line_no for target in parsed.targets],
@@ -102,17 +101,17 @@ class WudFileCleanupTests(unittest.TestCase):
 
             self.assertEqual(path.read_text(encoding="utf-8"), "repo/app:one\n")
 
-    def test_duplicate_raw_line_cleanup_preserves_one_duplicate(self) -> None:
+    def test_duplicate_raw_line_removal_preserves_one_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:latest\nrepo/app:latest\n", encoding="utf-8")
             parsed = parse_wud_file(path)
 
-            cleanup_successful_lines(path, parsed, [1])
+            remove_lines_before_run(path, parsed, [1])
 
             self.assertEqual(path.read_text(encoding="utf-8"), "repo/app:latest\n")
 
-    def test_appended_duplicate_survives_pre_run_removal_and_cleanup(self) -> None:
+    def test_appended_duplicate_survives_pre_run_removal(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text(
@@ -121,29 +120,11 @@ class WudFileCleanupTests(unittest.TestCase):
             )
             parsed = parse_wud_file(path)
 
-            remove_lines_before_run(path, parsed, [1, 3])
             with path.open("a", encoding="utf-8", newline="") as file:
                 file.write("repo/app:two\n")
-            cleanup_successful_lines(path, parsed, [2])
+            remove_lines_before_run(path, parsed, [1, 2, 3])
 
             self.assertEqual(path.read_text(encoding="utf-8"), "repo/app:two\n")
-
-    def test_cleanup_does_not_resurrect_replaced_unselected_lines(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "images.todo"
-            path.write_text("repo/app:one\nrepo/app:two\n", encoding="utf-8")
-            parsed = parse_wud_file(path)
-            path.write_text(
-                "repo/app:one sha256=new\nrepo/app:two\n",
-                encoding="utf-8",
-            )
-
-            cleanup_successful_lines(path, parsed, [2])
-
-            self.assertEqual(
-                path.read_text(encoding="utf-8"),
-                "repo/app:one sha256=new\n",
-            )
 
     def test_comments_and_blank_lines_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -151,11 +132,11 @@ class WudFileCleanupTests(unittest.TestCase):
             path.write_text("# header\n\nrepo/app:latest\n# footer\n", encoding="utf-8")
             parsed = parse_wud_file(path)
 
-            cleanup_successful_lines(path, parsed, [3])
+            remove_lines_before_run(path, parsed, [3])
 
             self.assertEqual(path.read_text(encoding="utf-8"), "# header\n\n# footer\n")
 
-    def test_owner_and_mode_are_preserved_when_cleaning_file(self) -> None:
+    def test_owner_and_mode_are_preserved_when_removing_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:latest\n", encoding="utf-8")
@@ -163,13 +144,13 @@ class WudFileCleanupTests(unittest.TestCase):
             before = path.stat()
             parsed = parse_wud_file(path)
 
-            cleanup_successful_lines(path, parsed, [1])
+            remove_lines_before_run(path, parsed, [1])
 
             after = path.stat()
             self.assertEqual(stat.S_IMODE(after.st_mode), stat.S_IMODE(before.st_mode))
             self.assertEqual((after.st_uid, after.st_gid), (before.st_uid, before.st_gid))
 
-    def test_readonly_mode_and_owner_are_preserved_when_cleaning_file(self) -> None:
+    def test_readonly_mode_and_owner_are_preserved_when_removing_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:latest\n", encoding="utf-8")
@@ -177,7 +158,7 @@ class WudFileCleanupTests(unittest.TestCase):
             before = path.stat()
             parsed = parse_wud_file(path)
 
-            cleanup_successful_lines(path, parsed, [1])
+            remove_lines_before_run(path, parsed, [1])
 
             after = path.stat()
             self.assertEqual(stat.S_IMODE(after.st_mode), stat.S_IMODE(before.st_mode))

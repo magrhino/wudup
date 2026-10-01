@@ -194,6 +194,18 @@ class CommandRunnerTests(unittest.TestCase):
             runner.run(["missing"])
 
         self.assertEqual(cm.exception.result.returncode, 127)
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
+
+    @mock.patch("wudup.command.subprocess.run")
+    def test_capture_check_chains_os_error(self, run_mock: mock.Mock) -> None:
+        run_mock.side_effect = FileNotFoundError("Missing")
+        runner = CommandRunner()
+
+        with self.assertRaises(CommandError) as cm:
+            runner.capture(["missing"], check=True)
+
+        self.assertEqual(cm.exception.result.returncode, 127)
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
 
     @mock.patch("wudup.command.os.read")
     @mock.patch("wudup.command.os.close")

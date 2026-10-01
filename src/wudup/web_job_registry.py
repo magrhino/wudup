@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from threading import Condition, Lock
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request
 
@@ -22,6 +22,9 @@ from .web_models import (
     WebApplyJobProgressEvent,
     WebSettings,
 )
+
+if TYPE_CHECKING:
+    from .plans import DryRunPlan
 
 WEB_APPLY_EXECUTOR_MAX_WORKERS = 1
 # Finished apply, retag, and tracking-repair jobs stay pollable in memory until
@@ -82,6 +85,16 @@ def _register_apply_job_unlocked(
     for job_id in terminal_ids[: max(0, len(jobs) - WEB_APPLY_JOB_LIMIT + 1)]:
         jobs.pop(job_id, None)
     jobs[job.id] = job
+
+
+def plan_can_apply(plan: DryRunPlan, settings: WebSettings) -> bool:
+    return (
+        settings.mutations_enabled
+        and plan.status == "ready"
+        and all(status == "fresh" for status in plan.selected_metadata_statuses())
+        and not plan.skipped
+        and not any(issue.severity == "error" for issue in plan.issues)
+    )
 
 
 def _active_apply_job_exists_in_state(state: Any) -> bool:

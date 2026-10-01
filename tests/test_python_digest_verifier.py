@@ -20,7 +20,6 @@ from wudup.digest_verifier import (
     ManifestLookupError,
     RegistryHttpManifestResolver,
     _payload_digest,
-    parse_ghcr_image,
     parse_registry_image,
 )
 from wudup.docker_cli import DockerCli
@@ -212,15 +211,19 @@ class DigestVerifierTests(unittest.TestCase):
         self.assertEqual(quay.repo, "prometheus/busybox")
         self.assertEqual(quay.tag, "latest")
 
-    def test_parse_ghcr_image_requires_tagged_ghcr_reference(self) -> None:
-        parsed = parse_ghcr_image("ghcr.io/acme/app:latest@sha256:old")
+    def test_parse_registry_image_identifies_tagged_ghcr_reference(self) -> None:
+        parsed = parse_registry_image("ghcr.io/acme/app:latest@sha256:old")
 
         self.assertIsNotNone(parsed)
         assert parsed is not None
+        self.assertTrue(parsed.is_ghcr())
         self.assertEqual(parsed.repo, "acme/app")
         self.assertEqual(parsed.tag, "latest")
-        self.assertIsNone(parse_ghcr_image("acme/app:latest"))
-        self.assertIsNone(parse_ghcr_image("ghcr.io/acme/app"))
+        hub = parse_registry_image("acme/app:latest")
+        self.assertIsNotNone(hub)
+        assert hub is not None
+        self.assertFalse(hub.is_ghcr())
+        self.assertIsNone(parse_registry_image("ghcr.io/acme/app"))
 
     def test_platform_child_digest_matches_local_config_digest(self) -> None:
         expected = "sha256:child"

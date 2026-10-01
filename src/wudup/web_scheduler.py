@@ -31,6 +31,7 @@ from .plans import (
     resolve_pending_groups,
 )
 from .web_database import immediate_transaction as _immediate_transaction
+from .web_job_registry import plan_can_apply
 from .web_metadata import json_object as _json_object
 from .web_metadata import json_object_or_empty
 from .web_models import (
@@ -317,7 +318,7 @@ def _auto_update_candidate(
         known_digest_provenance_by_service=known_digest_provenance_by_service,
         pending_source=pending_source,
     )
-    if not _plan_can_auto_apply(plan, settings):
+    if not plan_can_apply(plan, settings):
         return None
     return selection, plan, pending_source
 
@@ -348,16 +349,6 @@ def _build_auto_update_plan(
         host_docker_base=settings.host_docker_base,
         environ=settings.command_env,
         known_digest_provenance_by_service=known_digest_provenance_by_service,
-    )
-
-
-def _plan_can_auto_apply(plan: DryRunPlan, settings: WebSettings) -> bool:
-    return (
-        settings.mutations_enabled
-        and plan.status == "ready"
-        and all(status == "fresh" for status in plan.selected_metadata_statuses())
-        and not plan.skipped
-        and not any(issue.severity == "error" for issue in plan.issues)
     )
 
 
