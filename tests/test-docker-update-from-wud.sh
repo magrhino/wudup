@@ -158,6 +158,29 @@ set_manifest_failure(){
   printf '%s\n' "$stderr" > "$FAKE_ROOT/manifests/$safe.stderr"
 }
 
+# Post-pull hook simulating an external WUD-file writer that appends
+# HOOK_APPEND_LINE under the shared <file>.lock directory lock.
+write_locked_append_hook(){
+  cat > "$FAKE_ROOT/post-pull-hook" <<'HOOK'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Simulate an external WUD-file writer that appends under the shared lock.
+lock="${HOOK_WUD_FILE:?}.lock"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  if (( waited >= ${HOOK_LOCK_TIMEOUT:-30} )); then
+    printf 'Timed out waiting for WUD file lock: %s\n' "$lock" >&2
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+printf '%s\n' "${HOOK_APPEND_LINE:?}" >> "$HOOK_WUD_FILE"
+rmdir "$lock"
+HOOK
+  chmod +x "$FAKE_ROOT/post-pull-hook"
+}
+
 run_script(){
   local env_args=()
   while [[ "$#" -gt 0 && "$1" == *=* ]]; do
@@ -382,13 +405,9 @@ test_same_image_wud_callback_survives_successful_update(){
   make_single_service_stack two "$BASE/two" docker-compose.yml repo/app:two cid-two
   set_image_state repo/app:two old-two sha256:old-two
   set_image_after_pull repo/app:two new-two sha256:new-two
-  cat > "$FAKE_ROOT/post-pull-hook" <<'HOOK'
-#!/usr/bin/env bash
-env WUD_OUT_FILE="${HOOK_WUD_FILE:?}" WUD_LOCK_TIMEOUT=0 update_available=true image_name=repo/app image_tag_value=two sh "${HOOK_APPEND_SCRIPT:?}"
-HOOK
-  chmod +x "$FAKE_ROOT/post-pull-hook"
+  write_locked_append_hook
 
-  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_SCRIPT="$REPO_ROOT/wud/append-updates.sh" --yes --only-lines 2 --remove-lines-before-run 1,3
+  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_LINE=repo/app:two HOOK_LOCK_TIMEOUT=0 --yes --only-lines 2 --remove-lines-before-run 1,3
 
   assert_status 0
   assert_file_equals "$WUD_FILE" 'repo/app:two'
@@ -775,14 +794,9 @@ test_cleanup_removes_successful_raw_line_not_current_line_number(){
   make_single_service_stack app "$BASE/app" docker-compose.yml repo/b:latest
   set_image_state repo/b:latest old "$OLD_DIGEST"
   set_image_after_pull repo/b:latest new "$NEW_DIGEST"
-  cat > "$FAKE_ROOT/post-pull-hook" <<'HOOK'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-env WUD_OUT_FILE="${HOOK_WUD_FILE:?}" update_available=true image_name=repo/a image_tag_value=latest sh "${HOOK_APPEND_SCRIPT:?}"
-HOOK
-  chmod +x "$FAKE_ROOT/post-pull-hook"
+  write_locked_append_hook
 
-  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_SCRIPT="$REPO_ROOT/wud/append-updates.sh" --yes
+  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_LINE=repo/a:latest --yes
 
   assert_status 0
   assert_file_equals "$WUD_FILE" 'repo/a:latest'

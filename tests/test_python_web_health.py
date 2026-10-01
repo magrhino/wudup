@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest import mock
 
 from tests.web_test_helpers import (
     WUD_API_AUTH_CONFIG_KEY,
@@ -13,6 +14,7 @@ from tests.web_test_helpers import (
 )
 
 from wudup import web as web_module
+from wudup.doctor import DoctorConfigError
 
 
 def test_healthz_is_unauthenticated_before_setup(tmp_path: Path) -> None:
@@ -150,13 +152,13 @@ def test_readyz_fails_when_required_local_check_fails(
 def test_readyz_fails_when_required_checks_are_missing(
     tmp_path: Path,
 ) -> None:
-    client = _doctor_client(
-        tmp_path,
-        {"WUDUP_USE_SUDO": "treu"},
-        client=("127.0.0.1", 50000),
-    )
+    client = _doctor_client(tmp_path, client=("127.0.0.1", 50000))
 
-    response = client.get("/readyz")
+    with mock.patch(
+        "wudup.web_health.doctor_options_from_namespace",
+        side_effect=DoctorConfigError("invalid doctor configuration"),
+    ):
+        response = client.get("/readyz")
     body = response.json()
     checks = {check["code"]: check for check in body["checks"]}
 

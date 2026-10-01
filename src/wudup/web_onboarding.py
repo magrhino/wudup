@@ -56,7 +56,6 @@ ONBOARDING_REQUIRED_KEYS = frozenset(
     {
         "admin-setup",
         "wud-output",
-        "wud-scripts",
         "docker-access",
         "compose-discovery",
         "persistence",
@@ -168,25 +167,6 @@ def onboarding_checklist_response(
                 _onboarding_doc(
                     "WebUI container setup",
                     f"{ONBOARDING_DOC_BASE}/wiki/webui-container.md#start-the-webui",
-                )
-            ],
-        ),
-        _onboarding_item_from_checks(
-            key="wud-scripts",
-            title="WUD callback scripts",
-            checks=_checks_by_code(
-                checks,
-                {"packaged-wud-scripts", "wud-script-sync"},
-            ),
-            pass_detail=(
-                "Packaged WUD scripts are available and script sync can update "
-                "the managed trigger directory."
-            ),
-            missing_detail="WUD script sync readiness was not reported by doctor.",
-            docs=[
-                _onboarding_doc(
-                    "Script sync notes",
-                    f"{ONBOARDING_DOC_BASE}/wiki/container-script-sync.md",
                 )
             ],
         ),

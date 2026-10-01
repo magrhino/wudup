@@ -66,16 +66,13 @@ services:
       # Set a strong password in a private Compose env file before first start.
       WUD_AUTH_ADMIN_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
       WUD_AUTH_ADMIN_PASSWORD: "${WUD_AUTH_ADMIN_PASSWORD:-}"
-      # WUD watches Docker through the proxy. Legacy mode writes pending
-      # updates to /out/images.todo through mounted callback scripts.
+      # WUD watches Docker through the proxy.
       WUD_WATCHER_LOCAL_HOST: socket-proxy-wudup
       WUD_WATCHER_LOCAL_PORT: "2375"
       WUD_WATCHER_LOCAL_WATCHEVENTS: "true"
       WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST: "true"
       # WebUI release-note notifications poll WUD's API directly.
     volumes:
-      - wud-scripts:/wud:ro
-      - wud-out:/out
       - wud-store:/store
     read_only: true
     tmpfs:
@@ -142,8 +139,6 @@ services:
       - ${HOST_DOCKER_BASE:-/srv/docker}:${HOST_DOCKER_BASE:-/srv/docker}
       # WebUI logs and SQLite state are kept outside the Docker stack root.
       - ${WEBUI_LOG_DIR:-./logs}:/logs
-      # Startup sync copies this repo's WUD callback scripts here for WUD.
-      - wud-scripts:/managed-wud
       - wud-out:/out
       # For basic API auth, mount a password-only file (example host path):
       # - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
@@ -169,6 +164,5 @@ networks:
     internal: true
 
 volumes:
-  wud-scripts:
   wud-out:
   wud-store:

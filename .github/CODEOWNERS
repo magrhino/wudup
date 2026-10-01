@@ -6,7 +6,6 @@
 /.dockerignore @magrhino
 /Dockerfile @magrhino
 /entrypoint.sh @magrhino
-/install.sh @magrhino
 
 /bin/ @magrhino
 /wud/ @magrhino

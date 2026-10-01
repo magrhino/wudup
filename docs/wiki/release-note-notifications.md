@@ -2,11 +2,10 @@
 
 WUDup can post release information to Discord from the WebUI after WUD API
 polling sees pending updates, after you preview selected pending updates, or
-after a successful apply run. Legacy WUD shell helpers remain available for
-existing callback setups. GitHub token values must come from the WUDup/WebUI
-runtime environment, the WUD container environment for shell callbacks, or
-another host-local secret store. Discord webhooks can come from those same
-places or from the WebUI-managed webhook field.
+after a successful apply run. GitHub token values must come from the
+WUDup/WebUI runtime environment or another host-local secret store. Discord
+webhooks can come from those same places or from the WebUI-managed webhook
+field.
 
 ## WebUI Workflow
 
@@ -41,10 +40,6 @@ It does not discover candidates independently or change WUD's watch behavior.
 Existing Docker Hub deployments should set
 `WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST=true`, as the current Compose examples do,
 so WUD can report same-tag digest changes.
-
-If a legacy shell release-note callback is also configured, Discord can receive
-duplicate notifications for the same WUD update. Keep only one notification path
-enabled unless duplicate posts are intentional.
 
 Example summary notification:
 
@@ -129,88 +124,19 @@ Choose **Per container** for one detailed notification per update. Its stored
 value remains `per_container`; full verbosity appends the release body and
 truncates it to Discord's embed limits.
 
-## Legacy Shell Callback
+## Removed Shell Notifier
 
-`/wud/on-update.sh` remains available for existing shell-notification
-deployments. It always calls `/wud/append-updates.sh` first. When
-`update_available=true`, it also calls:
-
-```bash
-/wud/release-notes-to-discord.sh "$IMAGE" "$CONTAINER_NAME" "$CURRENT_TAG"
-```
-
-That helper is the single shell release-note router for WUD callbacks. It
-requires:
-
-| Variable | Purpose |
-|---|---|
-| `DISCORD_WEBHOOK` | Discord webhook for release-note embeds. |
-
-It also expects `docker`, `curl`, and `jq` to be available in the runtime
-environment.
-
-The helper tries to discover a GitHub repository from the image's
-`org.opencontainers.image.source` label. It also handles fully qualified GitHub
-Container Registry references that start with `ghcr.io/`, and LinuxServer.io
-images through the legacy `linuxserver/docker-<image>` GitHub release fallback.
-If no source can be found, it posts a minimal update notice.
-
-## Direct Shell Use
-
-The same canonical helper can post a GitHub release directly:
-
-```bash
-/wud/release-notes-to-discord.sh --repo Owner/Repo --tag latest --webhook "$DISCORD_WEBHOOK"
-```
-
-It also supports LinuxServer.io releases that need an upstream project lookup:
-
-```bash
-/wud/release-notes-to-discord.sh --provider lsio --lsio linuxserver/docker-radarr --upstream Radarr/Radarr --webhook "$DISCORD_WEBHOOK"
-```
-
-Common variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DISCORD_WEBHOOK` | empty | Discord webhook for release embeds. |
-| `ADMIN_WEBHOOK` | selected release webhook | Webhook for missing upstream mapping alerts. |
-| `GITHUB_TOKEN` | empty | Optional token for GitHub API rate limits. |
-| `MAX_COMMITS` | `3` | Maximum representative PRs or commits to include. |
-| `COLOR_HEX` | `0x57F287` | Discord embed color. |
-| `UPSTREAM_MAP` | `/wud/upstreams.txt` | LinuxServer.io image to upstream repository map used by explicit LSIO mode and `tag-manager.sh`. |
-| `RELEASE_EMBED` | `/wud/github-release-embed.sh` | Compatibility hook used by `tag-manager.sh`. |
-| `LOG_DIR` | `/out` | Compatibility log directory used by `tag-manager.sh`. |
-
-The default `github` provider fetches GitHub Releases for `--repo Owner/Repo`.
-The legacy provider name `generic` is still accepted as an alias.
-
-Compatibility entrypoints remain available for existing WUD configurations:
-
-```bash
-/wud/github-release-embed.sh --repo Owner/Repo --webhook "$DISCORD_WEBHOOK"
-/wud/tag-manager.sh
-```
-
-New WebUI-focused configurations should not use these shell notification
-wrappers. Keep them only for existing WUD callback setups that intentionally
-send release notes outside the WebUI.
-
-WUDup polls WUD's API directly for WebUI release-note notifications.
-Once WUD API metadata is healthy, set `WUDUP_LEGACY_SCRIPTS=false`, then remove
-WUD command triggers that call `/wud/append-updates.sh`, `/wud/on-update.sh`, or
-`/wud/tag-manager.sh` before recreating the stack.
+The WUD shell callbacks and notifier scripts (`on-update.sh`,
+`release-notes-to-discord.sh`, `github-release-embed.sh`, `tag-manager.sh`)
+were removed; the `legacy-file-mode` git tag keeps them for reference. Set
+`DISCORD_WEBHOOK` on the WUDup container or in WebUI Settings instead, remove
+WUD command triggers that call `/wud/*.sh`, and recreate the stack.
 
 ## LinuxServer.io Mapping
 
-For default WUD callbacks, LinuxServer.io images keep the legacy behavior:
-`linuxserver/xyz` resolves to the GitHub repository
-`linuxserver/docker-xyz`.
-
-For explicit LSIO mode or existing `tag-manager.sh` configurations,
-`linuxserver/docker-xyz` maps to an upstream `Owner/Repo` entry in
-`upstreams.txt`. Missing mappings are sent to `ADMIN_WEBHOOK` and the embed is
-skipped.
+The WebUI maps LinuxServer.io image repositories (`linuxserver/docker-xyz`) to
+an upstream `Owner/Repo` entry in `upstreams.txt`. Images without an entry are
+reported as unsupported with a missing-mapping error.
 
 For containers without a separate upstream release source, map the image
 repository to itself to use only its GitHub image releases. Socket-proxy is
@@ -224,7 +150,7 @@ linuxserver/docker-socket-proxy: linuxserver/docker-socket-proxy
 To enable another container, add a sorted entry in `wud/upstreams.txt` with the
 same `linuxserver/docker-<name>` repository on both sides. Keep an explanatory
 comment immediately above it so the refresh script preserves the override.
-The WebUI and legacy callbacks skip upstream enrichment for these entries.
+The WebUI skips upstream enrichment for these entries.
 
 The LinuxServer.io release is authoritative for LSIO image updates. LSIO-only
 image updates and rebuilds stop after that release is resolved and do not
@@ -239,7 +165,7 @@ receive LinuxServer.io image rebuilds.
 ## WebUI Release Links
 
 The WebUI uses a separate Python service for structured release-note metadata.
-It does not call the shell helper or parse Discord embeds. The WebUI cache uses
+It does not parse Discord embeds. The WebUI cache uses
 the same `GITHUB_TOKEN` for rate limits and can use `WUD_WEB_UPSTREAM_MAP` to
 point at a custom LinuxServer.io upstream map. WebUI-sent Discord notifications
 use `DISCORD_WEBHOOK` first. When it is not set, the Settings page can save a
@@ -249,11 +175,10 @@ stored webhook is configured; the raw URL is not returned to the browser.
 ## Secrets And Logs
 
 Do not commit webhook URLs, GitHub tokens, or private service URLs. Use
-environment variables supplied by WUD, Compose secrets, host-local config, or
+environment variables, Compose secrets, host-local config, or
 the WebUI-managed webhook field. Treat the WebUI SQLite database as
 secret-bearing if you store a webhook there.
 
-The legacy tag manager redacts webhook values when logging helper commands, and
-shared HTTP errors do not print webhook URLs. WebUI Settings responses, audit
+WebUI Settings responses, audit
 records, support bundles, and send errors also redact webhook values. Avoid
 copying raw environment dumps or SQLite rows into issues or pull requests.

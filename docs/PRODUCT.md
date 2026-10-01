@@ -39,16 +39,17 @@ available through run history, audit records, logs, Doctor checks, and
 diagnostics.
 
 WUD's API is the primary pending-update source for new WebUI deployments. The
-callback todo file remains a fallback/import source, and the retained host and
-helper-container CLI workflows remain file-based. Deployments interact with a
+deprecated todo file remains a fallback/import source, and the retained
+helper-container CLI workflow remains file-based. Deployments interact with a
 Docker daemon and mounted Compose stack roots; optional integrations include
 Discord release-note notifications, GitHub release metadata, and Trivy-backed
 candidate security scans.
 
 ## Capabilities and Constraints
 
-- The WebUI/API is the primary supported workflow. Host and helper-container
-  CLI paths are legacy conveniences; API and CLI feature parity is not a goal.
+- The WebUI/API is the primary supported workflow. The helper-container
+  `docker-update-from-wud` path is a legacy convenience; API and CLI feature
+  parity is not a goal.
 - The WebUI starts read-only. Browser mutations must be enabled intentionally,
   and update operations require an explicit plan and confirmation. Dry-run
   paths must remain non-mutating.
@@ -60,8 +61,7 @@ candidate security scans.
 - Candidate security scanning provides advisory evidence; it does not gate
   updates, snooze updates, or claim that an image is safe.
 - The public demo is fixture-backed, browser-only, and non-mutating.
-- Docker Compose is the maintainer-tested deployment environment. TrueNAS
-  support is experimental.
+- Docker Compose is the maintainer-tested deployment environment.
 - WUDup is a public beta. Secrets and deployment-specific values must remain in
   environment variables, secret files, or operator-managed configuration.
 

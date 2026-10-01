@@ -111,71 +111,6 @@ class TerminalRenderer:
         prefix = _KIND_PREFIXES.get(kind, "")
         self._console(target).print(f"{prefix}{message}", style=style)
 
-    def docker_updates(self, rows: Sequence[tuple[int, str]]) -> None:
-        if not self.rich_enabled():
-            print("=== 📦 Docker Updates ===", file=self.stream)
-            if rows:
-                for number, target in rows:
-                    print(f"{number}\t{target}", file=self.stream)
-            else:
-                print("✅ No pending Docker updates!", file=self.stream)
-            return
-
-        count = len(rows)
-        summary = _docker_update_summary(count)
-        style = _STYLE_WARNING if count else _STYLE_SUCCESS
-        self.panel("Docker Updates", summary, body_style=style)
-        if not rows:
-            return
-
-        table = self._table()
-        table.add_column("#", justify="right", style=_STYLE_DIM, no_wrap=True)
-        table.add_column("Image / container target", style=_STYLE_WHITE)
-        table.add_column("Status", style=_STYLE_WARNING, no_wrap=True)
-        for number, target in rows:
-            table.add_row(str(number), target, "pending")
-        self._console(self.stream).print(table)
-
-    def truenas_panel(
-        self,
-        title: str,
-        lines: Sequence[tuple[str, str]],
-        *,
-        plain_header: str,
-    ) -> None:
-        if not self.rich_enabled():
-            print(plain_header, file=self.stream)
-            for line, _kind in lines:
-                print(line, file=self.stream)
-            return
-
-        if Text is None:
-            return
-        body = Text()
-        for index, (line, kind) in enumerate(lines):
-            if index:
-                body.append("\n")
-            body.append(line, style=_KIND_STYLES.get(kind, _STYLE_WHITE))
-        self.panel(title, body)
-
-    def prompt_choice(self, question: str, choices: str) -> str:
-        if not self.rich_enabled():
-            try:
-                return input(f"{question} {choices} ")
-            except EOFError:
-                return ""
-
-        console = self._console(self.stream)
-        console.print(question, style=_STYLE_INFO)
-        if Text is not None:
-            console.print(Text(f"  {choices}", style=_STYLE_BLUE))
-        else:
-            console.print(f"  {choices}", style=_STYLE_BLUE, markup=False)
-        try:
-            return input("Choice: ")
-        except EOFError:
-            return ""
-
     def panel(
         self,
         title: str,
@@ -319,13 +254,6 @@ class TerminalRenderer:
 def _stream_is_tty(stream: TextIO) -> bool:
     isatty = getattr(stream, "isatty", None)
     return bool(isatty and isatty())
-
-
-def _docker_update_summary(count: int) -> str:
-    if not count:
-        return "✓ No pending Docker updates!"
-    suffix = "s" if count != 1 else ""
-    return f"{count} pending image update{suffix} from WUD"
 
 
 def _terminal_width(_stream: TextIO, explicit_width: int | None) -> int:

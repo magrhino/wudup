@@ -33,8 +33,8 @@ attention.
 Try the [public, fixture-backed demo](https://magrhino.github.io/wudup/).
 
 New WebUI deployments read available updates from WUD's API over a private
-Compose network and queue them on the Pending page. The callback todo file
-remains an explicit fallback/import source, and the host CLI stays file-based.
+Compose network and queue them on the Pending page. The deprecated todo file
+remains an explicit fallback/import source, and the CLI updater stays file-based.
 
 ```text
 WUD detects an image update
@@ -90,20 +90,20 @@ SQLite persistence, managed preferences, and mutation mode.
 
 ## Other Deployment Paths
 
-The WebUI container is recommended for new deployments. The non-web paths remain
-supported when you want a smaller command-runner workflow or host-installed
-commands:
+The WebUI container is recommended for new deployments. The command-runner path
+remains supported when you want a smaller workflow:
 
 | Path | Use when | Docs |
 |---|---|---|
 | Docker script runner | You want short-lived `docker compose run` commands for `doctor`, dry runs, and applies without a persistent WebUI. | [Command runner](docs/COMMAND_RUNNER.md) |
-| Host install | You want `updates` and `docker-update-from-wud` on the host `PATH` with host-managed WUD script mounts. | [Host install](docs/COMMAND_RUNNER.md#host-install) |
 
-The WebUI/API is the primary supported workflow. The `updates` and
-`docker-update-from-wud` CLI paths are retained as legacy file-mode conveniences
-for host and helper-container operators; API mode and CLI/WebUI feature parity
+The WebUI/API is the primary supported workflow. The `docker-update-from-wud`
+CLI path is retained as a legacy file-mode convenience for helper-container
+operators; API mode and CLI/WebUI feature parity
 are not project goals. New review and interactive features should go to the
-WebUI/API first.
+WebUI/API first. WUD shell callbacks, the host install, WUD script sync, and
+TrueNAS status checks were removed; see
+[Removed features](docs/DEPLOYMENT.md#removed-features).
 
 ## Documentation
 
@@ -112,7 +112,7 @@ WebUI/API first.
 | Public WebUI demo | [magrhino.github.io/wudup](https://magrhino.github.io/wudup/) and [demo notes](docs/wiki/demo.md) |
 | Deployment start guide | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 | WebUI container guide | [docs/wiki/webui-container.md](docs/wiki/webui-container.md) |
-| Command runner and host install | [docs/COMMAND_RUNNER.md](docs/COMMAND_RUNNER.md) |
+| Command runner | [docs/COMMAND_RUNNER.md](docs/COMMAND_RUNNER.md) |
 | Configuration reference | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 | Digest verification and digest-pin updates | [docs/wiki/digest-verification.md](docs/wiki/digest-verification.md) |
 | Complete documentation index | [docs/README.md](docs/README.md) |

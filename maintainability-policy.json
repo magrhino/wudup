@@ -9,7 +9,7 @@
   "thresholds": {"warn": 500, "block": 800},
   "production": {
     "extensions": [".py", ".sh", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".css", ".html", ".json", ".yaml", ".yml", ".toml"],
-    "paths": ["Dockerfile", "Makefile", "bin/updates", "bin/docker-update-from-wud"]
+    "paths": ["Dockerfile", "Makefile", "bin/docker-update-from-wud"]
   },
   "tests": {"prefixes": ["tests/", "webui/tests/"]},
   "generated": {"prefixes": ["src/wudup/web_static/", "webui/dist/", "webui/coverage/"]},

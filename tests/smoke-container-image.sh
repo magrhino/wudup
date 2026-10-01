@@ -24,7 +24,6 @@ docker_name_component(){
 
 RUN_ID_COMPONENT="$(docker_name_component "${GITHUB_RUN_ID:-local}")"
 SMOKE_LABEL="wudup.image-smoke=${RUN_ID_COMPONENT}-$$"
-SYNC_TMP=""
 HEALTH_TMP=""
 HEALTH_CONTAINER=""
 
@@ -39,9 +38,6 @@ cleanup(){
   done < <(docker ps -aq --filter "label=$SMOKE_LABEL" 2>/dev/null || true)
   if ((${#containers[@]})); then
     docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$SYNC_TMP" && -d "$SYNC_TMP" ]]; then
-    rm -rf "$SYNC_TMP"
   fi
   if [[ -n "$HEALTH_TMP" && -d "$HEALTH_TMP" ]]; then
     rm -rf "$HEALTH_TMP"
@@ -158,17 +154,15 @@ need_cmd docker
 
 run_docker_smoke 90 "$IMAGE" test -f /app/src/wudup/web_static/index.html
 run smoke_default_web_health
-run_docker_smoke 180 "$IMAGE" updates --dry-run
-run_docker_smoke 180 -e WUDUP_PYTHON=true "$IMAGE" updates --dry-run
+run_docker_smoke 90 "$IMAGE" test -f /app/wud/upstreams.txt
 
-SYNC_TMP="$(mktemp -d "${TMPDIR:-/tmp}/wud-script-sync-test.XXXXXX")"
-run_docker_smoke 90 -v "$SYNC_TMP:/managed-wud" "$IMAGE" sync-wud-scripts
-[[ -x "$SYNC_TMP/on-update.sh" ]]
-[[ -x "$SYNC_TMP/append-updates.sh" ]]
-[[ -x "$SYNC_TMP/release-parser.sh" ]]
-[[ -x "$SYNC_TMP/release-notes-to-discord.sh" ]]
-[[ -x "$SYNC_TMP/github-release-embed.sh" ]]
-[[ -x "$SYNC_TMP/tag-manager.sh" ]]
-[[ -f "$SYNC_TMP/upstreams.txt" ]]
+for removed_command in updates sync-wud-scripts truenas-status-export; do
+  removed_status=0
+  run_docker_smoke 90 "$IMAGE" "$removed_command" >/dev/null 2>&1 || removed_status=$?
+  if [[ "$removed_status" -ne 2 ]]; then
+    printf 'Expected removed command %s to exit 2, got %s\n' "$removed_command" "$removed_status" >&2
+    exit 1
+  fi
+done
 
 run_docker_smoke 90 "$IMAGE" docker-update-from-wud --help

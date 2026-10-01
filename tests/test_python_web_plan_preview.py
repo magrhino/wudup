@@ -498,7 +498,6 @@ def test_plan_endpoint_returns_apply_preflight_summary(tmp_path: Path) -> None:
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "TRUENAS_STATUS_CHECK": "false",
             **fake_env,
         },
     )
@@ -547,7 +546,6 @@ def test_plan_apply_preflight_ignores_unselected_compose_render_failure(
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "TRUENAS_STATUS_CHECK": "false",
             **fake_env,
         },
     )

@@ -10,12 +10,7 @@ services:
       WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - wud-scripts:/wud:ro
-      - wud-out:/out
       - wud-store:/store
-    # File-mode fallback: configure your WUD trigger to call:
-    #   /wud/append-updates.sh
-    # Use /wud/on-update.sh only for legacy shell release-note notifications.
 
   wudup:
     build: ../..
@@ -30,11 +25,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_DOCKER_BASE:-/srv/docker}:${HOST_DOCKER_BASE:-/srv/docker}
       - ./logs:/logs
-      - wud-scripts:/managed-wud
+      # Deprecated file pending source: WUDup no longer ships a WUD callback
+      # that writes images.todo. Prefer docker-compose.webui.yml (API source).
       - wud-out:/out
-    command: [ "updates", "--dry-run" ]
+    # Checks Docker access, paths, and Compose discovery without changing anything.
+    # Preview queued updates with: docker compose run --rm wudup docker-update-from-wud --dry-run
+    command: [ "doctor" ]
 
 volumes:
-  wud-scripts:
   wud-out:
   wud-store:

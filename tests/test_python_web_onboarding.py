@@ -93,7 +93,6 @@ def test_onboarding_checklist_returns_redacted_setup_items(
     assert {
         "admin-setup",
         "wud-output",
-        "wud-scripts",
         "docker-access",
         "compose-discovery",
         "persistence",

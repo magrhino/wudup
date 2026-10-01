@@ -6,8 +6,8 @@ browser UI from one image, and keeps Docker mutations behind explicit settings
 and confirmation.
 
 WUDup controls the Docker daemon it is pointed at. Review the Docker socket or
-socket-proxy access, stack-directory mounts, script mounts, and output mounts
-before applying updates.
+socket-proxy access, stack-directory mounts, and output mounts before applying
+updates.
 
 ## Choose A Path
 
@@ -15,24 +15,35 @@ before applying updates.
 |---|---|---|
 | WebUI container | You want the recommended local dashboard, Doctor checks, run history, logs, diagnostics, and plan-first apply flow. | [WebUI Container](wiki/webui-container.md) |
 | Hardened WebUI container | You want the WebUI behind a Docker socket proxy instead of mounting the raw socket into WUDup. | [WebUI Container](wiki/webui-container.md) and [`docker-compose.hardened.yml`](examples/docker-compose.hardened.yml) |
-| Docker script runner | You want short-lived `docker compose run` commands for `doctor`, dry runs, and applies without a persistent WebUI. | [Command Runner And Host Install](COMMAND_RUNNER.md) |
-| Host install | You want `updates` and `docker-update-from-wud` on the host `PATH` with host-managed WUD script mounts. | [Command Runner And Host Install](COMMAND_RUNNER.md) |
+| Docker script runner | You want short-lived `docker compose run` commands for `doctor`, dry runs, and applies without a persistent WebUI. | [Command Runner](COMMAND_RUNNER.md) |
 | Configuration reference | You need environment variables, WUD API auth, scan settings, notification settings, or legacy aliases. | [Configuration](CONFIGURATION.md) |
 
-The WebUI/API is the primary supported workflow. The `updates` and
-`docker-update-from-wud` CLI paths remain supported legacy file-mode
-conveniences; API mode and CLI/WebUI feature parity are not project goals.
+The WebUI/API is the primary supported workflow. The `docker-update-from-wud`
+CLI path remains a legacy file-mode convenience; API mode and CLI/WebUI feature
+parity are not project goals.
+
+## Removed Features
+
+WUDup no longer ships WUD shell callbacks (`on-update.sh`,
+`append-updates.sh`), the shell release-note notifier scripts, WUD script sync,
+the host `updates` wrapper and `install.sh`, or TrueNAS status checks. Use the
+WebUI with WUD's API pending source and the built-in release-note notifier
+instead. The removed container commands (`updates`, `sync-wud-scripts`,
+`truenas-status-export`) exit with an error, and so do options passed without a
+command (for example `docker run <image> --yes`), which used to run `updates`.
+The `legacy-file-mode` git tag (v0.65.2) keeps the old code for reference.
+
+Existing deployments can delete the `wud-scripts` volume, its `/wud` and
+`/managed-wud` mounts, WUD command triggers that call `/wud/*.sh`, and the
+`WUD_SYNC_SCRIPTS` and `WUD_SCRIPTS_DIR` settings, which are now ignored.
 
 ## Requirements
 
 - Docker with the Compose plugin on the host.
 - A Compose stack root mounted where WUDup and the Docker daemon can both see
   the same paths.
-- Bash and Python 3.10 or newer for host-installed commands.
-- Standard shell tools used by wrappers and callbacks: `awk`, `sort`, `sed`,
-  `perl`, `find`, `grep`, `cut`, `column`, and `mktemp`.
-- `curl` and `jq` for release-note helper scripts.
-- `midclt` only for local TrueNAS status checks.
+- Python 3.10 or newer only when running the `wudup` CLI, such as
+  `wudup init`, outside the container.
 
 ## Image Tags
 
@@ -115,8 +126,8 @@ security scans, and browser mutation mode.
 
 ## Doctor
 
-Run `doctor` after changing container mounts, Docker access, stack paths, script
-sync settings, or helper environment variables:
+Run `doctor` after changing container mounts, Docker access, stack paths, or
+helper environment variables:
 
 ```bash
 WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
@@ -126,8 +137,7 @@ docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml
 Doctor is read-only except for short-lived permission probe files that it
 creates and removes in writable runtime directories. It checks Docker CLI access,
 Compose rendering, `DOCKER_BASE`, `HOST_DOCKER_BASE`, `WUD_OUT_FILE`,
-`WUD_LOG_DIR`, packaged WUD scripts, managed script-sync destinations, and
-common helper-only path mistakes.
+`WUD_LOG_DIR`, and common helper-only path mistakes.
 
 The authenticated WebUI Doctor page runs the same deployment checks from the
 browser and adds WebUI database, auth, host/origin, secure-cookie, static asset,
@@ -138,7 +148,7 @@ and mutation-gate checks.
 - The WebUI starts read-only. Browser-initiated Docker mutations, candidate scan
   refresh jobs, and Settings container restart require
   `WUD_WEB_MUTATIONS_ENABLED=true`.
-- `updates --dry-run` and `docker-update-from-wud --dry-run` must not pull
+- `docker-update-from-wud --dry-run` must not pull
   images, recreate containers, remove WUD lines, or otherwise mutate host state.
 - Mutating Docker operations require interactive confirmation or `--yes`.
 - Mounting `/var/run/docker.sock` gives a container root-equivalent control over
@@ -151,8 +161,7 @@ and mutation-gate checks.
 
 ## Maintenance
 
-For container-first deployments, pull the new image and recreate WUDup so
-startup sync refreshes the managed WUD script volume:
+For container-first deployments, pull the new image and recreate WUDup:
 
 ```bash
 WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
@@ -160,6 +169,5 @@ docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml
 docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d --force-recreate wudup
 ```
 
-For local image development and host installs, see
-[Command Runner And Host Install](COMMAND_RUNNER.md). For every supported
+For local image development, see [Command Runner](COMMAND_RUNNER.md). For every supported
 environment variable, see [Configuration](CONFIGURATION.md).

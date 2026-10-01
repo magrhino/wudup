@@ -537,9 +537,6 @@ def _upstream_map_paths(environ: Mapping[str, str]) -> list[Path]:
         value = environ.get(name, "")
         if value:
             paths.append(Path(value))
-    scripts_dir = environ.get("WUD_SCRIPTS_DIR", "/managed-wud")
-    if scripts_dir:
-        paths.append(Path(scripts_dir) / UPSTREAM_MAP_FILENAME)
     app_dir = environ.get("WUD_APP_DIR", "/app")
     if app_dir:
         paths.append(Path(app_dir) / "wud" / UPSTREAM_MAP_FILENAME)
