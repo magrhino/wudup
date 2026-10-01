@@ -9,9 +9,7 @@ import type {
 } from "../src/api/client";
 import { DemoApiState } from "../src/api/demo/state";
 import PendingStackCard from "../src/components/pending/PendingStackCard.vue";
-import PendingCleanupModal from "../src/components/pending/PendingCleanupModal.vue";
 import PendingPlanReviewModal from "../src/components/pending/PendingPlanReviewModal.vue";
-import PendingRemovalModal from "../src/components/pending/PendingRemovalModal.vue";
 import PendingSecurityScanDetails from "../src/components/pending/PendingSecurityScanDetails.vue";
 import {
   digestProvenanceDisplay,
@@ -163,9 +161,6 @@ function pendingPlanReviewModalProps(
     applyReadinessSummary: "",
     applyVisible: false,
     cleanupAvailable: false,
-    cleanupButtonLabel: "Remove 0 unmatched entries",
-    cleanupDisabled: true,
-    cleanupDisabledMessage: "",
     cleanupItems: [],
     cleanupReviewSummary: "",
     digestPinLabelApprovalApproved: () => false,
@@ -1552,33 +1547,6 @@ describe("pending helper modules", () => {
       {
         component: PendingPlanReviewModal,
         props: pendingPlanReviewModalProps(),
-      },
-      {
-        component: PendingCleanupModal,
-        props: {
-          assistantActions: [],
-          assistantFindings: [],
-          assistantReasons: [],
-          cleanupButtonLabel: "Remove 0 unmatched entries",
-          cleanupDisabled: true,
-          cleanupItems: [],
-          cleanupLineLabel: () => "#1",
-          loading: false,
-          pendingSourceLabel: "images.todo",
-          show: true,
-        },
-      },
-      {
-        component: PendingRemovalModal,
-        props: {
-          loading: false,
-          pendingSourceLabel: "images.todo",
-          removalConfirmButtonLabel: "Remove 0 selected entries",
-          removalDisabled: true,
-          removalItems: [],
-          removalLineLabel: () => "#1",
-          show: true,
-        },
       },
     ];
 

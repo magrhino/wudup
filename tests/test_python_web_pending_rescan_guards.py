@@ -119,6 +119,74 @@ def test_pending_all_rescan_runs_global_watch_and_audits(
     assert metadata["wud_api"]["state"] == "ready"
 
 
+def test_pending_rescan_records_unexpected_watch_failure_in_audit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    install_recording_wud_api(monkeypatch, [container_payload(name="app")])
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_API_BASE_URL": "https://wud.rescan-crash.test:3000",
+        },
+    )
+
+    def crash(_settings):
+        raise RuntimeError("watch exploded")
+
+    monkeypatch.setattr(web_wud_api, "watch_all", crash)
+    headers = _csrf_headers(client)
+    payload = rescan_payload()
+
+    with pytest.raises(RuntimeError, match="watch exploded"):
+        client.post("/api/v1/pending/rescan", json=payload, headers=headers)
+
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        run = conn.execute(
+            "SELECT * FROM update_runs WHERE mode = 'web-wud-rescan'"
+        ).fetchone()
+    assert run["status"] == "failure"
+    metadata = json.loads(run["metadata_json"])
+    assert metadata["status"] == "failure"
+    assert metadata["watched_count"] == 0
+    assert "WUD rescan failed" in metadata["error"]
+
+
+def test_pending_rescan_does_not_wait_for_or_release_the_wud_file_lock(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = install_recording_wud_api(
+        monkeypatch,
+        [container_payload(name="app")],
+    )
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_API_BASE_URL": "https://wud.rescan-lock.test:3000",
+            "WUD_LOCK_TIMEOUT": "0",
+        },
+    )
+    lock_dir = tmp_path / "state" / "images.todo.lock"
+    lock_dir.mkdir()
+    calls.clear()
+
+    response = client.post(
+        "/api/v1/pending/rescan",
+        json=rescan_payload(),
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert ("POST", "/api/containers/watch") in calls
+    assert lock_dir.is_dir()
+
+
 @pytest.mark.parametrize("initial_store", ["empty", "stale", "up-to-date"])
 @pytest.mark.parametrize("pending_source", ["api", "file"])
 def test_pending_all_rescan_discovers_containers_outside_pending_store(

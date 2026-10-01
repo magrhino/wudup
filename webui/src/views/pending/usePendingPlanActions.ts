@@ -5,7 +5,6 @@ import type {
   PlanSelectionRequest,
   TagOverrideRequest,
 } from "../../api/client";
-import { useRunsStore } from "../../stores/runs";
 import { useUpdatesStore } from "../../stores/updates";
 import { uniqueSorted } from "./pendingDisplay";
 import type { ApplyJobPlanSnapshot } from "./usePendingApplyJob";
@@ -25,15 +24,10 @@ export type UsePendingPlanActionsOptions = {
     allowTagUpdates: boolean;
     tagOverrides: TagOverrideRequest[];
   }) => PendingApplyPlanPayload;
-  cleanupAvailable: ComputedRef<boolean>;
-  cleanupDisabled: ComputedRef<boolean>;
   clearUpdateIntent: () => void;
   createApplyJobSnapshot: () => ApplyJobPlanSnapshot | null;
   focusApplyJobPanel: () => Promise<void>;
   lineNumbersHaveTagUpdates: (lineNumbers: number[]) => boolean;
-  removalDisabled: ComputedRef<boolean>;
-  removeSelectedDisabled: ComputedRef<boolean>;
-  selectedLineNumbers: Ref<number[]>;
   selectedSelections: Ref<PlanSelectionRequest[]>;
   selectedUpdateContext: ComputedRef<string>;
   stackGroups: ComputedRef<PendingStackGroup[]>;
@@ -45,15 +39,10 @@ export type UsePendingPlanActionsOptions = {
 
 export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
   const updates = useUpdatesStore();
-  const runs = useRunsStore();
   const showPreflightModal = ref(false);
-  const showCleanupModal = ref(false);
-  const showRemovalModal = ref(false);
 
   function clearPreflight(): void {
     showPreflightModal.value = false;
-    showCleanupModal.value = false;
-    showRemovalModal.value = false;
     options.clearUpdateIntent();
     updates.clearPlan();
   }
@@ -146,94 +135,6 @@ export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
     clearPreflight();
   }
 
-  function openCleanupModal(): void {
-    if (!options.cleanupAvailable.value) {
-      return;
-    }
-    showCleanupModal.value = true;
-  }
-
-  function closeCleanupModal(): void {
-    showCleanupModal.value = false;
-  }
-
-  async function startSelectedRemoval(): Promise<void> {
-    const lineNumbers = uniqueSorted(options.selectedLineNumbers.value);
-    if (lineNumbers.length === 0 || options.removeSelectedDisabled.value) {
-      return;
-    }
-    try {
-      await updates.createRemovalPlan(lineNumbers);
-    } catch {
-      showRemovalModal.value = false;
-      return;
-    }
-    if (updates.pendingRemovalPlan?.lines.length) {
-      showRemovalModal.value = true;
-    }
-  }
-
-  function closeRemovalModal(): void {
-    showRemovalModal.value = false;
-    updates.clearPlan();
-  }
-
-  async function confirmSelectedRemoval(): Promise<void> {
-    const removal = updates.pendingRemovalPlan;
-    if (
-      !removal?.removal_id ||
-      options.removalDisabled.value ||
-      !removal.lines.length
-    ) {
-      return;
-    }
-    const result = await updates.removeSelectedPending(
-      removal.removal_id,
-      removal.lines.map((item) => ({ line_no: item.line_no, raw: item.raw })),
-    );
-    const removedLines = new Set(result.removed.map((item) => item.line_no));
-    options.selectedSelections.value = options.selectedSelections.value.filter(
-      (selection) => !removedLines.has(selection.line_no),
-    );
-    showRemovalModal.value = false;
-    await Promise.all([
-      loadPendingAndReleaseNotes({
-        preserveCleanup: true,
-        freshAfterCurrent: true,
-      }),
-      runs.loadRuns(),
-    ]);
-  }
-
-  async function confirmCleanup(): Promise<void> {
-    const cleanup = updates.plan?.cleanup;
-    if (
-      !cleanup?.cleanup_id ||
-      options.cleanupDisabled.value ||
-      !cleanup.items.length
-    ) {
-      return;
-    }
-    const result = await updates.cleanupPending(
-      cleanup.cleanup_id,
-      cleanup.items.map((item) => ({ line_no: item.line_no, raw: item.raw })),
-    );
-    const removedLines = new Set(result.removed.map((item) => item.line_no));
-    options.selectedSelections.value = options.selectedSelections.value.filter(
-      (selection) => !removedLines.has(selection.line_no),
-    );
-    showCleanupModal.value = false;
-    showPreflightModal.value = false;
-    options.clearUpdateIntent();
-    await Promise.all([
-      loadPendingAndReleaseNotes({
-        preserveCleanup: true,
-        freshAfterCurrent: true,
-      }),
-      runs.loadRuns(),
-    ]);
-  }
-
   async function confirmApply(): Promise<void> {
     if (!updates.plan || options.applyDisabled.value) {
       return;
@@ -266,7 +167,6 @@ export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
 
   async function loadPendingAndReleaseNotes(
     requestOptions: {
-      preserveCleanup?: boolean;
       freshAfterCurrent?: boolean;
     } = {},
   ): Promise<void> {
@@ -286,19 +186,11 @@ export function usePendingPlanActions(options: UsePendingPlanActionsOptions) {
 
   return {
     clearPreflight,
-    closeCleanupModal,
     closePreflightModal,
-    closeRemovalModal,
     confirmApply,
-    confirmCleanup,
-    confirmSelectedRemoval,
     loadPendingAndReleaseNotes,
-    openCleanupModal,
     retryPendingLoad,
-    showCleanupModal,
     showPreflightModal,
-    showRemovalModal,
-    startSelectedRemoval,
     startSelectedUpdate,
     startStackUpdate,
   };

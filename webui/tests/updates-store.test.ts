@@ -181,76 +181,6 @@ describe("updates store", () => {
     ).toBe("csrf-plan");
   });
 
-  it("passes csrf from auth store to pending cleanup", async () => {
-    const fetchMock = mockFetch({
-      status: "success",
-      audit_run_id: 12,
-      removed_count: 1,
-      removed: [
-        {
-          line_no: 3,
-          raw: "repo/old:latest",
-          image: "repo/old:latest",
-          reason: "unmatched",
-        },
-      ],
-    });
-    const auth = useAuthStore();
-    const ensureCsrf = vi
-      .spyOn(auth, "ensureCsrf")
-      .mockResolvedValue("csrf-cleanup");
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-
-    await updates.cleanupPending("cleanup-test", [
-      { line_no: 3, raw: "repo/old:latest" },
-    ]);
-
-    expect(ensureCsrf).toHaveBeenCalledTimes(1);
-    expect(updates.pendingCleanup?.audit_run_id).toBe(12);
-    expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
-      cleanup_id: "cleanup-test",
-      lines: [{ line_no: 3, raw: "repo/old:latest" }],
-      confirmation: "remove_unmatched",
-    });
-    expect(
-      ((fetchMock.mock.calls[0][1] as RequestInit).headers as Headers).get(
-        "x-wud-csrf-token",
-      ),
-    ).toBe("csrf-cleanup");
-  });
-
-  it("preserves cleanup success while refreshing pending state when requested", async () => {
-    mockFetch(pendingResponse());
-    useConnectionStore();
-    useSettingsStore();
-    const updates = useUpdatesStore();
-    useRunsStore();
-    updates.pendingCleanup = {
-      status: "success",
-      audit_run_id: 12,
-      removed_count: 1,
-      removed: [
-        {
-          line_no: 3,
-          raw: "repo/old:latest",
-          image: "repo/old:latest",
-          reason: "unmatched",
-        },
-      ],
-    };
-
-    await updates.loadPending({ preserveCleanup: true });
-
-    expect(updates.pendingCleanup?.audit_run_id).toBe(12);
-
-    await updates.loadPending();
-
-    expect(updates.pendingCleanup).toBeNull();
-  });
-
   it("coalesces pending loads and one fresh trailing reload", async () => {
     const first = deferred<Response>();
     const second = deferred<Response>();
@@ -274,26 +204,12 @@ describe("updates store", () => {
     useSettingsStore();
     const updates = useUpdatesStore();
     useRunsStore();
-    updates.pendingCleanup = {
-      status: "success",
-      audit_run_id: 12,
-      removed_count: 0,
-      removed: [],
-    };
 
-    const initial = updates.loadPending({ preserveCleanup: true });
-    const joinedDuringHandoff = initial.then(() =>
-      updates.loadPending({ preserveCleanup: true }),
-    );
-    const joined = updates.loadPending({ preserveCleanup: true });
-    const trailing = updates.loadPending({
-      preserveCleanup: true,
-      freshAfterCurrent: true,
-    });
-    const joinedTrailing = updates.loadPending({
-      preserveCleanup: true,
-      freshAfterCurrent: true,
-    });
+    const initial = updates.loadPending();
+    const joinedDuringHandoff = initial.then(() => updates.loadPending());
+    const joined = updates.loadPending();
+    const trailing = updates.loadPending({ freshAfterCurrent: true });
+    const joinedTrailing = updates.loadPending({ freshAfterCurrent: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(updates.loading).toBe(true);
@@ -316,7 +232,6 @@ describe("updates store", () => {
 
     expect(maxActiveRequests).toBe(1);
     expect(updates.pending?.source_hash).toBe("second-generation");
-    expect(updates.pendingCleanup?.audit_run_id).toBe(12);
     expect(updates.loading).toBe(false);
   });
 
@@ -388,21 +303,6 @@ describe("updates store", () => {
       },
     };
     const plan = planResponse();
-    const removalPlan = {
-      removal_id: "removal-test",
-      source_file: pending.source_file,
-      can_remove: true,
-      selected_line_numbers: [2],
-      lines: [
-        {
-          line_no: 2,
-          raw: "repo/old:1.0",
-          image: "repo/old:1.0",
-          desired_tag: "",
-          digest: "",
-        },
-      ],
-    };
     const rescan = pendingRescanResponse();
     const notes = releaseNotesResponse();
     const notification = releaseNotificationResponse();
@@ -448,7 +348,6 @@ describe("updates store", () => {
     useRunsStore();
     updates.pending = pending;
     updates.plan = plan;
-    updates.pendingRemovalPlan = removalPlan;
     updates.pendingRescan = rescan;
     updates.releaseNotes = notes;
     updates.releaseNotesError = "stale notes";
@@ -492,7 +391,6 @@ describe("updates store", () => {
     expect(updates.error).toBe(
       "Selected update metadata changed. Review the warnings and preview the plan again.",
     );
-    expect(updates.pendingRemovalPlan).toEqual(removalPlan);
     expect(updates.pendingRescan).toEqual(rescan);
     expect(updates.releaseNotes).toBeNull();
     expect(updates.releaseNotesError).toBe("");
@@ -665,12 +563,6 @@ describe("updates store", () => {
     updates.pendingRescan = pendingRescanResponse();
     updates.releaseNotes = releaseNotesResponse();
     updates.releaseNotification = releaseNotificationResponse();
-    updates.pendingCleanup = {
-      status: "success",
-      audit_run_id: 12,
-      removed_count: 0,
-      removed: [],
-    };
 
     await updates.refreshPendingMetadata();
 
@@ -688,7 +580,6 @@ describe("updates store", () => {
     expect(updates.pending?.source.active).toBe("api");
     expect(updates.pending?.items[0].metadata_status).toBe("fresh");
     expect(updates.pendingWudMetadataCheckedAt).toBe("2026-01-02T00:01:00+00:00");
-    expect(updates.pendingCleanup?.audit_run_id).toBe(12);
     expect(updates.plan).toBeNull();
     expect(updates.error).toBe(
       "Selected update metadata changed. Review the warnings and preview the plan again.",

@@ -589,32 +589,10 @@ def test_pending_endpoint_returns_hidden_wud_api_snoozed_candidates(
         json={"line_numbers": [1]},
         headers=headers,
     )
-    cleanup = client.post(
-        "/api/v1/pending/cleanup",
-        json={
-            "cleanup_id": "candidate",
-            "lines": [{"line_no": 1, "raw": candidate["image"]}],
-            "confirmation": "remove_unmatched",
-        },
-        headers=headers,
-    )
-    removal = client.post(
-        "/api/v1/pending/removal-plan",
-        json={"line_numbers": [1]},
-        headers=headers,
-    )
 
     assert plan.status_code == 422
     assert plan.json()["detail"] == (
         "line_numbers must reference actionable WUD target lines: 1"
-    )
-    assert cleanup.status_code == 409
-    assert cleanup.json()["detail"] == (
-        "pending cleanup only supports WUD_OUT_FILE source"
-    )
-    assert removal.status_code == 409
-    assert removal.json()["detail"] == (
-        "pending removal only supports WUD_OUT_FILE source"
     )
     _assert_pending_grouping_did_not_mutate(_fake_docker_calls(fake_root))
 
@@ -1784,3 +1762,29 @@ def test_pending_endpoint_groups_tag_updates_without_allowing_tag_updates(
         == compose_before
     )
     _assert_pending_grouping_did_not_mutate(_fake_docker_calls(fake_root))
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/pending/cleanup", "/api/v1/pending/removal-plan", "/api/v1/pending/removal"],
+)
+def test_removed_pending_file_edit_routes_are_not_served(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+        },
+    )
+
+    response = client.post(path, json={}, headers=_csrf_headers(client))
+
+    # 404 without built static assets; 405 when the SPA catch-all GET route exists.
+    assert response.status_code in {404, 405}
+    assert not any(
+        getattr(route, "path", "") == path and "POST" in getattr(route, "methods", set())
+        for route in client.app.routes
+    )

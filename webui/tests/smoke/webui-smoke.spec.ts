@@ -267,8 +267,6 @@ function planResponse(overrides: Record<string, unknown> = {}) {
     skipped: [],
     issues: [],
     cleanup: {
-      cleanup_id: "",
-      can_remove_unmatched: false,
       items: [],
     },
     apply_preflight: {
@@ -842,55 +840,6 @@ test("read-only pending flow can preflight a stack but cannot apply", async ({ p
   expect(state.calls.some((call) => call.path === "/api/v1/plans")).toBe(true);
   expect(state.calls.some((call) => call.path === "/api/v1/plans/apply")).toBe(false);
 });
-
-for (const kind of ["removal", "cleanup"] as const) {
-  test(`pending ${kind} confirmation supports keyboard focus and cancel`, async ({ page }) => {
-    const state = createState({ authenticated: true, mutationsEnabled: true });
-    await installApiFixtures(page, state);
-    const line = { line_no: 1, raw: "repo/old:latest", image: "repo/old:latest", desired_tag: "", digest: "" };
-    if (kind === "removal") {
-      await page.route("**/api/v1/pending/removal-plan", (route) => json(route, {
-        removal_id: "removal-smoke",
-        source_file: "/out/images.todo",
-        can_remove: true,
-        selected_line_numbers: [1],
-        lines: [line],
-      }));
-    } else {
-      await page.route("**/api/v1/plans", (route) => json(route, planResponse({
-        cleanup: {
-          cleanup_id: "cleanup-smoke",
-          can_remove_unmatched: true,
-          items: [{ ...line, reason: "unmatched", diagnostic: null }],
-        },
-      })));
-    }
-    await page.goto("/#/pending");
-    await page.getByRole("checkbox", { name: /Select stack media/ }).check();
-    if (kind === "removal") {
-      await page.getByText("Queue tools", { exact: true }).click();
-      await page.getByRole("button", { name: "Remove 1 selected entry", exact: true }).click();
-    } else {
-      await page.getByRole("button", { name: /Review selected \(/ }).click();
-      await page.getByRole("dialog").getByRole("button", { name: "Remove 1 unmatched entry", exact: true }).click();
-    }
-    const dialog = page.getByRole("dialog", {
-      name: kind === "removal" ? "Remove selected entries" : "Remove unmatched entries",
-      exact: true,
-    });
-    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
-    const confirm = dialog.getByRole("button", { name: /Remove 1/ });
-    await cancel.focus();
-    await expect(cancel).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(confirm).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(cancel).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(dialog).toBeHidden();
-    expect(state.calls.some((call) => ["/api/v1/pending/removal", "/api/v1/pending/cleanup"].includes(call.path))).toBe(false);
-  });
-}
 
 test("mutation-enabled pending flow applies and links to run details", async ({
   page,

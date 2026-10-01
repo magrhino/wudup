@@ -1,6 +1,4 @@
-import type { PendingCleanupLine } from "../types";
-
-export function cleanupLineKey(line: PendingCleanupLine): string {
+export function cleanupLineKey(line: { line_no: number; raw: string }): string {
   return `${line.line_no}\u0000${line.raw}`;
 }
 

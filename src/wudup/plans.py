@@ -122,7 +122,6 @@ __all__ = [
     "UnmatchedDiagnostic",
     "build_dry_run_plan",
     "build_dry_run_plan_from_pending_source",
-    "build_unmatched_cleanup",
     "resolve_pending_groups",
 ]
 
@@ -328,11 +327,9 @@ class _PlanBuilder(_UpdateScopeMixin):
                     host_docker_base=self.host_docker_base,
                 )
             cleanup = _cleanup_for_skipped(
-                self.config,
                 parsed.targets,
                 cleanup_skipped,
                 cleanup_diagnostics,
-                host_docker_base=self.host_docker_base,
             )
             issues.extend(tag_update_plan_issues(matches))
             issues.extend(manifest_issues(self.docker, matches))
@@ -913,54 +910,6 @@ def _build_dry_run_plan_from_pending_source(
         source=source,
         known_digest_provenance_by_service=known_digest_provenance_by_service or {},
     ).build()
-
-
-def build_unmatched_cleanup(
-    config: UpdaterConfig,
-    *,
-    line_numbers: Sequence[int],
-    parsed: ParsedWudFile | None = None,
-    host_docker_base: Path | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> DryRunPlanCleanup:
-    selected = _selected_line_numbers(line_numbers)
-    full_parse = parsed or _read_wud_file(config.wud_out_file)
-    _validate_selected_targets(full_parse, selected)
-    selected_parse = _parsed_for_selected_lines(full_parse, selected)
-    runner = CommandRunner(env=environ) if environ is not None else CommandRunner()
-    docker = DockerCli(runner=runner)
-    compose = ComposeCli(runner=runner)
-
-    try:
-        stacks = compose.discover_stacks(
-            config.docker_base,
-            project_base=host_docker_base,
-            ignore_paths=config.compose_ignore_paths,
-        )
-    except ComposeDiscoveryError:
-        return DryRunPlanCleanup()
-
-    _matches, skipped = _match_targets(
-        selected_parse,
-        stacks,
-        docker,
-        allow_tag_updates=True,
-        allow_digest_pin_rematch=config.digest_pin_updates,
-    )
-    diagnostics = _unmatched_diagnostics(
-        config,
-        selected_parse.targets,
-        skipped,
-        docker,
-        host_docker_base=host_docker_base,
-    )
-    return _cleanup_for_skipped(
-        config,
-        selected_parse.targets,
-        skipped,
-        diagnostics,
-        host_docker_base=host_docker_base,
-    )
 
 
 def resolve_pending_groups(

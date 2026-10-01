@@ -96,8 +96,6 @@ function selfUpdatePlanStatus(): SelfUpdatePlanResponse {
       skipped: [],
       issues: [],
       cleanup: {
-        cleanup_id: "",
-        can_remove_unmatched: false,
         items: [],
       },
       apply_preflight: {
@@ -195,9 +193,6 @@ describe("webApi", () => {
         [{ service_key: "media/app", choice: "switch-to-concrete" }],
         "csrf",
       ),
-      webApi.cleanupPending("cleanup", [{ line_no: 1, raw: "repo/app:1.0" }], "csrf"),
-      webApi.createRemovalPlan([1], "csrf"),
-      webApi.removeSelectedPending("removal", [{ line_no: 1, raw: "repo/app:1.0" }], "csrf"),
       webApi.rescanPending("selected", [pendingRescanLine()], "csrf"),
       webApi.servicePolicies(),
       webApi.snoozes("active"),
@@ -223,7 +218,7 @@ describe("webApi", () => {
       webApi.runLog(1),
     ]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(47);
+    expect(fetchMock).toHaveBeenCalledTimes(44);
     for (const call of fetchMock.mock.calls) {
       expect(requestInit(call).credentials).toBe("include");
     }
@@ -355,17 +350,6 @@ describe("webApi", () => {
       "pending_select",
       "csrf-token",
     );
-    await webApi.cleanupPending(
-      "cleanup",
-      [{ line_no: 1, raw: "repo/app:1.0" }],
-      "csrf-token",
-    );
-    await webApi.createRemovalPlan([1], "csrf-token");
-    await webApi.removeSelectedPending(
-      "removal",
-      [{ line_no: 1, raw: "repo/app:1.0" }],
-      "csrf-token",
-    );
     await webApi.rescanPending("selected", [pendingRescanLine()], "csrf-token");
     await webApi.stateOperation(operation, "csrf-token");
     await webApi.planSelfUpdate("csrf-token");
@@ -404,21 +388,10 @@ describe("webApi", () => {
     }
   });
 
-  it("serializes cleanup, plan, and job payloads exactly", async () => {
+  it("serializes settings, plan, and job payloads exactly", async () => {
     const fetchMock = mockFetch({});
     const tagOverrides = [{ line_no: 4, tag: "2.0" }];
 
-    await webApi.cleanupPending(
-      "cleanup-id",
-      [{ line_no: 3, raw: "repo/old:latest" }],
-      "csrf",
-    );
-    await webApi.createRemovalPlan([3], "csrf");
-    await webApi.removeSelectedPending(
-      "removal-id",
-      [{ line_no: 3, raw: "repo/old:latest" }],
-      "csrf",
-    );
     await webApi.updateManagedSettings(
       { theme_preference: "dark", onboarding_checklist: "dismissed" },
       "csrf",
@@ -433,37 +406,24 @@ describe("webApi", () => {
     await webApi.applyPlan("plan-id", [4], true, tagOverrides, [], "csrf");
 
     expect(jsonRequestBody(fetchMock.mock.calls[0])).toEqual({
-      cleanup_id: "cleanup-id",
-      lines: [{ line_no: 3, raw: "repo/old:latest" }],
-      confirmation: "remove_unmatched",
-    });
-    expect(jsonRequestBody(fetchMock.mock.calls[1])).toEqual({
-      line_numbers: [3],
-    });
-    expect(jsonRequestBody(fetchMock.mock.calls[2])).toEqual({
-      removal_id: "removal-id",
-      lines: [{ line_no: 3, raw: "repo/old:latest" }],
-      confirmation: "remove_selected",
-    });
-    expect(jsonRequestBody(fetchMock.mock.calls[3])).toEqual({
       values: {
         theme_preference: "dark",
         onboarding_checklist: "dismissed",
       },
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[4])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[1])).toEqual({
       status: "in_progress",
       step: "pending_preflight",
     });
-    expect(requestInit(fetchMock.mock.calls[5]).body).toBeUndefined();
-    expect(jsonRequestBody(fetchMock.mock.calls[6])).toEqual({
+    expect(requestInit(fetchMock.mock.calls[2]).body).toBeUndefined();
+    expect(jsonRequestBody(fetchMock.mock.calls[3])).toEqual({
       confirmation: "pull_image",
       current_tag: "v0.24.2",
       latest_tag: "v0.25.0",
       target_image: "ghcr.io/magrhino/wudup:latest",
       restart_container: "wudup",
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[7])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[4])).toEqual({
       confirmation: "prepare_tag_update",
       plan_id: "self-plan",
       current_tag: "v0.24.2",
@@ -471,10 +431,10 @@ describe("webApi", () => {
       target_image: "ghcr.io/magrhino/wudup:latest",
       restart_container: "wudup",
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[8])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[5])).toEqual({
       confirmation: "restart_container",
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[9])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[6])).toEqual({
       line_numbers: [4],
       allow_tag_updates: true,
       tag_overrides: tagOverrides,
@@ -482,7 +442,7 @@ describe("webApi", () => {
       tag_stream_label_rewrite_approvals: [],
       digest_pin_label_rewrite_approvals: [],
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[10])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[7])).toEqual({
       plan_id: "plan-id",
       line_numbers: [4],
       allow_tag_updates: true,
@@ -492,7 +452,7 @@ describe("webApi", () => {
       digest_pin_label_rewrite_approvals: [],
       confirmation: "apply",
     });
-    expect(jsonRequestBody(fetchMock.mock.calls[11])).toEqual({
+    expect(jsonRequestBody(fetchMock.mock.calls[8])).toEqual({
       plan_id: "plan-id",
       line_numbers: [4],
       allow_tag_updates: true,

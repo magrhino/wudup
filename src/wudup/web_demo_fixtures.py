@@ -726,7 +726,6 @@ def _fixture_payload(context: SimpleNamespace) -> dict[str, Any]:
             "pending": _dump(web_pending.pending_response(settings)),
             "updateTargets": _dump(web_pending.update_targets_response(settings)),
             "planCases": [],
-            "removalCases": [],
             "retagTargets": retag_targets,
             "retagCases": [],
             "releaseNotes": _dump(web_release_notes.api_release_notes(request)),
@@ -797,7 +796,6 @@ def _static_demo_payload(data: dict[str, Any]) -> dict[str, Any]:
         ]
 
     payload["planCases"] = []
-    payload["removalCases"] = []
     payload["retagCases"] = []
     return payload
 
@@ -954,9 +952,6 @@ def _normalize_self_update_plan(plan: SelfUpdatePlanResponse) -> dict[str, Any]:
     data = _dump(plan)
     data["plan"]["plan_id"] = "demo-self-update-plan"
     data["plan"]["source_file"] = "demo/out/.self-update-plan.todo"
-    cleanup = data["plan"].get("cleanup", {})
-    if cleanup.get("cleanup_id"):
-        cleanup["cleanup_id"] = "demo-self-update-plan-cleanup"
     return data
 
 

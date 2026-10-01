@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, Check, CheckCircle2, Play, Trash2, XCircle } from "@lucide/vue";
+import { AlertTriangle, Check, CheckCircle2, Play, XCircle } from "@lucide/vue";
 import { NAlert, NButton, NTag } from "naive-ui";
 import { computed } from "vue";
 import UpdateScopeSummary from "../UpdateScopeSummary.vue";
@@ -26,6 +26,7 @@ import {
 import {
   actionCommand,
   applyPreflightCheckLabel,
+  assistantDetailList,
   applyPreflightCheckType,
   digestPinLabelIssueProposedRegex,
   issueDetailString,
@@ -58,9 +59,6 @@ const props = defineProps<{
   applyReadinessSummary: string;
   applyVisible: boolean;
   cleanupAvailable: boolean;
-  cleanupButtonLabel: string;
-  cleanupDisabled: boolean;
-  cleanupDisabledMessage: string;
   cleanupItems: PlanCleanupItem[];
   cleanupReviewSummary: string;
   digestPinLabelApprovalApproved: (issue: PlanIssue) => boolean;
@@ -102,10 +100,22 @@ const emit = defineEmits<{
   (event: "approve-tag-stream-label-rewrite", issue: PlanIssue): void;
   (event: "choose-tag-stream", issue: PlanIssue, decision: TagStreamDecision): void;
   (event: "close"): void;
-  (event: "open-cleanup"): void;
 }>();
 
 const changes = computed(() => planChanges(props.plan));
+const unmatchedGuidanceSections = [
+  { key: "preflight_findings", title: "Preflight found" },
+  { key: "possible_reasons", title: "Likely causes" },
+  { key: "recommended_actions", title: "Recommended actions" },
+] as const;
+const unmatchedGuidance = computed(() =>
+  unmatchedGuidanceSections
+    .map(section => ({
+      title: section.title,
+      items: assistantDetailList(props.cleanupItems, section.key),
+    }))
+    .filter(section => section.items.length),
+);
 const reviewReasons = computed(() => {
   const cleanupLines = new Set(props.cleanupItems.map(item => item.line_no));
   return [
@@ -241,7 +251,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       <CoreUpdateTourPanel
         step="pending_preflight"
         title="Read the plan like a checklist"
-        detail="Matched services and images show what will change. Issues block apply, tag rewrites are called out, and cleanup actions only edit the pending file after confirmation."
+        detail="Matched services and images show what will change. Issues block apply, tag rewrites are called out, and unmatched entries explain why no Compose service was found."
         next-label="Continue to apply guidance"
         next-step="pending_apply"
         @advanced="emit('close')"
@@ -521,14 +531,6 @@ function tagStreamRulePreview(issue: PlanIssue): string {
         </div>
       </section>
 
-      <n-alert
-        v-if="cleanupDisabledMessage"
-        class="preflight-block"
-        type="warning"
-      >
-        {{ cleanupDisabledMessage }}
-      </n-alert>
-
       <section
         v-if="cleanupAvailable"
         class="preflight-impact preflight-block"
@@ -557,6 +559,24 @@ function tagStreamRulePreview(issue: PlanIssue): string {
             <em>
               <span>{{ staleDiagnosticDetail(item) }}</span>
             </em>
+          </div>
+        </div>
+        <div
+          v-if="unmatchedGuidance.length"
+          class="unmatched-guidance"
+          aria-label="Unmatched entry guidance"
+        >
+          <div
+            v-for="section in unmatchedGuidance"
+            :key="section.title"
+            class="unmatched-guidance-section"
+          >
+            <strong>{{ section.title }}</strong>
+            <ul>
+              <li v-for="entry in section.items" :key="entry" class="wrap-anywhere">
+                {{ entry }}
+              </li>
+            </ul>
           </div>
         </div>
       </section>
@@ -659,20 +679,6 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 
     <template #footer>
       <PreflightFooterActions @secondary="emit('close')">
-        <n-button
-          v-if="cleanupAvailable"
-          type="warning"
-          size="small"
-          secondary
-          :disabled="cleanupDisabled"
-          :loading="loading"
-          @click="emit('open-cleanup')"
-        >
-          <template #icon>
-            <Trash2 :size="16" />
-          </template>
-          {{ cleanupButtonLabel }}
-        </n-button>
         <template #primary>
           <n-button
             v-if="applyVisible"
@@ -694,6 +700,43 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 </template>
 
 <style scoped>
+.unmatched-guidance {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb,
+      var(--color-border) 68%,
+      var(--color-warning-fg) 32%);
+  border-radius: 7px;
+  background: color-mix(in srgb,
+      var(--color-surface) 86%,
+      var(--color-warning-bg) 14%);
+}
+
+.unmatched-guidance-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.83rem;
+  line-height: 1.4;
+}
+
+.unmatched-guidance-section strong {
+  color: var(--color-ink);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.unmatched-guidance-section ul {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .plan-actions {
   display: grid;
   gap: 8px;

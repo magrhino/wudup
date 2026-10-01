@@ -7,11 +7,8 @@ import {
   type ApplyJobLogResponse,
   type ApplyJobResponse,
   type DigestPinLabelRewriteApprovalRequest,
-  type PendingCleanupLine,
-  type PendingCleanupResponse,
   type PendingGroupedItem,
   type PendingMetadataRefreshItem,
-  type PendingRemovalPlanResponse,
   type PendingRescanLine,
   type PendingRescanResponse,
   type PendingRescanScope,
@@ -57,7 +54,6 @@ const PENDING_PLAN_METADATA_CHANGED_MESSAGE =
   "Selected update metadata changed. Review the warnings and preview the plan again.";
 
 type PendingLoadOptions = {
-  preserveCleanup?: boolean;
   freshAfterCurrent?: boolean;
 };
 
@@ -147,8 +143,6 @@ export const useUpdatesStore = defineStore("updates", () => {
   });
   const securityScanJob = ref<SecurityScanJobResponse | null>(null);
   const plan = ref<PlanResponse | null>(null);
-  const pendingCleanup = ref<PendingCleanupResponse | null>(null);
-  const pendingRemovalPlan = ref<PendingRemovalPlanResponse | null>(null);
   const pendingRescan = ref<PendingRescanResponse | null>(null);
   const applyJob = ref<ApplyJobResponse | null>(null);
   const applyJobLog = ref<ApplyJobLogResponse | null>(null);
@@ -172,7 +166,6 @@ export const useUpdatesStore = defineStore("updates", () => {
   const error = ref("");
   let pendingLoadInFlight: Promise<void> | null = null;
   let pendingLoadTrailing: Promise<void> | null = null;
-  let pendingLoadTrailingPreservesCleanup = true;
 
   async function loadWithState(work: () => Promise<void>): Promise<void> {
     activeLoads += 1;
@@ -184,8 +177,8 @@ export const useUpdatesStore = defineStore("updates", () => {
     }
   }
 
-  function startPendingLoad(options: PendingLoadOptions): Promise<void> {
-    const load = loadWithState(() => reloadPending(options)).finally(() => {
+  function startPendingLoad(): Promise<void> {
+    const load = loadWithState(() => reloadPending()).finally(() => {
       if (pendingLoadInFlight === load) {
         pendingLoadInFlight = pendingLoadTrailing;
       }
@@ -197,13 +190,12 @@ export const useUpdatesStore = defineStore("updates", () => {
   function loadPending(options: PendingLoadOptions = {}): Promise<void> {
     const active = pendingLoadInFlight;
     if (active === null) {
-      return startPendingLoad(options);
+      return startPendingLoad();
     }
     if (!options.freshAfterCurrent) {
       return pendingLoadTrailing ?? active;
     }
 
-    pendingLoadTrailingPreservesCleanup &&= options.preserveCleanup === true;
     if (pendingLoadTrailing !== null) {
       return pendingLoadTrailing;
     }
@@ -211,15 +203,12 @@ export const useUpdatesStore = defineStore("updates", () => {
     const trailing = active
       .catch(() => undefined)
       .then(() => {
-        const preserveCleanup = pendingLoadTrailingPreservesCleanup;
         pendingLoadTrailing = null;
-        pendingLoadTrailingPreservesCleanup = true;
-        return startPendingLoad({ preserveCleanup });
+        return startPendingLoad();
       })
       .finally(() => {
         if (pendingLoadTrailing === trailing) {
           pendingLoadTrailing = null;
-          pendingLoadTrailingPreservesCleanup = true;
         }
       });
     pendingLoadTrailing = trailing;
@@ -256,10 +245,7 @@ export const useUpdatesStore = defineStore("updates", () => {
       const sourceHashChanged =
         response.source_hash !== (current.source_hash ?? "");
       clearReleaseNoteDisplay();
-      await loadPending({
-        preserveCleanup: true,
-        freshAfterCurrent: true,
-      });
+      await loadPending({ freshAfterCurrent: true });
       const selectedMetadataChanged =
         sourceHashChanged ||
         pendingLinesChanged(
@@ -512,8 +498,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     const auth = useAuthStore();
     await loadWithState(async () => {
       plan.value = null;
-      pendingCleanup.value = null;
-      pendingRemovalPlan.value = null;
       applyJob.value = null;
       applyJobLog.value = null;
       plan.value = await webApi.createPlan(
@@ -531,70 +515,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     });
   }
 
-  async function cleanupPending(
-    cleanupId: string,
-    lines: PendingCleanupLine[],
-  ): Promise<PendingCleanupResponse> {
-    const auth = useAuthStore();
-    let response: PendingCleanupResponse | null = null;
-    await loadWithState(async () => {
-      response = await webApi.cleanupPending(
-        cleanupId,
-        lines,
-        await auth.ensureCsrf(),
-      );
-      pendingCleanup.value = response;
-      plan.value = null;
-      pendingRemovalPlan.value = null;
-    });
-    if (response === null) {
-      throw new Error("Pending cleanup did not return a response");
-    }
-    return response;
-  }
-
-  async function createRemovalPlan(
-    lineNumbers: number[],
-  ): Promise<PendingRemovalPlanResponse> {
-    const auth = useAuthStore();
-    let response: PendingRemovalPlanResponse | null = null;
-    await loadWithState(async () => {
-      plan.value = null;
-      pendingCleanup.value = null;
-      pendingRemovalPlan.value = await webApi.createRemovalPlan(
-        lineNumbers,
-        await auth.ensureCsrf(),
-      );
-      response = pendingRemovalPlan.value;
-    });
-    if (response === null) {
-      throw new Error("Pending removal plan did not return a response");
-    }
-    return response;
-  }
-
-  async function removeSelectedPending(
-    removalId: string,
-    lines: PendingCleanupLine[],
-  ): Promise<PendingCleanupResponse> {
-    const auth = useAuthStore();
-    let response: PendingCleanupResponse | null = null;
-    await loadWithState(async () => {
-      response = await webApi.removeSelectedPending(
-        removalId,
-        lines,
-        await auth.ensureCsrf(),
-      );
-      pendingCleanup.value = response;
-      pendingRemovalPlan.value = null;
-      plan.value = null;
-    });
-    if (response === null) {
-      throw new Error("Pending removal did not return a response");
-    }
-    return response;
-  }
-
   async function rescanPending(
     scope: PendingRescanScope,
     lineNumbers: number[] = [],
@@ -609,8 +529,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     let response: PendingRescanResponse | null = null;
     await loadWithState(async () => {
       plan.value = null;
-      pendingCleanup.value = null;
-      pendingRemovalPlan.value = null;
       pendingRescan.value = null;
       response = await webApi.rescanPending(
         scope,
@@ -633,17 +551,10 @@ export const useUpdatesStore = defineStore("updates", () => {
 
   function clearPlan(): void {
     plan.value = null;
-    pendingRemovalPlan.value = null;
   }
 
-  async function reloadPending(
-    options: Pick<PendingLoadOptions, "preserveCleanup"> = {},
-  ): Promise<void> {
+  async function reloadPending(): Promise<void> {
     plan.value = null;
-    pendingRemovalPlan.value = null;
-    if (!options.preserveCleanup) {
-      pendingCleanup.value = null;
-    }
     setPending(await webApi.pending());
   }
 
@@ -942,8 +853,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     currentSecurityScanItems,
     securityScanJob,
     plan,
-    pendingCleanup,
-    pendingRemovalPlan,
     pendingRescan,
     applyJob,
     applyJobLog,
@@ -973,9 +882,6 @@ export const useUpdatesStore = defineStore("updates", () => {
     refreshSecurityScans,
     securityScanFor,
     createPlan,
-    cleanupPending,
-    createRemovalPlan,
-    removeSelectedPending,
     rescanPending,
     clearPlan,
     applyPlan,

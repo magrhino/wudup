@@ -15,7 +15,7 @@ def test_static_demo_fixture_generation_matches_read_only_contract() -> None:
     assert data["auth"]["session"]["dev_auth_bypass"] is False
     assert data["auth"]["session"]["mutations_enabled"] is False
     assert data["planCases"] == []
-    assert data["removalCases"] == []
+    assert "removalCases" not in data
     assert data["retagCases"] == []
     assert any(
         item["service_key"] == "media/wudup"

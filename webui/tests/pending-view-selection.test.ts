@@ -24,6 +24,9 @@ import {
   mountPendingView,
   pendingWithUnmatched,
   setupStores,
+  stalePendingPossibleReasons,
+  stalePendingPreflightFindings,
+  stalePendingRecommendedActions,
   unmatchedPendingItem,
 } from "./helpers/viewSecurity";
 
@@ -40,10 +43,7 @@ async function selectAllAndPreview(
     ?.trigger("click");
 }
 
-function unmatchedCleanupPlan(
-  item: ReturnType<typeof unmatchedPendingItem>,
-  canRemoveUnmatched: boolean,
-) {
+function unmatchedCleanupPlan(item: ReturnType<typeof unmatchedPendingItem>) {
   return planResponse({
     can_apply: false,
     status: "blocked",
@@ -78,8 +78,6 @@ function unmatchedCleanupPlan(
       },
     ],
     cleanup: {
-      cleanup_id: "cleanup-test",
-      can_remove_unmatched: canRemoveUnmatched,
       items: [
         {
           line_no: 1,
@@ -289,15 +287,14 @@ describe("pending view selection actions", () => {
     ).toBe(true);
   });
 
-  it("shows unmatched cleanup preview disabled in read-only mode", async () => {
+  it("shows unmatched entries in the plan review without a removal action", async () => {
     const item = unmatchedPendingItem();
     const { pinia, settings, updates } = setupStores(false);
     updates.pending = pendingWithUnmatched(item);
     mockPendingLifecycle(settings, updates);
     vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = unmatchedCleanupPlan(item, false);
+      updates.plan = unmatchedCleanupPlan(item);
     });
-    const cleanupPending = vi.spyOn(updates, "cleanupPending");
     const wrapper = mountPendingView(pinia);
 
     expect(wrapper.text()).toContain("Stale pending entries");
@@ -322,22 +319,30 @@ describe("pending view selection actions", () => {
     const dialog = wrapper.find('[role="dialog"]');
     expect(dialog.text()).toContain("Unmatched pending entries");
     expect(dialog.text()).toContain(
-      "1 entry needs review: Compose file missing. Cleanup only removes WUD pending lines.",
+      "1 entry needs review: Compose file missing.",
     );
     expect(dialog.text()).toContain(
       "Running container exists, but its Compose file is missing or archived.",
     );
-    expect(dialog.text()).not.toContain("Preflight found");
+    const guidance = dialog.find('[aria-label="Unmatched entry guidance"]');
+    expect(guidance.exists()).toBe(true);
+    for (const entry of [
+      ...stalePendingPreflightFindings,
+      ...stalePendingPossibleReasons,
+      ...stalePendingRecommendedActions,
+    ]) {
+      expect(guidance.text()).toContain(entry);
+    }
+    expect(guidance.findAll("li")).toHaveLength(
+      stalePendingPreflightFindings.length +
+        stalePendingPossibleReasons.length +
+        stalePendingRecommendedActions.length,
+    );
     expect(dialog.text()).not.toContain("No Compose service matched repo/old:latest.");
     expect(dialog.find(".warning-list").exists()).toBe(false);
-    expect(dialog.text()).toContain("Read-only mode is active");
-    const cleanupButton = dialog
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 unmatched entry"));
-    expect(cleanupButton?.attributes("disabled")).toBeDefined();
-    await cleanupButton?.trigger("click");
-
-    expect(cleanupPending).not.toHaveBeenCalled();
+    expect(
+      dialog.findAll("button").some((button) => button.text().includes("Remove")),
+    ).toBe(false);
   });
 
   it("refreshes pending metadata from status timestamp changes while mounted", async () => {
@@ -577,97 +582,10 @@ describe("pending view selection actions", () => {
     expect(wrapper.text()).not.toContain("Security scans loading");
   });
 
-  it("confirms unmatched cleanup before refreshing pending state", async () => {
-    const item = unmatchedPendingItem();
-    const { pinia, updates, runs } = setupStores(true);
-    updates.pending = pendingWithUnmatched(item);
-    const loadPending = vi.spyOn(updates, "loadPending").mockResolvedValue();
-    const loadReleaseNotes = vi.spyOn(updates, "loadReleaseNotes").mockResolvedValue();
-    const refreshReleaseNotes = vi
-      .spyOn(updates, "refreshReleaseNotes")
-      .mockResolvedValue();
-    const loadRuns = vi.spyOn(runs, "loadRuns").mockResolvedValue();
-    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = unmatchedCleanupPlan(item, true);
-    });
-    const cleanupPending = vi
-      .spyOn(updates, "cleanupPending")
-      .mockImplementation(async () => {
-        const response = {
-          status: "success" as const,
-          audit_run_id: 42,
-          removed_count: 1,
-          removed: [
-            {
-              line_no: 1,
-              raw: "repo/old:latest",
-              image: "repo/old:latest",
-              reason: "unmatched",
-            },
-          ],
-        };
-        updates.pendingCleanup = response;
-        updates.plan = null;
-        return response;
-      });
-    const wrapper = mountPendingView(pinia);
-
-    await wrapper
-      .find('input[aria-label="Select update repo/old:latest"]')
-      .setValue(true);
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Review selected ("))
-      ?.trigger("click");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("Unmatched pending entries");
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 unmatched entry"))
-      ?.trigger("click");
-    await flushPromises();
-
-    const cleanupDialog = wrapper
-      .findAll('[role="dialog"]')
-      .find((dialog) => dialog.text().includes("Pending cleanup"));
-    expect(cleanupDialog?.text()).toContain("Stale entry guidance");
-    expect(cleanupDialog?.text()).toContain("Docker labels reference docker-compose.yml.");
-    expect(cleanupDialog?.text()).toContain(
-      "The stack was moved or the Compose file path changed after the container was created.",
-    );
-    expect(cleanupDialog?.text()).toContain(
-      "Containers, images, Compose services, and Compose files are not deleted or updated.",
-    );
-    expect(cleanupDialog?.text()).toContain("Source lines");
-    expect(cleanupDialog?.text()).toContain("#1 repo/old:latest");
-    expect(cleanupDialog?.text()).toContain("repo/old:latest");
-
-    await cleanupDialog
-      ?.findAll("button")
-      .find((button) => button.text().includes("Remove 1 unmatched entry"))
-      ?.trigger("click");
-    await flushPromises();
-
-    expect(cleanupPending).toHaveBeenCalledWith("cleanup-test", [
-      { line_no: 1, raw: "repo/old:latest" },
-    ]);
-    expect(loadPending).toHaveBeenCalledWith({
-      preserveCleanup: true,
-      freshAfterCurrent: true,
-    });
-    expect(loadReleaseNotes).toHaveBeenCalled();
-    expect(refreshReleaseNotes).toHaveBeenCalled();
-    expect(loadRuns).toHaveBeenCalled();
-    expect(wrapper.text()).toContain("1 pending entry removed from images.todo.");
-    expect(wrapper.text()).toContain("Details");
-  });
-
-  it("disables selected pending removal in read-only mode", async () => {
-    const { pinia, settings, updates } = setupStores(false);
+  it("does not offer pending entry removal for a selection", async () => {
+    const { pinia, settings, updates } = setupStores(true);
     updates.pending = pendingResponse();
     mockPendingLifecycle(settings, updates);
-    const createRemovalPlan = vi.spyOn(updates, "createRemovalPlan");
     const wrapper = mountPendingView(pinia);
 
     await wrapper
@@ -675,14 +593,10 @@ describe("pending view selection actions", () => {
       .setValue(true);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Read-only mode is active");
-    const removalButton = wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 selected entry"));
-    expect(removalButton?.attributes("disabled")).toBeDefined();
-    await removalButton?.trigger("click");
-
-    expect(createRemovalPlan).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Review selected (");
+    expect(
+      wrapper.findAll("button").some((button) => button.text().includes("Remove")),
+    ).toBe(false);
   });
 
   it("keeps release-note notifications post-run only", async () => {
@@ -865,183 +779,6 @@ describe("pending view selection actions", () => {
       ?.trigger("click");
 
     expect(rescanPending).toHaveBeenCalledWith("selected", [1]);
-  });
-
-  it("disables selected pending removal for API pending source", async () => {
-    const item = pendingItem({
-      source: "api",
-      source_id: "docker.local.app",
-    });
-    const { pinia, settings, updates } = setupStores(true);
-    updates.pending = {
-      ...pendingResponse([item]),
-      source_file: "WUD API",
-      source: pendingSourceInfo({
-        configured: "api",
-        active: "api",
-        label: "WUD API",
-      }),
-    };
-    mockPendingLifecycle(settings, updates);
-    const createRemovalPlan = vi.spyOn(updates, "createRemovalPlan");
-    const wrapper = mountPendingView(pinia);
-
-    await wrapper
-      .find('input[aria-label="Select stack media"]')
-      .setValue(true);
-    await flushPromises();
-
-    expect(wrapper.text()).toContain(
-      "WUD API entries cannot be removed from the WebUI because this source is read from WUD.",
-    );
-    const removalButton = wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 selected entry"));
-    expect(removalButton?.attributes("disabled")).toBeDefined();
-    await removalButton?.trigger("click");
-
-    expect(createRemovalPlan).not.toHaveBeenCalled();
-  });
-
-  it("disables unmatched cleanup for API pending source", async () => {
-    const item = {
-      ...unmatchedPendingItem(),
-      source: "api" as const,
-      source_id: "docker.local.old",
-    };
-    const { pinia, settings, updates } = setupStores(true);
-    updates.pending = {
-      ...pendingWithUnmatched(item),
-      source_file: "WUD API",
-      source: pendingSourceInfo({
-        configured: "api",
-        active: "api",
-        label: "WUD API",
-      }),
-    };
-    mockPendingLifecycle(settings, updates);
-    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
-      updates.plan = unmatchedCleanupPlan(item, false);
-    });
-    const cleanupPending = vi.spyOn(updates, "cleanupPending");
-    const wrapper = mountPendingView(pinia);
-
-    await wrapper
-      .find('input[aria-label="Select update repo/old:latest"]')
-      .setValue(true);
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Review selected ("))
-      ?.trigger("click");
-    await flushPromises();
-
-    const dialog = wrapper.find('[role="dialog"]');
-    expect(dialog.text()).toContain("Unmatched pending entries");
-    expect(dialog.text()).toContain(
-      "WUD API entries cannot be removed from the WebUI because this source is read from WUD.",
-    );
-    const cleanupButton = dialog
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 unmatched entry"));
-    expect(cleanupButton?.attributes("disabled")).toBeDefined();
-    await cleanupButton?.trigger("click");
-
-    expect(cleanupPending).not.toHaveBeenCalled();
-  });
-
-  it("confirms selected pending removal before refreshing pending state", async () => {
-    const item = pendingItem({
-      line_no: 1,
-      raw: "repo/app:1.0 sha256=abc",
-      image: "repo/app:1.0",
-      repo: "repo/app",
-    });
-    const { pinia, updates, runs } = setupStores(true);
-    updates.pending = pendingResponse([item]);
-    const loadPending = vi.spyOn(updates, "loadPending").mockResolvedValue();
-    const loadReleaseNotes = vi.spyOn(updates, "loadReleaseNotes").mockResolvedValue();
-    const refreshReleaseNotes = vi
-      .spyOn(updates, "refreshReleaseNotes")
-      .mockResolvedValue();
-    const loadRuns = vi.spyOn(runs, "loadRuns").mockResolvedValue();
-    const removalPlan = {
-      removal_id: "removal-test",
-      source_file: "/out/images.todo",
-      can_remove: true,
-      selected_line_numbers: [1],
-      lines: [
-        {
-          line_no: 1,
-          raw: item.raw,
-          image: item.image,
-          desired_tag: item.desired_tag,
-          digest: item.digest,
-        },
-      ],
-    };
-    const createRemovalPlan = vi
-      .spyOn(updates, "createRemovalPlan")
-      .mockImplementation(async () => {
-        updates.pendingRemovalPlan = removalPlan;
-        return removalPlan;
-      });
-    const removeSelectedPending = vi
-      .spyOn(updates, "removeSelectedPending")
-      .mockImplementation(async () => {
-        const response = {
-          status: "success" as const,
-          audit_run_id: 77,
-          removed_count: 1,
-          removed: [
-            {
-              line_no: 1,
-              raw: item.raw,
-              image: item.image,
-              reason: "selected",
-            },
-          ],
-        };
-        updates.pendingCleanup = response;
-        updates.pendingRemovalPlan = null;
-        return response;
-      });
-    const wrapper = mountPendingView(pinia);
-
-    await wrapper
-      .find('input[aria-label="Select stack media"]')
-      .setValue(true);
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Remove 1 selected entry"))
-      ?.trigger("click");
-    await flushPromises();
-
-    expect(createRemovalPlan).toHaveBeenCalledWith([1]);
-    const removalDialog = wrapper
-      .findAll('[role="dialog"]')
-      .find((dialog) => dialog.text().includes("Pending removal"));
-    expect(removalDialog?.text()).toContain("Source lines");
-    expect(removalDialog?.text()).toContain("#1 repo/app:1.0");
-    expect(removalDialog?.text()).toContain("Containers, images, and Compose services are not deleted or updated");
-
-    await removalDialog
-      ?.findAll("button")
-      .find((button) => button.text().includes("Remove 1 selected entry"))
-      ?.trigger("click");
-    await flushPromises();
-
-    expect(removeSelectedPending).toHaveBeenCalledWith("removal-test", [
-      { line_no: 1, raw: item.raw },
-    ]);
-    expect(loadPending).toHaveBeenCalledWith({
-      preserveCleanup: true,
-      freshAfterCurrent: true,
-    });
-    expect(loadReleaseNotes).toHaveBeenCalled();
-    expect(refreshReleaseNotes).toHaveBeenCalled();
-    expect(loadRuns).toHaveBeenCalled();
-    expect(wrapper.text()).toContain("1 pending entry removed from images.todo.");
-    expect(wrapper.text()).toContain("Details");
   });
 
   it("starts a stack update with the full stack line set", async () => {

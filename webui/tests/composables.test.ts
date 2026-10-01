@@ -32,7 +32,10 @@ import {
   usePendingApplyJob,
   type PendingApplyJobPanelRef,
 } from "../src/views/pending/usePendingApplyJob";
-import { tagStreamLabelApprovalIssueKey } from "../src/views/pending/planReviewFormatters";
+import {
+  assistantDetailList,
+  tagStreamLabelApprovalIssueKey,
+} from "../src/views/pending/planReviewFormatters";
 import { usePendingPlanReviewState } from "../src/views/pending/usePendingPlanReviewState";
 import { usePendingQueueState } from "../src/views/pending/usePendingQueueState";
 import {
@@ -353,18 +356,14 @@ function setupPendingPlanReview(mutationsEnabled = true) {
   const auth = useAuthStore();
   auth.session = authSession({ mutations_enabled: mutationsEnabled });
   const updates = useUpdatesStore();
-  const selectedLineNumbers = ref<number[]>([]);
   const selectedSelections = ref<PlanSelectionRequest[]>([]);
   const selectedSelectionKeySet = computed(
     () => new Set(selectedSelections.value.map(pendingSelectionKey)),
   );
   const stackGroups = computed(() => updates.pending?.grouping.groups ?? []);
   const unmatchedItems = computed(() => updates.pending?.grouping.unmatched ?? []);
-  const pendingSourceLabel = computed(() => "images.todo");
   const tagOverrideErrorForLines = vi.fn(() => "");
   const state = usePendingPlanReviewState({
-    pendingSourceLabel,
-    selectedLineNumbers,
     selectedSelections,
     selectedSelectionKeySet,
     stackGroups,
@@ -375,7 +374,6 @@ function setupPendingPlanReview(mutationsEnabled = true) {
   return {
     state,
     updates,
-    selectedLineNumbers,
     selectedSelections,
     tagOverrideErrorForLines,
   };
@@ -655,7 +653,6 @@ describe("usePendingPlanReviewState", () => {
     const auth = useAuthStore();
     auth.session = authSession({ mutations_enabled: true });
     const updates = useUpdatesStore();
-    const selectedLineNumbers = ref<number[]>([1]);
     const selectedSelections = ref<PlanSelectionRequest[]>([
       { line_no: 1, selection_id: "" },
     ]);
@@ -664,8 +661,6 @@ describe("usePendingPlanReviewState", () => {
     );
     const tagValidationError = ref("");
     const state = usePendingPlanReviewState({
-      pendingSourceLabel: computed(() => "images.todo"),
-      selectedLineNumbers,
       selectedSelections,
       selectedSelectionKeySet,
       stackGroups: computed(() => updates.pending?.grouping.groups ?? []),
@@ -727,8 +722,8 @@ describe("usePendingPlanReviewState", () => {
     );
   });
 
-  it("derives cleanup and removal state without exposing stale cleanup issues", () => {
-    const { state, updates, selectedLineNumbers } = setupPendingPlanReview(false);
+  it("summarizes unmatched entries without exposing stale line issues", () => {
+    const { state, updates } = setupPendingPlanReview(false);
     const item = pendingGroupedItem({
       line_no: 1,
       image: "repo/old:latest",
@@ -758,7 +753,6 @@ describe("usePendingPlanReviewState", () => {
         },
       },
     });
-    selectedLineNumbers.value = [1];
     updates.plan = planResponse({
       can_apply: false,
       issues: [
@@ -774,8 +768,6 @@ describe("usePendingPlanReviewState", () => {
         },
       ],
       cleanup: {
-        cleanup_id: "cleanup-test",
-        can_remove_unmatched: false,
         items: [
           {
             line_no: item.line_no,
@@ -790,26 +782,10 @@ describe("usePendingPlanReviewState", () => {
       },
     });
 
-    expect(state.cleanupButtonLabel.value).toBe("Remove 1 unmatched entry");
-    expect(state.cleanupDisabled.value).toBe(true);
-    expect(state.cleanupDisabledMessage.value).toContain("Read-only mode is active");
-    expect(state.removeSelectedDisabled.value).toBe(true);
-    expect(state.removeSelectedDisabledMessage.value).toContain(
-      "Read-only mode is active",
-    );
-    expect(state.removalButtonLabel.value).toBe("Remove 1 selected entry");
-    expect(state.cleanupReviewSummary.value).toContain(
+    expect(state.cleanupAvailable.value).toBe(true);
+    expect(state.cleanupReviewSummary.value).toBe(
       "1 entry needs review: Compose file missing.",
     );
-    expect(state.cleanupAssistantFindings.value).toEqual([
-      "Compose file missing",
-      "Archived file found",
-    ]);
-    expect(state.cleanupAssistantReasons.value).toEqual(["Stack moved"]);
-    expect(state.cleanupAssistantActions.value).toEqual([
-      "Restore Compose file",
-      "Remove stale line",
-    ]);
     expect(state.visiblePlanIssues.value).toEqual([]);
   });
 
@@ -840,8 +816,6 @@ describe("usePendingPlanReviewState", () => {
         },
       ],
       cleanup: {
-        cleanup_id: "cleanup-test",
-        can_remove_unmatched: false,
         items: [
           {
             line_no: 1,
@@ -1585,5 +1559,35 @@ describe("usePendingApplyJob", () => {
 
     updates.setApplyJobLog(applyJobLogResponse({ content: "first\nsecond\n\n\n" }));
     expect(state.applyJobLatestLogMessage.value).toBe("second");
+  });
+});
+
+describe("assistantDetailList", () => {
+  it("trims, drops blanks, and deduplicates guidance within and across items", () => {
+    const items = [
+      {
+        diagnostic: {
+          details: {
+            recommended_actions: [
+              " Restore Compose file ",
+              "Restore Compose file",
+              "",
+              7,
+              "Remove stale line",
+            ],
+          },
+        },
+      },
+      { diagnostic: { details: { recommended_actions: ["Remove stale line", "Move stack"] } } },
+      { diagnostic: null },
+      {},
+    ] as unknown as Parameters<typeof assistantDetailList>[0];
+
+    expect(assistantDetailList(items, "recommended_actions")).toEqual([
+      "Restore Compose file",
+      "Remove stale line",
+      "Move stack",
+    ]);
+    expect(assistantDetailList(items, "possible_reasons")).toEqual([]);
   });
 });

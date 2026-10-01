@@ -89,8 +89,11 @@ For larger runs it shows the exact record count and asks you to open the run for
 verification, without claiming that a partial set was verified. Full run detail
 retains all records. These reads do not initiate new Docker or health checks.
 
-**Queue details and actions** explains count scopes and contains rescans and
-selected-entry removal. Search narrows the visible queue; hidden selections still
+**Queue details and actions** explains count scopes and contains WUD rescans.
+The WebUI no longer removes unmatched or selected pending entries. Unmatched
+entries stay listed with diagnostics until the pending source stops reporting
+them; with the deprecated file source, that means editing `images.todo` by hand.
+Search narrows the visible queue; hidden selections still
 participate in review. **Select all** replaces the selection with the currently
 visible selectable updates; **Clear selection** clears hidden selections too.
 Stopped/unverified services are excluded from bulk selection. Stale metadata can

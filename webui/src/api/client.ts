@@ -27,14 +27,11 @@ import type {
   RetagPlanResponse,
   RetagPreviewJobResponse,
   DiagnosticsSupportBundleResponse,
-  PendingCleanupLine,
-  PendingCleanupResponse,
   PendingRescanLine,
   PendingRescanScope,
   PendingRescanResponse,
   SecurityScansResponse,
   SecurityScanJobResponse,
-  PendingRemovalPlanResponse,
   ReleaseNotesResponse,
   ReleaseNotificationSource,
   ReleaseNotificationResponse,
@@ -282,40 +279,6 @@ const pendingApi = {
       method: "POST",
       headers: { "x-wud-csrf-token": csrfToken },
       body: JSON.stringify(request),
-    }),
-  cleanupPending: (
-    cleanupId: string,
-    lines: PendingCleanupLine[],
-    csrfToken: string,
-  ) =>
-    apiRequest<PendingCleanupResponse>("/pending/cleanup", {
-      method: "POST",
-      headers: { "x-wud-csrf-token": csrfToken },
-      body: JSON.stringify({
-        cleanup_id: cleanupId,
-        lines,
-        confirmation: "remove_unmatched",
-      }),
-    }),
-  createRemovalPlan: (lineNumbers: number[], csrfToken: string) =>
-    apiRequest<PendingRemovalPlanResponse>("/pending/removal-plan", {
-      method: "POST",
-      headers: { "x-wud-csrf-token": csrfToken },
-      body: JSON.stringify({ line_numbers: lineNumbers }),
-    }),
-  removeSelectedPending: (
-    removalId: string,
-    lines: PendingCleanupLine[],
-    csrfToken: string,
-  ) =>
-    apiRequest<PendingCleanupResponse>("/pending/removal", {
-      method: "POST",
-      headers: { "x-wud-csrf-token": csrfToken },
-      body: JSON.stringify({
-        removal_id: removalId,
-        lines,
-        confirmation: "remove_selected",
-      }),
     }),
   rescanPending: (
     scope: PendingRescanScope,

@@ -14,7 +14,7 @@ Parent `webui/AGENTS.md` still owns frontend architecture and validation.
 - Do not add FastAPI, SQLite, fake Docker, WUD callbacks, Docker Compose, or
   real browser mutation behavior to static demo mode.
 - Do not regenerate static fixtures from backend state or restore all-subset
-  plan/removal/retag catalogs. Keep fixtures small and hand-auditable.
+  plan/retag catalogs. Keep fixtures small and hand-auditable.
 - Mutation endpoints should reject with the shared static-demo read-only error
   or return an explicit blocked response. They must not change pending counts,
   settings, runs, logs, jobs, policies, snoozes, tag exclusions, or Compose

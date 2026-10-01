@@ -14,10 +14,8 @@ import CoreUpdateTourPanel from "../components/CoreUpdateTourPanel.vue";
 import { useRouteRefresh } from "../components/app/routeRefresh";
 import PendingApplyJobPanel from "../components/pending/PendingApplyJobPanel.vue";
 import PendingApplyRecovery from "../components/pending/PendingApplyRecovery.vue";
-import PendingCleanupModal from "../components/pending/PendingCleanupModal.vue";
 import PendingFallbackQueue from "../components/pending/PendingFallbackQueue.vue";
 import PendingPlanReviewModal from "../components/pending/PendingPlanReviewModal.vue";
-import PendingRemovalModal from "../components/pending/PendingRemovalModal.vue";
 import PendingReleaseNotificationModal from "../components/pending/PendingReleaseNotificationModal.vue";
 import PendingSearchEmptyState from "../components/pending/PendingSearchEmptyState.vue";
 import PendingSearchPanel from "../components/pending/PendingSearchPanel.vue";
@@ -40,8 +38,6 @@ import {
   tagInputProps,
 } from "./pending/pendingDisplay";
 import {
-  cleanupLineLabel,
-  removalLineLabel,
   staleDiagnosticDetail,
   staleDiagnosticLabel,
 } from "./pending/planReviewFormatters";
@@ -140,7 +136,6 @@ watch(() => route?.query?.search, (value) => {
 let clearPreflightHandler: () => void = () => undefined;
 let loadPendingAndReleaseNotesHandler: (
   options?: {
-    preserveCleanup?: boolean;
     freshAfterCurrent?: boolean;
   },
 ) => Promise<void> = async () => undefined;
@@ -269,13 +264,7 @@ const {
   applyReadinessSummary,
   applyVisible,
   batchSummaryLabel,
-  cleanupAssistantActions,
-  cleanupAssistantFindings,
-  cleanupAssistantReasons,
   cleanupAvailable,
-  cleanupButtonLabel,
-  cleanupDisabled,
-  cleanupDisabledMessage,
   cleanupItems,
   cleanupReviewSummary,
   approveDigestPinLabelRewrite,
@@ -287,7 +276,6 @@ const {
   mutationStateLabel,
   mutationStateType,
   pendingApplyTourDetail,
-  pendingCleanupMessage,
   planActions,
   planAlertType,
   planDigestPinLabelRewrites,
@@ -302,12 +290,6 @@ const {
   preflightSummary,
   preflightTagRewriteNotice,
   preflightTitle,
-  removalButtonLabel,
-  removalConfirmButtonLabel,
-  removalDisabled,
-  removalItems,
-  removeSelectedDisabled,
-  removeSelectedDisabledMessage,
   selectedTagOverrideError,
   selectedMetadataWarning,
   selectedUpdateContext,
@@ -324,8 +306,6 @@ const {
   updateSelectedButtonLabel,
   visiblePlanIssues,
 } = usePendingPlanReviewState({
-  pendingSourceLabel,
-  selectedLineNumbers,
   selectedSelections,
   selectedSelectionKeySet,
   stackGroups: rawStackGroups,
@@ -420,34 +400,21 @@ const securityScanRefreshDisabledMessage = computed(() => {
 
 const {
   clearPreflight,
-  closeCleanupModal,
   closePreflightModal,
-  closeRemovalModal,
   confirmApply,
-  confirmCleanup,
-  confirmSelectedRemoval,
   loadPendingAndReleaseNotes,
-  openCleanupModal,
   retryPendingLoad,
-  showCleanupModal,
   showPreflightModal,
-  showRemovalModal,
-  startSelectedRemoval,
   startSelectedUpdate,
   startStackUpdate,
 } = usePendingPlanActions({
   applyDisabled,
   applyJobSnapshot,
   applyPlanPayload,
-  cleanupAvailable,
-  cleanupDisabled,
   clearUpdateIntent,
   createApplyJobSnapshot,
   focusApplyJobPanel,
   lineNumbersHaveTagUpdates,
-  removalDisabled,
-  removeSelectedDisabled,
-  selectedLineNumbers,
   selectedSelections,
   selectedUpdateContext,
   stackGroups,
@@ -566,17 +533,6 @@ onBeforeUnmount(() => {
           :to="{ name: 'run-detail', params: { id: updates.pendingRescan.audit_run_id } }"
         >
           Request details
-        </RouterLink>
-      </n-flex>
-    </n-alert>
-    <n-alert v-if="pendingCleanupMessage" type="success">
-      {{ pendingCleanupMessage }}
-      <n-flex inline class="inline-actions recovery-actions" align="center" :size="8">
-        <RouterLink
-          class="text-link"
-          :to="{ name: 'run-detail', params: { id: updates.pendingCleanup?.audit_run_id } }"
-        >
-          Details
         </RouterLink>
       </n-flex>
     </n-alert>
@@ -744,9 +700,6 @@ onBeforeUnmount(() => {
       :has-selected-tag-updates="selectedHasTagUpdates"
       :loading="updates.loading"
       :pending-loaded="pendingLoaded"
-      :removal-button-label="removalButtonLabel"
-      :remove-selected-disabled="removeSelectedDisabled"
-      :remove-selected-disabled-message="removeSelectedDisabledMessage"
       :selectable-count="visibleSelectableSelections.length"
       :select-all-label="visibleSelectAllLabel"
       :selected-count="selectedSelections.length"
@@ -768,7 +721,6 @@ onBeforeUnmount(() => {
       @rescan-all="rescanAllPending"
       @rescan-selected="rescanSelectedPending"
       @select-all="selectAllVisible"
-      @start-removal="startSelectedRemoval"
       @start-update="startSelectedUpdate"
     >
       <template #scan>
@@ -901,9 +853,6 @@ onBeforeUnmount(() => {
       :apply-readiness-summary="applyReadinessSummary"
       :apply-visible="applyVisible"
       :cleanup-available="cleanupAvailable"
-      :cleanup-button-label="cleanupButtonLabel"
-      :cleanup-disabled="cleanupDisabled"
-      :cleanup-disabled-message="cleanupDisabledMessage"
       :cleanup-items="cleanupItems"
       :cleanup-review-summary="cleanupReviewSummary"
       :digest-pin-label-approval-approved="digestPinLabelApprovalApproved"
@@ -940,36 +889,6 @@ onBeforeUnmount(() => {
       @approve-tag-stream-label-rewrite="approveTagStreamLabelRewrite"
       @choose-tag-stream="chooseTagStream"
       @close="closePreflightModal"
-      @open-cleanup="openCleanupModal"
-    />
-
-    <PendingCleanupModal
-      v-if="updates.plan && cleanupAvailable"
-      :show="showCleanupModal"
-      :assistant-actions="cleanupAssistantActions"
-      :assistant-findings="cleanupAssistantFindings"
-      :assistant-reasons="cleanupAssistantReasons"
-      :cleanup-button-label="cleanupButtonLabel"
-      :cleanup-disabled="cleanupDisabled"
-      :cleanup-items="cleanupItems"
-      :cleanup-line-label="cleanupLineLabel"
-      :loading="updates.loading"
-      :pending-source-label="pendingSourceLabel"
-      @close="closeCleanupModal"
-      @confirm="confirmCleanup"
-    />
-
-    <PendingRemovalModal
-      v-if="updates.pendingRemovalPlan"
-      :show="showRemovalModal"
-      :loading="updates.loading"
-      :pending-source-label="pendingSourceLabel"
-      :removal-confirm-button-label="removalConfirmButtonLabel"
-      :removal-disabled="removalDisabled"
-      :removal-items="removalItems"
-      :removal-line-label="removalLineLabel"
-      @close="closeRemovalModal"
-      @confirm="confirmSelectedRemoval"
     />
 
     <PendingReleaseNotificationModal
