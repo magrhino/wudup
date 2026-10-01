@@ -126,7 +126,7 @@ a password with at least 12 characters, then sign in at
 `http://127.0.0.1:7417`. The example binds browser access to loopback by
 default.
 
-See [WebUI Container](wiki/webui-container.md) for WUD API/file pending modes,
+See [WebUI Container](wiki/webui-container.md) for WUD API pending updates,
 login recovery, SQLite persistence, LAN or reverse-proxy exposure, candidate
 security scans, and browser mutation mode.
 

@@ -448,6 +448,60 @@ def test_apply_job_without_pending_snapshot_fails_without_touching_shared_file(
     )
 
 
+def test_apply_job_finishes_before_raising_private_copy_cleanup_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = _settings_for_lock_timeout(tmp_path, {})
+    jobs = {
+        "job": WebApplyJob(
+            id="job",
+            status="queued",
+            selected_line_numbers=(1,),
+        )
+    }
+
+    class FakeRunner:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.audit_run_id = 9
+            self.log_file = tmp_path / "apply.log"
+
+        def run(self) -> int:
+            return 0
+
+    def fail_cleanup(_self) -> None:
+        raise OSError("private copy cleanup failed")
+
+    monkeypatch.setattr(web_jobs, "UpdateFromWudRunner", FakeRunner)
+    monkeypatch.setattr(web_jobs.tempfile.TemporaryDirectory, "cleanup", fail_cleanup)
+
+    with pytest.raises(OSError, match="private copy cleanup failed"):
+        web_jobs._run_apply_job(
+            settings,
+            "plan",
+            (1,),
+            False,
+            (),
+            (),
+            (),
+            (),
+            jobs,
+            web_jobs.Condition(),
+            "job",
+            lambda settings: settings.config,
+            lambda *_args, **_kwargs: None,
+            web_jobs.ApplyJobRunContext(
+                pending_source_active="file",
+                pending_source_text="repo/app:latest\n",
+            ),
+        )
+
+    job = jobs["job"]
+    assert job.status == "success"
+    assert job.run_id == 9
+    assert job.finished_at
+
+
 def test_apply_job_refreshes_only_api_pending_source(
     tmp_path: Path,
     monkeypatch,

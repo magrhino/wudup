@@ -443,7 +443,7 @@ def _notification_response(
     notification_config = effective_release_notification_config(settings)
     destination = _release_notification_destination(settings)
     if not enabled:
-        disabled = release_notes_disabled_state(settings)
+        disabled = release_notes_disabled_state()
         return ReleaseNotificationResponse(
             enabled=False,
             mode=notification_config.mode,
