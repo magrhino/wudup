@@ -119,6 +119,43 @@ def test_pending_all_rescan_runs_global_watch_and_audits(
     assert metadata["wud_api"]["state"] == "ready"
 
 
+def test_pending_rescan_records_unexpected_watch_failure_in_audit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    install_recording_wud_api(monkeypatch, [container_payload(name="app")])
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_API_BASE_URL": "https://wud.rescan-crash.test:3000",
+        },
+    )
+
+    def crash(_settings):
+        raise RuntimeError("watch exploded")
+
+    monkeypatch.setattr(web_wud_api, "watch_all", crash)
+
+    with pytest.raises(RuntimeError, match="watch exploded"):
+        client.post(
+            "/api/v1/pending/rescan",
+            json=rescan_payload(),
+            headers=_csrf_headers(client),
+        )
+
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        run = conn.execute(
+            "SELECT * FROM update_runs WHERE mode = 'web-wud-rescan'"
+        ).fetchone()
+    assert run["status"] == "failure"
+    metadata = json.loads(run["metadata_json"])
+    assert metadata["status"] == "failure"
+    assert metadata["watched_count"] == 0
+    assert "WUD rescan failed" in metadata["error"]
+
+
 def test_pending_rescan_does_not_wait_for_or_release_the_wud_file_lock(
     tmp_path: Path,
     monkeypatch,
