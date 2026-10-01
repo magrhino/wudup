@@ -763,17 +763,6 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         runner = UpdateFromWudRunner(options)
         with self.assertRaisesRegex(UpdaterError, "List file not found"):
             runner.run()
-    def test_run_acquires_lock_if_parent_held(self) -> None:
-        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-        self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
-        self.set_image_state("repo/app:latest", "old", "sha256:old")
-        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
-        self.env["WUD_LOCK_HELD_BY_PARENT"] = "1"
-        from wudup.locks import lock_dir_for
-        lock_dir_for(self.wud_file).mkdir(parents=True)
-        result = self.run_python("--yes")
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertFalse(lock_dir_for(self.wud_file).exists())
     def test_recreate_compose_unpause_failure_aborts_without_rewrite(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])

@@ -1,9 +1,9 @@
 # WUD Update Flow
 
-WUDup is built around shared, line-oriented pending entries. The legacy CLI reads
-those entries from `images.todo` only. The WebUI can either read that file or
-render WUD API container metadata into the same pending-line format before
-planning, applying, or previewing release notes.
+WUDup is built around line-oriented pending entries. The legacy CLI reads those
+entries from `images.todo`. The WebUI never reads that file; it renders WUD API
+container metadata into the same pending-line format before planning, applying,
+or previewing release notes.
 
 ## File Mode Flow
 
@@ -19,34 +19,22 @@ file mode needs an external writer that produces the
 
 The default output path is `/out/images.todo` inside the WUDup container.
 
-WebUI deployments default to `WUD_PENDING_SOURCE=api`, which skips the todo
-file and derives the same pending lines from WUD `/api/containers` over the
-private Compose app network. `auto` uses that API when available and falls back
-to `WUD_OUT_FILE`; `file` reads only the todo file.
-
-When legacy scripts remain enabled, API mode may read `WUD_OUT_FILE` as a
-read-only cold-start recovery hint if WUD returns a degraded container row and
-no last-known-good observation exists. Recovery only considers pending lines
-with a desired `tag=` or `sha256=` value and requires the registry, current
-image, platform, and installed digest or tag to match. Explicit Docker Hub
-aliases are equivalent to the default unqualified registry; other registries
-must match exactly. This prevents already-applied, metadata-free, and unrelated
-lines from being revived. The API remains the active pending source, and an
-explicit selected rescan targets only the recovered WUD container IDs. Recovery
-never triggers a global WUD watch or changes the file.
+The WebUI never reads the todo file. It derives the same pending-line format
+from WUD `/api/containers` over the private Compose app network, and each apply
+job runs the updater against a private copy of the selected lines. When WUD
+reports a failed update check for a container and WUDup has no last successful
+result for it, the update's status is reported as unknown instead of being
+recovered from `WUD_OUT_FILE`.
 
 The **Rescan WUD** button requests a full scan through `POST /api/containers/watch`.
 WUD runs all configured watchers, discovering eligible containers even when its
 stored container list is empty or contains obsolete IDs. WUD's configured watcher
 filters still apply. Selected rescans refresh only the selected WUD container IDs.
-WUDup leaves the pending file unchanged; WUD's configured triggers may run during
-the scan. Full-scan audit counts represent one global watch request, rather than
+WUD's configured triggers may run during the scan. Full-scan audit counts represent one global watch request, rather than
 the number of containers discovered. Registry errors remain visible as a partial
 result, and existing rate-limit cooldowns can temporarily block a full scan.
 
-WUDup polls WUD's API directly for WebUI release-note notifications. Set
-`WUDUP_LEGACY_SCRIPTS=false` only after removing legacy WUD command triggers and
-recreating the stack.
+WUDup polls WUD's API directly for WebUI release-note notifications.
 
 ## Review updates in the WebUI
 
@@ -90,9 +78,8 @@ verification, without claiming that a partial set was verified. Full run detail
 retains all records. These reads do not initiate new Docker or health checks.
 
 **Queue details and actions** explains count scopes and contains WUD rescans.
-The WebUI no longer removes unmatched or selected pending entries. Unmatched
-entries stay listed with diagnostics until the pending source stops reporting
-them; with the deprecated file source, that means editing `images.todo` by hand.
+The WebUI does not remove pending entries. Unmatched entries stay listed with
+diagnostics until WUD stops reporting them.
 Search narrows the visible queue; hidden selections still
 participate in review. **Select all** replaces the selection with the currently
 visible selectable updates; **Clear selection** clears hidden selections too.
@@ -166,8 +153,8 @@ interpolation, and inherited image values fail closed.
 
 ## Locking
 
-`docker-update-from-wud` and WebUI pending-file edits use a directory lock at
-`${WUD_OUT_FILE}.lock` and wait up to `WUD_LOCK_TIMEOUT` seconds, defaulting to
+`docker-update-from-wud` takes a directory lock at `${WUD_OUT_FILE}.lock` while
+it rewrites the file and waits up to `WUD_LOCK_TIMEOUT` seconds, defaulting to
 `30`. External writers should use the same lock. Rewrites preserve the file's
 owner and mode unless `OUT_UID` and `OUT_GID` are set.
 

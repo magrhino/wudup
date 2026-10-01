@@ -116,8 +116,6 @@ services:
       WUD_API_AUTH_BASIC_PASSWORD: "${WUD_API_AUTH_BASIC_PASSWORD:-}"
       WUD_API_AUTH_BASIC_PASSWORD_FILE: "${WUD_API_AUTH_BASIC_PASSWORD_FILE:-}"
       WUD_API_HEADERS_FILE: "${WUD_API_HEADERS_FILE:-}"
-      WUD_PENDING_SOURCE: "${WUD_PENDING_SOURCE:-api}"
-      WUDUP_LEGACY_SCRIPTS: "${WUDUP_LEGACY_SCRIPTS:-true}"
       # Leave unset to manage from Settings; uncomment to force the env override.
       # WUD_RELEASE_NOTES_ENABLED: "true"
       # Use WUDUP_IMAGE=ghcr.io/magrhino/wudup:latest-trivy when enabling scans.

@@ -15,11 +15,10 @@ from tests.web_test_helpers import (
 )
 
 from wudup import (
-    web_pending_sources,
-    web_scheduler,
+    web_release_notifications as notifications_module,
 )
 from wudup import (
-    web_release_notifications as notifications_module,
+    web_scheduler,
 )
 from wudup.db import init_db, insert_snooze, open_db
 from wudup.release_notes import ReleaseNoteInfo as ReleaseNoteData
@@ -34,6 +33,7 @@ _ENV = {
     "WUD_WEB_MUTATIONS_ENABLED": "true",
     "WUD_RELEASE_NOTES_ENABLED": "true",
     "DISCORD_WEBHOOK": "https://discord.test/webhook-secret",
+    "WUD_PENDING_SOURCE": "api",
 }
 
 
@@ -161,12 +161,12 @@ def test_poll_sends_wud_api_notifications_without_trigger_token(
     )
     _fake_release_refresh(monkeypatch)
     posted = _capture_discord_posts(monkeypatch)
-
-    def fail_file_read(_path: Path):
-        raise AssertionError("notification poller should not read images.todo")
-
-    monkeypatch.setattr(web_pending_sources, "_read_pending_file", fail_file_read)
-    client = _client(tmp_path, {**_ENV, "WUD_PENDING_SOURCE": "file"})
+    client = _client(tmp_path, _ENV)
+    # A stale shared file must never feed notifications.
+    (tmp_path / "state" / "images.todo").write_text(
+        "repo/stale:1.0 tag=9.9\n",
+        encoding="utf-8",
+    )
     try:
         response = notifications_module.poll_wud_api_release_notifications(
             client.app.state.web_settings,

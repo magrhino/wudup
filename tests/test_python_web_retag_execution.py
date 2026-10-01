@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from threading import Event
-from types import SimpleNamespace
 
 import pytest
 from tests.web_retag_test_helpers import (
@@ -14,7 +12,7 @@ from tests.web_retag_test_helpers import (
 )
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
-from wudup import web_job_registry, web_retag_apply, web_retag_audit, web_retags
+from wudup import web_retag_apply, web_retag_audit, web_retags
 from wudup.compose import ComposeCli
 
 
@@ -39,21 +37,6 @@ def test_retag_execution_preserves_mutation_recovery_and_audit_order(
     events: list[str] = []
     errors: list[Exception] = []
     source_hashes: dict[str, str] = {}
-    closed = Event()
-    acquire = web_job_registry._acquire_apply_wud_lock
-
-    def acquire_lock(*args: object, **kwargs: object) -> SimpleNamespace:
-        lock = acquire(*args, **kwargs)
-        events.append("lock")
-
-        def close() -> None:
-            lock.close()
-            events.append("unlock")
-            closed.set()
-
-        return SimpleNamespace(close=close)
-
-    monkeypatch.setattr(web_job_registry, "_acquire_apply_wud_lock", acquire_lock)
 
     def track(owner: object, name: str, event: str) -> None:
         original = getattr(owner, name)
@@ -100,9 +83,8 @@ def test_retag_execution_preserves_mutation_recovery_and_audit_order(
     response = _apply_retag_plan(fixture.client, headers, plan)
     assert response.status_code == 202
     job = _wait_apply_job(fixture.client, response.json()["job_id"])
-    assert closed.wait(5), "retag worker did not release its WUD lock"
-    prefix = ["lock", "plan", "audit-start", "apply", "runtime", "backup", "rewrite"]
-    suffix = ["cleanup", "audit-finish", "unlock"]
+    prefix = ["plan", "audit-start", "apply", "runtime", "backup", "rewrite"]
+    suffix = ["cleanup", "audit-finish"]
     stages = ["pull", "recreate", "health", "known"]
     if failure is None:
         expected = prefix + stages + suffix

@@ -32,7 +32,6 @@ from wudup import web_retags as web_retags_module
 from wudup.compose import ComposeStack, ServiceImage
 from wudup.db import open_db
 from wudup.digest_provenance import DigestTagProvenance
-from wudup.locks import DirectoryLock
 from wudup.updater_digest_pin import digest_pin_update_from_values
 from wudup.web_models import RetagPlanResponse, WebApplyJob
 from wudup.web_retag_plans import RetagPlanBuild, RetagPlanUpdate
@@ -380,51 +379,6 @@ def test_retag_apply_returns_job_before_slow_revalidation(
 
     job = _wait_apply_job(fixture.client, response.json()["job_id"])
     assert job["status"] == "success"
-
-
-def test_retag_apply_reports_existing_wud_lock_as_failed_preflight(
-    tmp_path: Path,
-) -> None:
-    fixture = _make_retag_fixture(
-        tmp_path,
-        env={
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_LOCK_TIMEOUT": "0",
-        },
-    )
-    headers = _csrf_headers(fixture.client)
-    plan = _create_retag_plan(fixture.client, headers)
-    compose_file = fixture.compose_dir / "docker-compose.yml"
-    compose_before = compose_file.read_text(encoding="utf-8")
-    calls_before = _fake_docker_calls(fixture.fake_root)
-    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
-        audit_count_before = conn.execute(
-            "SELECT COUNT(*) FROM update_runs"
-        ).fetchone()[0]
-
-    external_lock = DirectoryLock(
-        tmp_path / "state" / "images.todo",
-        timeout_seconds=0,
-    )
-    external_lock.acquire()
-    try:
-        response = _apply_retag_plan(fixture.client, headers, plan)
-        assert response.status_code == 202
-        job = _wait_apply_job(fixture.client, response.json()["job_id"])
-    finally:
-        external_lock.close()
-
-    assert job["status"] == "failure"
-    assert "WUD file is locked" in job["error"]
-    assert job["progress"][-1]["phase"] == "preflight"
-    assert job["progress"][-1]["status"] == "failure"
-    assert compose_file.read_text(encoding="utf-8") == compose_before
-    assert _fake_docker_calls(fixture.fake_root) == calls_before
-    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
-        audit_count_after = conn.execute(
-            "SELECT COUNT(*) FROM update_runs"
-        ).fetchone()[0]
-    assert audit_count_after == audit_count_before
 
 
 @pytest.mark.parametrize("runtime_state", ["not-running", "unknown"])

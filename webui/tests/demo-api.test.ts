@@ -56,7 +56,7 @@ describe("demo web API", () => {
       dev_auth_bypass: false,
       mutations_enabled: false,
       auto_update_scheduler_enabled: false,
-      wud_api: { detail: "3 updates are available." },
+      wud_api: { detail: "7 updates are available." },
     });
     await expect(api.settings()).resolves.toMatchObject({
       updater: expect.arrayContaining([
@@ -75,7 +75,7 @@ describe("demo web API", () => {
 
     const pending = await api.pending();
     expect(pending.count).toBe(8);
-    expect(pending.source_file).toBe("demo/out/images.todo");
+    expect(pending.source_file).toBe("WUD API");
     expect(pending.grouping.groups.map((group) => group.name)).toEqual([
       "data",
       "home",
@@ -83,9 +83,9 @@ describe("demo web API", () => {
       "media",
     ]);
     expect(pending.grouping.unmatched.map((item) => item.line_no)).toEqual([
-      7,
+      1,
+      2,
       8,
-      9,
     ]);
 
     const doctor = await api.doctor("csrf");
@@ -264,7 +264,7 @@ describe("demo web API", () => {
       api.createPlan([3], false, [{ line_no: 3, tag: "2026.6.0" }], [], "csrf"),
     ).rejects.toThrow("allow_tag_updates=true");
     await expect(
-      api.createPlan([5], true, [{ line_no: 5, tag: "17" }], [], "csrf"),
+      api.createPlan([7], true, [{ line_no: 7, tag: "17" }], [], "csrf"),
     ).rejects.toThrow("does not target a tag update");
     await expect(
       api.createPlan(
@@ -286,7 +286,7 @@ describe("demo web API", () => {
     ).rejects.toThrow("wud.tag.include");
     await expect(
       api.createPlan(
-        [5],
+        [7],
         true,
         [],
         [
@@ -302,20 +302,20 @@ describe("demo web API", () => {
         "csrf",
       ),
     ).resolves.toMatchObject({
-      plan_id: "demo-session-5-allow-tags-data--postgres--16",
+      plan_id: "demo-session-7-allow-tags-data--postgres--16",
     });
   });
 
   it("replans update-stream choices in the static demo", async () => {
     const api = createDemoWebApi();
 
-    const unresolved = await api.createPlan([2], true, [], [], "csrf");
+    const unresolved = await api.createPlan([6], true, [], [], "csrf");
     expect(unresolved).toMatchObject({
       status: "blocked",
       issues: [
         expect.objectContaining({
           code: "tag-stream-change",
-          line_no: 2,
+          line_no: 6,
           details: expect.objectContaining({
             same_stream_tag: "2.34.4-distroless",
           }),
@@ -323,11 +323,11 @@ describe("demo web API", () => {
       ],
     });
 
-    const preserved = await api.createPlan([2], true, [], [], "csrf", {
-      tagStreamDecisions: [{ line_no: 2, decision: "preserve" }],
+    const preserved = await api.createPlan([6], true, [], [], "csrf", {
+      tagStreamDecisions: [{ line_no: 6, decision: "preserve" }],
     });
-    const switched = await api.createPlan([2], true, [], [], "csrf", {
-      tagStreamDecisions: [{ line_no: 2, decision: "switch" }],
+    const switched = await api.createPlan([6], true, [], [], "csrf", {
+      tagStreamDecisions: [{ line_no: 6, decision: "switch" }],
     });
 
     expect(preserved).toMatchObject({
@@ -361,10 +361,10 @@ describe("demo web API", () => {
     expect(preserved.plan_id).not.toBe(switched.plan_id);
 
     await expect(
-      api.createPlan([2], true, [], [], "csrf", {
-        tagStreamDecisions: [{ line_no: 2, decision: "preserve" }],
+      api.createPlan([6], true, [], [], "csrf", {
+        tagStreamDecisions: [{ line_no: 6, decision: "preserve" }],
         tagStreamLabelRewriteApprovals: [{
-          line_no: 2,
+          line_no: 6,
           stack: "jarvis",
           stack_directory: "demo/docker/jarvis",
           compose_file: "docker-compose.yml",

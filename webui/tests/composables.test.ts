@@ -27,6 +27,7 @@ import {
   snooze,
   updateTarget,
   updateTargetsResponse,
+  pendingSourceInfo,
 } from "./helpers/fixtures";
 import {
   usePendingApplyJob,
@@ -457,17 +458,20 @@ describe("usePendingQueueState", () => {
     expect(state.stackGroups.value).toHaveLength(1);
     expect(state.stackGroups.value[0]?.items.map((item) => item.line_no)).toEqual([2]);
     expect(state.selectableLineNumbers.value).toEqual([2]);
-    expect(state.pendingSourceLabel.value).toBe("images.todo");
+    expect(state.pendingSourceLabel.value).toBe("WUD API");
   });
 
-  it("treats whitespace-only pending source files as empty", () => {
+  it("labels the pending source as the WUD API when the label is missing", () => {
     const updates = useUpdatesStore();
-    updates.pending = { ...pendingResponse([]), source_file: "   " };
+    updates.pending = {
+      ...pendingResponse([]),
+      source: pendingSourceInfo({ label: "" }),
+    };
 
     const state = usePendingQueueState();
 
-    expect(state.pendingSourceLabel.value).toBe("Pending file");
-    expect(state.pendingSourceDisplay.value).toBe("Pending file");
+    expect(state.pendingSourceLabel.value).toBe("WUD API");
+    expect(state.pendingSourceDisplay.value).toBe("Source WUD API");
   });
 });
 

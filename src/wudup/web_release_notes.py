@@ -309,11 +309,11 @@ def _wud_api_status(source: web_pending_sources.PendingSourceResult) -> WudApiSt
     )
 
 
-def release_notes_disabled_state(settings: WebSettings) -> ReleaseNotesDisabledState:
+def release_notes_disabled_state() -> ReleaseNotesDisabledState:
     return ReleaseNotesDisabledState(
         reason=RELEASE_NOTES_DISABLED_DETAIL,
         source=PendingSourceInfo(
-            configured=settings.pending_source,
+            configured="file",
             active="file",
             label="Release notes disabled",
             fresh=True,

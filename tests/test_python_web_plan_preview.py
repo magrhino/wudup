@@ -149,51 +149,6 @@ def test_plan_endpoint_wraps_source_oserror(
     assert "[REDACTED_PATH]" in detail
 
 
-def test_plan_endpoint_fails_closed_when_completion_state_is_unreadable(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    redacted_value = "completion-state-redaction-fixture"
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_TOKEN": redacted_value,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/shared:latest\n", encoding="utf-8")
-
-    def fail_load(*_args, **_kwargs):
-        raise OSError(
-            f"read failed for {tmp_path / 'state' / 'wud.sqlite'} "
-            f"with {redacted_value}"
-        )
-
-    monkeypatch.setattr(
-        plans_module.web_file_selection_store,
-        "load_completed_update_selections",
-        fail_load,
-    )
-    response = client.post(
-        "/api/v1/plans",
-        json={
-            "selections": [
-                {"line_no": 1, "selection_id": f"sel-v1-{'0' * 64}"}
-            ]
-        },
-        headers=_csrf_headers(client),
-    )
-    detail = response.json()["detail"]
-
-    assert response.status_code == 500
-    assert detail.startswith("could not create plan: ")
-    assert redacted_value not in detail
-    assert str(tmp_path) not in detail
-    assert "<redacted>" in detail
-    assert "[REDACTED_PATH]" in detail
-
-
 def test_plan_endpoint_returns_selected_dry_run_without_mutation(
     tmp_path: Path,
 ) -> None:

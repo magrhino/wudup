@@ -328,7 +328,7 @@ describe("pending view fallback and release notes", () => {
     expect(snoozedCard?.text()).toContain("Snoozed");
     expect(snoozedCard?.text()).toContain("lscr.io/linuxserver/radarr:5.0");
     expect(snoozedCard?.text()).toContain("lscr.io/linuxserver/radarr:5.1");
-    expect(snoozedCard?.text()).toContain("Pending file line #1");
+    expect(snoozedCard?.text()).toContain("Pending entry #1");
   });
 
   it("shows ready preflight service impact and row tag rewrites", async () => {
@@ -521,7 +521,7 @@ describe("pending view fallback and release notes", () => {
     expect(dialog.text()).not.toContain("0 plan issues");
   });
 
-  it("falls back to pending file order when grouping is unavailable", () => {
+  it("falls back to pending source order when grouping is unavailable", () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(true);
     updates.pending = {
       ...pendingResponse(),
@@ -536,7 +536,7 @@ describe("pending view fallback and release notes", () => {
     const wrapper = mountPendingView(pinia);
 
     expect(wrapper.text()).toContain(
-      "Stack grouping is unavailable. Showing pending file order.",
+      "Stack grouping is unavailable. Showing pending entries in source order.",
     );
     expect(wrapper.find('[role="table"]').exists()).toBe(true);
   });
@@ -546,11 +546,9 @@ describe("pending view fallback and release notes", () => {
     updates.pending = {
       ...pendingResponse(),
       source: pendingSourceInfo({
-        configured: "auto",
-        active: "file",
         fresh: false,
         degraded: true,
-        fallback_reason: "WUD API is unavailable: connection refused",
+        detail: "WUD API is unavailable: connection refused",
       }),
     };
     mockPendingLifecycle(settings, updates);
@@ -840,7 +838,7 @@ describe("pending view fallback and release notes", () => {
     expect(clearState.exists()).toBe(true);
     expect(clearState.text()).toContain("Update queue is clear");
     expect(clearState.text()).toContain(
-      "images.todo has no updates waiting for review.",
+      "WUD API has no updates waiting for review.",
     );
     expect(clearState.text()).toContain("Review latest run #42");
     expect(clearState.find(".clear-queue-mark").exists()).toBe(true);

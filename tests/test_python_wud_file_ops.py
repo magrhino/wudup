@@ -41,39 +41,6 @@ class WudFileCleanupTests(unittest.TestCase):
 
             self.assertFalse(lock_dir_for(path).exists())
 
-    def test_parent_lock_context_manager_releases_parent_lock(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "images.todo"
-            path.write_text("repo/app:latest\n", encoding="utf-8")
-            lock_dir_for(path).mkdir()
-
-            with DirectoryLock(path, timeout_seconds=0, parent_held=True):
-                self.assertTrue(lock_dir_for(path).is_dir())
-
-            self.assertFalse(lock_dir_for(path).exists())
-
-    def test_parent_lock_is_reused_and_released_explicitly(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "images.todo"
-            path.write_text(
-                "repo/app:one\nrepo/app:two\nrepo/app:three\n",
-                encoding="utf-8",
-            )
-            parsed = parse_wud_file(path)
-            lock_dir_for(path).mkdir()
-            lock = DirectoryLock(path, timeout_seconds=0, parent_held=True)
-
-            remove_lines_before_run(path, parsed, [1, 3], lock=lock)
-            self.assertEqual(path.read_text(encoding="utf-8"), "repo/app:two\n")
-            self.assertTrue(lock_dir_for(path).is_dir())
-
-            remove_lines_before_run(path, parsed, [1, 2, 3], lock=lock)
-            self.assertEqual(path.read_text(encoding="utf-8"), "")
-            self.assertTrue(lock_dir_for(path).is_dir())
-
-            lock.release_parent()
-            self.assertFalse(lock_dir_for(path).exists())
-
     def test_timeout_leaves_file_and_existing_lock_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"

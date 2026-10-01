@@ -139,6 +139,10 @@ class LoadConfigTests(unittest.TestCase):
             ({"WUD_MAX_WAIT": "-1"}, "WUD_MAX_WAIT.*zero or greater"),
             ({"WUD_LOCK_TIMEOUT": "slow"}, "WUD_LOCK_TIMEOUT.*integer"),
             ({"WUD_LOCK_TIMEOUT": "-1"}, "WUD_LOCK_TIMEOUT.*zero or greater"),
+            # docker-update-from-wud only accepts plain digits, so config must too.
+            ({"WUD_LOCK_TIMEOUT": "5 "}, "WUD_LOCK_TIMEOUT.*integer"),
+            ({"WUD_LOCK_TIMEOUT": " 5"}, "WUD_LOCK_TIMEOUT.*integer"),
+            ({"WUD_LOCK_TIMEOUT": "+5"}, "WUD_LOCK_TIMEOUT.*integer"),
         )
 
         for env, error in invalid_cases:

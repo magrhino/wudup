@@ -323,8 +323,8 @@ class Doctor:
             self._record(
                 "PASS",
                 "WUD_OUT_FILE",
-                f"{wud_file} does not exist yet; docker-update-from-wud and the "
-                "file pending source need it before they can run",
+                f"{wud_file} does not exist yet; docker-update-from-wud needs it "
+                "before it can run",
             )
         elif not wud_file.is_file():
             self._record("FAIL", "WUD_OUT_FILE", f"{wud_file} is not a file")
@@ -587,8 +587,9 @@ def _suggestions_for(status: str, name: str) -> tuple[DoctorSuggestion, ...]:
             DoctorSuggestion(
                 label="Share WUD output",
                 description=(
-                    "Mount the WUD output directory and point WUD_OUT_FILE at "
-                    "the shared pending file."
+                    "Mount the WUD output directory and point WUD_OUT_FILE at the "
+                    "todo file docker-update-from-wud reads. The WebUI keeps "
+                    "self-update plan files in the same directory."
                 ),
                 snippet="WUD_OUT_FILE=/out/images.todo",
             ),

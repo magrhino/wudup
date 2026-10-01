@@ -54,6 +54,19 @@ def _parse_non_negative_int(name: str, value: str | None, default: int) -> int:
     return parsed
 
 
+def _parse_lock_timeout(value: str | None) -> int:
+    lock_timeout = _parse_non_negative_int(
+        "WUD_LOCK_TIMEOUT",
+        value,
+        DEFAULT_LOCK_TIMEOUT,
+    )
+    # docker-update-from-wud reads the raw value with the same digits-only rule,
+    # so reject padded or signed values here instead of failing every apply job.
+    if value and not (value.isascii() and value.isdigit()):
+        raise ConfigError("WUD_LOCK_TIMEOUT must be an integer number of seconds")
+    return lock_timeout
+
+
 def _parse_optional_numeric_id(name: str, value: str | None) -> int | None:
     if value is None or value == "":
         return None
@@ -176,11 +189,7 @@ def load_config(
         env.get("WUD_MAX_WAIT"),
         DEFAULT_MAX_WAIT,
     )
-    lock_timeout = _parse_non_negative_int(
-        "WUD_LOCK_TIMEOUT",
-        env.get("WUD_LOCK_TIMEOUT"),
-        DEFAULT_LOCK_TIMEOUT,
-    )
+    lock_timeout = _parse_lock_timeout(env.get("WUD_LOCK_TIMEOUT"))
     timezone_name = _parse_timezone_name(env.get("WUD_TIMEZONE"))
     compose_ignore_paths = parse_compose_ignore_paths(
         env.get(COMPOSE_IGNORE_PATHS_ENV)

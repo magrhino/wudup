@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import asdict
 from typing import Any, Protocol
 
@@ -10,7 +9,6 @@ from fastapi import HTTPException, Request
 
 from . import (
     web_database,
-    web_file_selection_store,
     web_pending_snoozes,
     web_pending_sources,
     web_wud_api,
@@ -29,12 +27,10 @@ from .compose import (
 from .config import ConfigError, UpdaterConfig
 from .docker_cli import DockerCli
 from .images import image_tag, repo_key
-from .plan_matching import pending_target_key
 from .plans import (
     resolve_pending_groups,
 )
 from .tag_streams import pending_tag_stream_hint
-from .updater_models import CompletedUpdateSelection
 from .web_models import (
     PendingDiagnostic,
     PendingGroupedItem,
@@ -56,7 +52,6 @@ from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
 from .wud_file import (
     ParsedWudFile,
-    parse_wud_file,
 )
 
 _PENDING_DOCKER_TIMEOUT_SECONDS = 10.0
@@ -118,18 +113,6 @@ def pending_response_with_snapshot(
             include_wud_metadata=include_wud_metadata,
             force=force_api,
         ).source
-        completed_update_selections = (
-            web_file_selection_store.load_completed_update_selections(
-                settings.config.db_path,
-                pending_file=settings.config.wud_out_file,
-                pending_target_keys={
-                    pending_target_key(target.raw)
-                    for target in source.parsed.targets
-                },
-            )
-            if source.active == "file"
-            else ()
-        )
     except OSError as exc:
         raise HTTPException(
             status_code=500,
@@ -152,7 +135,6 @@ def pending_response_with_snapshot(
             source=source.active,
             source_ids_by_line=source_ids_by_line,
             metadata_status_by_line=metadata_status_by_line,
-            completed_update_selections=completed_update_selections,
         )
         if include_grouping
         else PendingGrouping(status="unavailable")
@@ -337,19 +319,6 @@ def update_targets_response(settings: WebSettings) -> UpdateTargetsResponse:
     )
 
 
-def parse_pending_file(settings: WebSettings) -> tuple[bool, ParsedWudFile]:
-    path = settings.config.wud_out_file
-    try:
-        return True, parse_wud_file(path)
-    except FileNotFoundError:
-        return False, ParsedWudFile(lines=(), targets=(), warnings=())
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=_safe_exception_detail(settings, "could not read WUD file", exc),
-        ) from exc
-
-
 def _effective_config(settings: WebSettings) -> UpdaterConfig:
     if _effective_config_loader is None:
         return settings.config
@@ -374,7 +343,6 @@ def _pending_grouping_response(
     source: str,
     source_ids_by_line: dict[int, str],
     metadata_status_by_line: dict[int, PendingMetadataStatus],
-    completed_update_selections: Sequence[CompletedUpdateSelection],
 ) -> PendingGrouping:
     grouping = resolve_pending_groups(
         _effective_config(settings),
@@ -384,7 +352,6 @@ def _pending_grouping_response(
         known_digest_provenance_by_service=(
             web_database.known_digest_provenance_by_service(settings)
         ),
-        completed_update_selections=completed_update_selections,
     )
     runtime_service_states = _pending_runtime_service_states(settings)
     return PendingGrouping(

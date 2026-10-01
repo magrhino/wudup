@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from threading import Lock
 from typing import TYPE_CHECKING, cast
 
+from . import web_pending_sources
 from .command import CommandRunner
 from .compose import ComposeCli, ComposeDiscoveryError, ServiceImage
 from .digest_verifier import DigestResolveResult, DigestVerifier, ResolvedImageSubject
@@ -15,7 +16,7 @@ from .docker_cli import DockerCli
 from .images import image_with_tag, normalize_digest
 from .plan_matching import _match_targets
 from .platforms import ImagePlatform, platform_value
-from .web_pending_sources import PendingSourceResult, resolve_pending_source
+from .web_pending_sources import PendingSourceResult
 from .wud_file import WudTarget
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ def pending_security_context(
     *,
     options: PendingSecurityOptions = PENDING_SECURITY_DEFAULT_OPTIONS,
 ) -> PendingSecurityContext:
-    source = resolve_pending_source(
+    source = web_pending_sources.resolve_pending_source(
         settings,
         include_wud_metadata=options.include_wud_metadata,
     )

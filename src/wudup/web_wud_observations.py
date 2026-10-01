@@ -32,7 +32,7 @@ from .web_models import (
 )
 from .web_wud_observation_store import WudContainerIdentity
 from .web_wud_transport import _sanitize_detail
-from .wud_file import WudTarget, parse_wud_text
+from .wud_file import WudTarget
 
 _HTTP_STATUS_DETAIL_RE = re.compile(
     r"\b(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*(?:[:=]\s*)?([1-5]\d{2})\b",
@@ -139,7 +139,6 @@ def _count_phrase(count: int, noun: str) -> str:
 def _degraded_observation_detail(
     degraded_container_count: int,
     retained_update_count: int,
-    recovered_update_count: int,
 ) -> str:
     detail = (
         " The last WUD update check failed for "
@@ -151,18 +150,7 @@ def _degraded_observation_detail(
             f" {retained} {'uses the result' if retained_update_count == 1 else 'use results'} "
             "from the last successful WUD check."
         )
-    if recovered_update_count:
-        recovered = _count_phrase(recovered_update_count, "update")
-        detail += (
-            f" {recovered} {'was' if recovered_update_count == 1 else 'were'} "
-            "recovered from the pending file."
-        )
-    unresolved_count = max(
-        0,
-        degraded_container_count
-        - retained_update_count
-        - recovered_update_count,
-    )
+    unresolved_count = max(0, degraded_container_count - retained_update_count)
     if unresolved_count:
         detail += (
             " Update status is unknown for "
@@ -175,7 +163,6 @@ def _observation_status_detail(
     available_update_count: int,
     degraded_container_count: int,
     retained_update_count: int,
-    recovered_update_count: int,
     unsupported_container_count: int,
 ) -> str:
     updates = _count_phrase(available_update_count, "update")
@@ -184,7 +171,6 @@ def _observation_status_detail(
         detail += _degraded_observation_detail(
             degraded_container_count,
             retained_update_count,
-            recovered_update_count,
         )
     if unsupported_container_count:
         containers = _count_phrase(unsupported_container_count, "container")
@@ -312,72 +298,12 @@ def _previous_observation_for_container(
     return matches[0] if len(matches) == 1 else None
 
 
-def _pending_file_recovery_targets(settings: WebSettings) -> tuple[WudTarget, ...]:
-    if not settings.legacy_scripts_enabled:
-        return ()
-    try:
-        text = settings.config.wud_out_file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return ()
-    return parse_wud_text(text).targets
-
-
-def _recover_pending_file_observation(
-    container: WudApiContainer,
-    targets: Sequence[WudTarget],
-) -> WudApiContainer | None:
-    for target in targets:
-        if not _pending_file_target_is_recoverable(container, target):
-            continue
-
-        return cast(
-            WudApiContainer,
-            replace(
-                container,
-                remote_tag=target.desired_tag,
-                remote_digest=target.digest,
-                update_kind="tag" if target.desired_tag else "digest",
-                error=(
-                    container.error
-                    or "WUD update result is unavailable; pending update recovered "
-                    "from WUD_OUT_FILE"
-                ),
-                metadata_status="recovered",
-            ),
-        )
-    return None
-
-
-def _pending_file_target_is_recoverable(
-    container: WudApiContainer,
-    target: WudTarget,
-) -> bool:
-    if not (target.desired_tag or target.digest):
-        return False
-    if not _recovery_container_matches_target(container, target):
-        return False
-    if target.platform is not None and target.platform != container.platform:
-        return False
-    if target.desired_tag:
-        return target.desired_tag != container.local_tag
-    return target.digest != normalize_digest(container.local_digest)
-
-
 def _reconcile_degraded_observation(
     observation: _WudContainerObservation,
-    settings: WebSettings,
     previous: Mapping[WudContainerIdentity, _PendingObservation],
     containers: list[WudApiContainer],
     pending_observations: dict[WudContainerIdentity, _PendingObservation],
-    recovery_targets: tuple[WudTarget, ...] | None,
-) -> tuple[
-    tuple[WudTarget, ...] | None,
-    int,
-    int,
-    int,
-    int,
-    WudApiObservationOutcome,
-]:
+) -> tuple[int, int, int, WudApiObservationOutcome]:
     container = observation.container
     if _retain_previous_observation(
         container,
@@ -385,17 +311,11 @@ def _reconcile_degraded_observation(
         containers,
         pending_observations,
     ):
-        return recovery_targets, 1, 1, 0, 0, "retained"
+        return 1, 1, 0, "retained"
 
     if observation.unsupported:
-        return recovery_targets, 0, 0, 0, 1, "unsupported_ignored"
-    if recovery_targets is None:
-        recovery_targets = _pending_file_recovery_targets(settings)
-    recovered = _recover_pending_file_observation(container, recovery_targets)
-    if recovered is not None:
-        containers.append(recovered)
-        return recovery_targets, 1, 0, 1, 0, "recovered"
-    return recovery_targets, 1, 0, 0, 0, "unresolved"
+        return 0, 0, 1, "unsupported_ignored"
+    return 1, 0, 0, "unresolved"
 
 
 def _record_retryable_degraded_container(
@@ -429,7 +349,6 @@ def _reconcile_container_observations(
     int,
     int,
     int,
-    int,
     tuple[WudApiObservationDiagnostic, ...],
     Mapping[WudContainerIdentity, _PendingObservation],
 ]:
@@ -442,10 +361,8 @@ def _reconcile_container_observations(
     pending_observations: dict[WudContainerIdentity, _PendingObservation] = {}
     degraded_container_count = 0
     retained_update_count = 0
-    recovered_update_count = 0
     unsupported_container_count = 0
     observation_diagnostics: list[WudApiObservationDiagnostic] = []
-    recovery_targets: tuple[WudTarget, ...] | None = None
 
     for raw in payload:
         observation = _parse_container_observation(raw, settings)
@@ -473,23 +390,18 @@ def _reconcile_container_observations(
         )
         if observation.unsupported or observation.degraded:
             (
-                recovery_targets,
                 degraded_delta,
                 retained_delta,
-                recovered_delta,
                 unsupported_delta,
                 outcome,
             ) = _reconcile_degraded_observation(
                 observation,
-                settings,
                 previous,
                 containers,
                 pending_observations,
-                recovery_targets,
             )
             degraded_container_count += degraded_delta
             retained_update_count += retained_delta
-            recovered_update_count += recovered_delta
             unsupported_container_count += unsupported_delta
             observation_diagnostics.append(
                 _observation_diagnostic(observation, outcome, settings)
@@ -511,7 +423,6 @@ def _reconcile_container_observations(
         tuple(retryable_degraded_container_ids),
         degraded_container_count,
         retained_update_count,
-        recovered_update_count,
         unsupported_container_count,
         tuple(observation_diagnostics),
         pending_observations,
@@ -792,20 +703,6 @@ def _container_matches_target(container: WudApiContainer, target: WudTarget) -> 
     return image_matches_resolved_target(container.image, target.first, allow_repo)
 
 
-def _recovery_container_matches_target(
-    container: WudApiContainer,
-    target: WudTarget,
-) -> bool:
-    if target.first in {container.name, container.display_name, container.id}:
-        return True
-    if not container.image:
-        return False
-    if _image_registry_key(container.image) != _image_registry_key(target.first):
-        return False
-    allow_repo = target.allow_repo or not image_has_tag(target.first)
-    return image_matches_resolved_target(container.image, target.first, allow_repo)
-
-
 def _image_registry_key(image: str) -> str:
     if not _image_has_registry(image):
         return ""
@@ -914,4 +811,3 @@ def _error_message(value: object) -> str:
     if isinstance(value, dict):
         return _string(value.get("message") or value.get("error"))
     return _string(value)
-

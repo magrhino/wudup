@@ -126,7 +126,6 @@ def test_settings_reports_effective_non_secret_configuration(
             "WUD_API_BASE_URL": "http://wud.internal:3000",
             "WUD_API_STARTUP_WAIT_SECONDS": "5",
             "WUD_API_HEADERS_FILE": str(wud_api_headers_file),
-            "WUD_PENDING_SOURCE": "auto",
             **secret_values,
         },
     )
@@ -197,20 +196,8 @@ def test_settings_reports_effective_non_secret_configuration(
         "configured": True,
         "source": "configured",
     }
-    assert webui["WUD_PENDING_SOURCE"] == {
-        "name": "WUD_PENDING_SOURCE",
-        "value": "auto",
-        "default_value": "api",
-        "configured": True,
-        "source": "configured",
-    }
-    assert webui["WUDUP_LEGACY_SCRIPTS"] == {
-        "name": "WUDUP_LEGACY_SCRIPTS",
-        "value": "true",
-        "default_value": "true",
-        "configured": False,
-        "source": "default",
-    }
+    assert "WUD_PENDING_SOURCE" not in webui
+    assert "WUDUP_LEGACY_SCRIPTS" not in webui
     assert webui["WUD_WEB_SECURE_COOKIES"]["value"] == "false"
     assert webui["WUD_WEB_SECURE_COOKIES_EFFECTIVE"]["value"] == "false"
     assert webui["WUD_WEB_SECURE_COOKIES_EFFECTIVE"]["source"] == "request"

@@ -194,12 +194,10 @@ def get_observation_diagnostics(
             available=len(active_snapshot.containers),
             degraded=active_snapshot.degraded_container_count,
             retained=active_snapshot.retained_update_count,
-            recovered=active_snapshot.recovered_update_count,
             unresolved=max(
                 0,
                 active_snapshot.degraded_container_count
-                - active_snapshot.retained_update_count
-                - active_snapshot.recovered_update_count,
+                - active_snapshot.retained_update_count,
             ),
             unsupported_ignored=active_snapshot.unsupported_container_count,
         ),

@@ -31,14 +31,17 @@ WebUI with WUD's API pending source and the built-in release-note notifier
 instead. The removed container commands (`updates`, `sync-wud-scripts`,
 `truenas-status-export`) exit with an error, and so do options passed without a
 command (for example `docker run <image> --yes`), which used to run `updates`.
-The WebUI's pending cleanup and selected-entry removal actions, which edited
-`images.todo`, were also removed; unmatched entries stay listed with
-diagnostics. The `legacy-file-mode` git tag (v0.65.2) keeps the old code for
-reference.
+The WebUI no longer reads or edits `images.todo`: its file and `auto` pending
+sources, the pending cleanup and selected-entry removal actions, and the
+recovery of failed WUD checks from that file were removed. WUD's API is the only
+pending source, and an update whose WUD check failed shows as unknown until WUD
+reports it again. The `legacy-file-mode` git tag (v0.65.2) keeps the old code
+for reference.
 
 Existing deployments can delete the `wud-scripts` volume, its `/wud` and
 `/managed-wud` mounts, WUD command triggers that call `/wud/*.sh`, and the
-`WUD_SYNC_SCRIPTS` and `WUD_SCRIPTS_DIR` settings, which are now ignored.
+`WUD_SYNC_SCRIPTS`, `WUD_SCRIPTS_DIR`, `WUD_PENDING_SOURCE` and
+`WUDUP_LEGACY_SCRIPTS` settings, which are now ignored with a startup warning.
 
 ## Requirements
 
@@ -123,7 +126,7 @@ a password with at least 12 characters, then sign in at
 `http://127.0.0.1:7417`. The example binds browser access to loopback by
 default.
 
-See [WebUI Container](wiki/webui-container.md) for WUD API/file pending modes,
+See [WebUI Container](wiki/webui-container.md) for WUD API pending updates,
 login recovery, SQLite persistence, LAN or reverse-proxy exposure, candidate
 security scans, and browser mutation mode.
 

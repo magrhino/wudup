@@ -10,7 +10,7 @@ from wudup.web_models import WebSettings
 from wudup.wud_file import parse_wud_text
 
 
-def _settings(tmp_path: Path, *, pending_source: str = "file") -> WebSettings:
+def _settings(tmp_path: Path) -> WebSettings:
     root = tmp_path / "state"
     return WebSettings(
         config=UpdaterConfig(
@@ -28,7 +28,6 @@ def _settings(tmp_path: Path, *, pending_source: str = "file") -> WebSettings:
             out_gid=None,
         ),
         auth_token="",
-        pending_source=pending_source,
     )
 
 
@@ -59,34 +58,27 @@ def _watch_result() -> web_wud_api.WudApiWatchResult:
     )
 
 
-@pytest.mark.parametrize(
-    ("api_source", "expected_pending_source"),
-    [(False, "file"), (True, "api")],
-)
-def test_refresh_wud_pending_source_uses_active_settings(
+def test_refresh_wud_pending_source_watches_and_resolves_with_same_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    api_source: bool,
-    expected_pending_source: str,
 ) -> None:
+    settings = _settings(tmp_path)
     source = _pending_source_result()
     watch_result = _watch_result()
-    observed_watch: list[str] = []
-    observed_resolve: list[tuple[str, bool, bool]] = []
+    observed_watch: list[WebSettings] = []
+    observed_resolve: list[tuple[WebSettings, bool, bool]] = []
 
-    def fake_watch_all(settings: WebSettings) -> web_wud_api.WudApiWatchResult:
-        observed_watch.append(settings.pending_source)
+    def fake_watch_all(active: WebSettings) -> web_wud_api.WudApiWatchResult:
+        observed_watch.append(active)
         return watch_result
 
     def fake_resolve_pending_source(
-        settings: WebSettings,
+        active: WebSettings,
         *,
         include_wud_metadata: bool = False,
         force_api: bool = False,
     ) -> web_pending_sources.PendingSourceResult:
-        observed_resolve.append(
-            (settings.pending_source, include_wud_metadata, force_api)
-        )
+        observed_resolve.append((active, include_wud_metadata, force_api))
         return source
 
     monkeypatch.setattr(web_wud_refresh.web_wud_api, "watch_all", fake_watch_all)
@@ -96,17 +88,13 @@ def test_refresh_wud_pending_source_uses_active_settings(
         fake_resolve_pending_source,
     )
 
-    result = web_wud_refresh.refresh_wud_pending_source(
-        _settings(tmp_path),
-        watch_all=True,
-        api_source=api_source,
-    )
+    result = web_wud_refresh.refresh_wud_pending_source(settings, watch_all=True)
 
     assert isinstance(result, web_wud_refresh.WudPendingRefresh)
     assert result.source is source
     assert result.watch_result is watch_result
-    assert observed_watch == [expected_pending_source]
-    assert observed_resolve == [(expected_pending_source, True, False)]
+    assert observed_watch == [settings]
+    assert observed_resolve == [(settings, True, False)]
 
 
 @pytest.mark.parametrize(

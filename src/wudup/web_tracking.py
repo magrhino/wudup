@@ -591,7 +591,6 @@ def _run_tracking_repair(
     web_job_registry._update_apply_job(
         jobs, condition, job_id, status="running", started_at=utc_timestamp()
     )
-    lock = None
     backup: Path | None = None
     run_id: int | None = None
     plan: TrackingRepairPlan | None = None
@@ -605,7 +604,6 @@ def _run_tracking_repair(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="preflight", status="running", message="Revalidating Compose and runtime state."),
         )
-        lock = web_job_registry._acquire_apply_wud_lock(settings)
         plan, record, expected_image_id, runner, compose = _revalidate_tracking_repair(
             settings, payload
         )
@@ -675,8 +673,6 @@ def _run_tracking_repair(
     finally:
         if backup is not None and not retain_backup:
             backup.unlink(missing_ok=True)
-        if lock is not None:
-            lock.close()
 
 
 def _finish_failed_tracking_repair(

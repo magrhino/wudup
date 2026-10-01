@@ -93,7 +93,7 @@ const applyJobProgressPhases: ApplyJobProgressPhase[] = [
   {
     key: "preflight",
     label: "Preflight",
-    waitingMessage: "Waiting to validate the pending file and Compose state.",
+    waitingMessage: "Waiting to validate the pending entries and Compose state.",
   },
   {
     key: "pull",
@@ -113,7 +113,7 @@ const applyJobProgressPhases: ApplyJobProgressPhase[] = [
   {
     key: "cleanup",
     label: "Cleanup",
-    waitingMessage: "Waiting to reconcile the pending file.",
+    waitingMessage: "Waiting to reconcile the pending entries.",
   },
   {
     key: "completion",

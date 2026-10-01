@@ -16,7 +16,6 @@ from tests.web_test_helpers import (
 
 from wudup import web_jobs, web_scheduler
 from wudup.db import init_db, open_db
-from wudup.locks import DirectoryLock
 
 
 def test_auto_update_scheduler_submits_after_reservation_commit(
@@ -67,7 +66,6 @@ def test_auto_update_scheduler_submits_after_reservation_commit(
             ).fetchone()
         assert row is not None
         assert row["status"] == "reserved"
-        kwargs["wud_lock"].close()
         observed["start_event"] = kwargs["run_context"].start_event
         return web_scheduler.ApplyJobResponse(
             job_id="job-after-commit",
@@ -392,8 +390,3 @@ def test_auto_update_scheduler_rolls_back_reservation_when_queue_fails(
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         rows = conn.execute("SELECT * FROM auto_update_schedule_runs").fetchall()
     assert rows == []
-    contender = DirectoryLock(wud_file, timeout_seconds=0)
-    try:
-        contender.acquire()
-    finally:
-        contender.close()

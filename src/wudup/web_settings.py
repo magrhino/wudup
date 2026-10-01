@@ -10,7 +10,7 @@ from typing import cast
 
 from fastapi import HTTPException, Request
 
-from . import web_pending_sources, web_wud_api
+from . import web_wud_api
 from .config import (
     COMPOSE_IGNORE_PATHS_ENV,
     DEFAULT_COMPOSE_IGNORE_PATHS,
@@ -122,7 +122,6 @@ from .web_static import (
 )
 
 DEFAULT_WEB_HOST = "127.0.0.1"
-LEGACY_SCRIPTS_ENV = "WUDUP_LEGACY_SCRIPTS"
 _MANAGED_SETTING_ALLOWED_VALUES = {
     MANAGED_THEME_PREFERENCE_KEY: THEME_PREFERENCE_VALUES,
     MANAGED_ONBOARDING_CHECKLIST_KEY: ONBOARDING_CHECKLIST_VALUES,
@@ -834,19 +833,6 @@ def _webui_settings_entries(
             env.get(web_wud_api.WUD_API_HEADERS_FILE_ENV, ""),
             "",
             _env_configured(settings, web_wud_api.WUD_API_HEADERS_FILE_ENV),
-        ),
-        _settings_entry(
-            web_pending_sources.PENDING_SOURCE_ENV,
-            settings.pending_source,
-            web_pending_sources.DEFAULT_PENDING_SOURCE,
-            _env_configured(settings, web_pending_sources.PENDING_SOURCE_ENV),
-            source="derived" if not settings.legacy_scripts_enabled else None,
-        ),
-        _settings_entry(
-            LEGACY_SCRIPTS_ENV,
-            _format_bool(settings.legacy_scripts_enabled),
-            "true",
-            _env_configured(settings, LEGACY_SCRIPTS_ENV),
         ),
         _settings_entry(
             "WUD_WEB_MUTATIONS_ENABLED",

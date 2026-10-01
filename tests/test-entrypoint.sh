@@ -8,7 +8,7 @@ APP_DIR=""
 LAST_STATUS=0
 
 # Keep developer shell settings from leaking into entrypoint output.
-unset WUD_LOG_DIR WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUDUP_LEGACY_SCRIPTS
+unset WUD_LOG_DIR WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUD_PENDING_SOURCE WUDUP_LEGACY_SCRIPTS
 
 fail(){
   printf 'not ok - %s\n' "$*" >&2
@@ -57,14 +57,14 @@ run_entrypoint(){
     "PYTHON_BIN=${PYTHON_BIN:-}"
   )
   local name
-  for name in WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUDUP_LEGACY_SCRIPTS WUD_LOG_DIR; do
+  for name in WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUD_PENDING_SOURCE WUDUP_LEGACY_SCRIPTS WUD_LOG_DIR; do
     if [[ -n "${!name+x}" ]]; then
       env_args+=("$name=${!name}")
     fi
   done
 
   LAST_STATUS=0
-  env -u WUD_SYNC_SCRIPTS -u WUD_SCRIPTS_DIR -u WUDUP_LEGACY_SCRIPTS \
+  env -u WUD_SYNC_SCRIPTS -u WUD_SCRIPTS_DIR -u WUD_PENDING_SOURCE -u WUDUP_LEGACY_SCRIPTS \
     "${env_args[@]}" "$SCRIPT" "$@" > "$TEST_TMP/output.log" 2>&1 ||
     LAST_STATUS=$?
 }
@@ -185,11 +185,13 @@ test_removed_sync_settings_warn_and_do_not_sync(){
   teardown_case
 }
 
-test_legacy_scripts_setting_is_not_flagged_as_ignored(){
+test_removed_pending_source_settings_warn_and_still_start_web(){
   setup_case
-  PYTHON_BIN="$TEST_TMP/python" WUDUP_LEGACY_SCRIPTS=false run_entrypoint web
+  PYTHON_BIN="$TEST_TMP/python" WUD_PENDING_SOURCE=file WUDUP_LEGACY_SCRIPTS=false run_entrypoint web
   assert_status 0
-  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs]"
+  assert_output_contains "Ignoring WUD_PENDING_SOURCE: the WebUI always reads pending updates from the WUD API"
+  assert_output_contains "Ignoring WUDUP_LEGACY_SCRIPTS: the WebUI always reads pending updates from the WUD API"
+  assert_output_contains "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs]"
   teardown_case
 }
 
@@ -219,7 +221,7 @@ main(){
   run_test test_web_dispatch_injects_paths
   run_test test_removed_commands_exit_with_guidance
   run_test test_removed_sync_settings_warn_and_do_not_sync
-  run_test test_legacy_scripts_setting_is_not_flagged_as_ignored
+  run_test test_removed_pending_source_settings_warn_and_still_start_web
   run_test test_debug_command_executes_directly
 }
 

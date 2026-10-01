@@ -66,7 +66,6 @@ class WudApiSnapshot:
     retryable_degraded_container_ids: tuple[str, ...] = ()
     degraded_container_count: int = 0
     retained_update_count: int = 0
-    recovered_update_count: int = 0
     unsupported_container_count: int = 0
     observation_diagnostics: tuple[WudApiObservationDiagnostic, ...] = ()
     metadata_checked: bool = False
@@ -460,7 +459,6 @@ def _refresh_snapshot_serialized(
         retryable_degraded_container_ids,
         degraded_container_count,
         retained_update_count,
-        recovered_update_count,
         unsupported_container_count,
         observation_diagnostics,
         pending_observations,
@@ -474,7 +472,6 @@ def _refresh_snapshot_serialized(
         len(containers),
         degraded_container_count,
         retained_update_count,
-        recovered_update_count,
         unsupported_container_count,
     )
     snapshot = replace(
@@ -491,7 +488,6 @@ def _refresh_snapshot_serialized(
             retryable_degraded_container_ids=retryable_degraded_container_ids,
             degraded_container_count=degraded_container_count,
             retained_update_count=retained_update_count,
-            recovered_update_count=recovered_update_count,
         ),
         unresolved_containers=unresolved_containers,
         inventory_containers=inventory_containers,
@@ -962,7 +958,6 @@ def _snapshot(
     retryable_degraded_container_ids: Sequence[str] = (),
     degraded_container_count: int = 0,
     retained_update_count: int = 0,
-    recovered_update_count: int = 0,
 ) -> WudApiSnapshot:
     return WudApiSnapshot(
         status=WudApiStatus(
@@ -977,7 +972,6 @@ def _snapshot(
         retryable_degraded_container_ids=tuple(retryable_degraded_container_ids),
         degraded_container_count=degraded_container_count,
         retained_update_count=retained_update_count,
-        recovered_update_count=recovered_update_count,
         metadata_checked=metadata_checked,
         checked_monotonic=checked_monotonic,
     )

@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass, replace
 from threading import Event, Thread
-from typing import Any, cast
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -168,11 +168,10 @@ def _release_notification_scheduler_loop(
 def poll_wud_api_release_notifications(
     settings: WebSettings,
 ) -> ReleaseNotificationResponse | None:
-    api_settings = cast(WebSettings, replace(settings, pending_source="api"))
-    delivery_mode = effective_release_notification_config(api_settings).delivery_mode
+    delivery_mode = effective_release_notification_config(settings).delivery_mode
     verified_only = delivery_mode == RELEASE_NOTIFICATIONS_DELIVERY_MODE_ON_DEMAND
     try:
-        require_release_notification_sendable(api_settings)
+        require_release_notification_sendable(settings)
     except HTTPException as exc:
         if (
             exc.status_code in {403, 422}
@@ -190,7 +189,6 @@ def poll_wud_api_release_notifications(
         settings,
         include_wud_metadata=True,
         force=True,
-        api_source=True,
     ).source
     if (
         source.degraded
@@ -209,7 +207,7 @@ def poll_wud_api_release_notifications(
     )
     try:
         return send_release_notifications(
-            api_settings,
+            settings,
             payload,
             request=None,
             actor_type=SCHEDULER_ACTOR_TYPE,
@@ -445,7 +443,7 @@ def _notification_response(
     notification_config = effective_release_notification_config(settings)
     destination = _release_notification_destination(settings)
     if not enabled:
-        disabled = release_notes_disabled_state(settings)
+        disabled = release_notes_disabled_state()
         return ReleaseNotificationResponse(
             enabled=False,
             mode=notification_config.mode,
@@ -638,7 +636,7 @@ def _run_notification_source(settings: WebSettings, run_id: int) -> _Notificatio
         targets=tuple(targets),
         source_file=f"Run #{run_id}",
         source=PendingSourceInfo(
-            configured=settings.pending_source,
+            configured="file",
             active="file",
             label=f"Run #{run_id}",
             fresh=True,

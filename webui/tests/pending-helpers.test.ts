@@ -27,7 +27,6 @@ import {
   groupedItemServiceKeys,
   groupedItemTarget,
   itemsBreakingCount,
-  pendingSourceFileName,
   previewChangeLabels,
   releaseNoteReason,
   releaseNoteStatus,
@@ -1257,7 +1256,6 @@ describe("pending helper modules", () => {
       "api",
       "worker",
     ]);
-    expect(pendingSourceFileName("/out/images.todo")).toBe("images.todo");
     expect(groupedItemServiceKeys({ name: "media" }, item)).toEqual([
       "media/app",
     ]);

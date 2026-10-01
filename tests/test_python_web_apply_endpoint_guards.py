@@ -14,7 +14,7 @@ from tests.web_test_helpers import (
 
 from wudup import web_plans as plans_module
 from wudup.config import ConfigError
-from wudup.locks import DirectoryLock, lock_dir_for
+from wudup.locks import lock_dir_for
 
 
 def test_apply_endpoint_rejects_mixed_plan_with_skipped_lines_without_mutation(
@@ -433,56 +433,6 @@ def test_apply_endpoint_rejects_changed_tag_override_as_stale(
     assert response.status_code == 409
     assert response.json()["detail"] == "plan is stale"
     assert " pull " not in _fake_docker_calls(fake_root)
-
-
-def test_apply_endpoint_rejects_existing_wud_lock_without_queueing_job(
-    tmp_path: Path,
-) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_LOCK_TIMEOUT": "0",
-            **fake_env,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-    _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "stack",
-        [("app", "repo/app:latest", "cid-app")],
-    )
-    headers = _csrf_headers(client)
-    plan = client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=headers,
-    ).json()
-    external_lock = DirectoryLock(wud_file, timeout_seconds=0)
-    external_lock.acquire()
-    try:
-        response = client.post(
-            "/api/v1/jobs",
-            json={
-                "plan_id": plan["plan_id"],
-                "line_numbers": [1],
-                "confirmation": "apply",
-            },
-            headers=headers,
-        )
-    finally:
-        external_lock.close()
-
-    assert response.status_code == 409
-    assert response.json()["detail"] == "WUD file is locked"
-    assert client.app.state.web_apply_jobs == {}
-    calls = _fake_docker_calls(fake_root)
-    assert " pull " not in calls
-    assert " up -d " not in calls
 
 
 def test_apply_endpoint_rejects_concurrent_jobs(tmp_path: Path) -> None:

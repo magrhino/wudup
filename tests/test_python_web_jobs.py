@@ -29,7 +29,6 @@ from wudup.command import CommandError, CommandResult
 from wudup.compose import ComposeCli
 from wudup.config import UpdaterConfig
 from wudup.docker_cli import DockerCli
-from wudup.updater_models import CompletedUpdateSelection
 from wudup.web_models import WebApplyJob, WebSettings
 
 
@@ -161,39 +160,6 @@ def _plan_and_apply(
         apply_response=apply_response,
         job=job,
     )
-
-
-def test_acquire_apply_wud_lock_coerces_env_timeout_to_int(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    observed: list[int] = []
-
-    class FakeDirectoryLock:
-        def __init__(self, _path: object, *, timeout_seconds: int) -> None:
-            self.timeout_seconds = timeout_seconds
-            observed.append(timeout_seconds)
-
-        def acquire(self) -> None:
-            pass
-
-    monkeypatch.setattr(web_job_registry, "DirectoryLock", FakeDirectoryLock)
-
-    cases = [
-        ({"WUD_LOCK_TIMEOUT": "5"}, 5),
-        ({}, 30),
-        ({"WUD_LOCK_TIMEOUT": "slow"}, 30),
-        ({"WUD_LOCK_TIMEOUT": "-1"}, 30),
-    ]
-
-    for command_env, expected in cases:
-        lock = web_job_registry._acquire_apply_wud_lock(
-            _settings_for_lock_timeout(tmp_path, command_env)
-        )
-        assert lock.timeout_seconds == expected
-
-    assert observed == [5, 30, 30, 30]
-    assert all(isinstance(timeout_seconds, int) for timeout_seconds in observed)
 
 
 def test_refresh_api_pending_source_reports_degraded_detail(
@@ -437,6 +403,113 @@ def test_failed_api_apply_refreshes_pending_source_without_masking_failure(
     assert jobs["job"].progress[-1].status == "success"
 
 
+def test_apply_job_without_pending_snapshot_fails_without_touching_shared_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = _settings_for_lock_timeout(tmp_path, {})
+    settings.config.wud_out_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.config.wud_out_file.write_text("repo/app:latest\n", encoding="utf-8")
+    jobs = {
+        "job": WebApplyJob(
+            id="job",
+            status="queued",
+            selected_line_numbers=(1,),
+        )
+    }
+
+    def fail_runner(*_args, **_kwargs):
+        raise AssertionError("updater must not run without a pending snapshot")
+
+    monkeypatch.setattr(web_jobs, "UpdateFromWudRunner", fail_runner)
+
+    web_jobs._run_apply_job(
+        settings,
+        "plan",
+        (1,),
+        False,
+        (),
+        (),
+        (),
+        (),
+        jobs,
+        web_jobs.Condition(),
+        "job",
+        lambda settings: settings.config,
+        lambda *_args, **_kwargs: None,
+        web_jobs.ApplyJobRunContext(),
+    )
+
+    job = jobs["job"]
+    assert job.status == "failure"
+    assert "no pending-update snapshot" in job.error
+    assert settings.config.wud_out_file.read_text(encoding="utf-8") == (
+        "repo/app:latest\n"
+    )
+
+
+def test_apply_job_finishes_before_raising_private_copy_cleanup_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = _settings_for_lock_timeout(tmp_path, {})
+    jobs = {
+        "job": WebApplyJob(
+            id="job",
+            status="queued",
+            selected_line_numbers=(1,),
+        )
+    }
+
+    class FakeRunner:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.audit_run_id = 9
+            self.log_file = tmp_path / "apply.log"
+
+        def run(self) -> int:
+            return 0
+
+    def fail_cleanup(_self) -> None:
+        raise OSError("private copy cleanup failed")
+
+    monkeypatch.setattr(web_jobs, "UpdateFromWudRunner", FakeRunner)
+    monkeypatch.setattr(web_jobs.tempfile.TemporaryDirectory, "cleanup", fail_cleanup)
+    condition = web_jobs.Condition()
+    run_context = web_jobs.ApplyJobRunContext(
+        pending_source_active="file",
+        pending_source_text="repo/app:latest\n",
+    )
+
+    def config_loader(active):
+        return active.config
+
+    def record_schedule_update(*_args, **_kwargs) -> None:
+        return None
+
+    with pytest.raises(OSError, match="private copy cleanup failed"):
+        web_jobs._run_apply_job(
+            settings,
+            "plan",
+            (1,),
+            False,
+            (),
+            (),
+            (),
+            (),
+            jobs,
+            condition,
+            "job",
+            config_loader,
+            record_schedule_update,
+            run_context,
+        )
+
+    job = jobs["job"]
+    assert job.status == "success"
+    assert job.run_id == 9
+    assert job.finished_at
+
+
 def test_apply_job_refreshes_only_api_pending_source(
     tmp_path: Path,
     monkeypatch,
@@ -497,7 +570,6 @@ def test_apply_job_refreshes_only_api_pending_source(
         jobs,
         web_jobs.Condition(),
         "job",
-        None,
         lambda settings: settings.config,
         record_schedule_update,
         web_jobs.ApplyJobRunContext(
@@ -763,7 +835,7 @@ def test_job_stream_emits_initial_and_terminal_status(tmp_path: Path) -> None:
     assert "log" in event_names[:-1]
 
 
-def test_scoped_apply_updates_shared_stacks_sequentially_and_clears_line(
+def test_scoped_apply_mutates_only_the_selected_stack(
     tmp_path: Path,
 ) -> None:
     case = _shared_update_case(tmp_path)
@@ -832,59 +904,6 @@ def test_scoped_apply_updates_shared_stacks_sequentially_and_clears_line(
         for event in run.json()["events"]
         if event["stack_name"]
     } == {"active"}
-
-    unrelated = "repo/unrelated:latest\n"
-    case.wud_file.write_text(
-        f"{case.original}{unrelated}",
-        encoding="utf-8",
-    )
-    restarted_client = _client(tmp_path, case.environ)
-    restarted_headers = _csrf_headers(restarted_client)
-    remaining_pending = restarted_client.get("/api/v1/pending").json()
-    assert [
-        group["name"] for group in remaining_pending["grouping"]["groups"]
-    ] == ["backup"]
-    legacy_plan = restarted_client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=restarted_headers,
-    )
-    assert legacy_plan.status_code == 200
-    assert {
-        stack["name"] for stack in legacy_plan.json()["stacks"]
-    } == {"active", "backup"}
-    backup_result = _plan_and_apply(
-        restarted_client,
-        restarted_headers,
-        [_selection_for_group(restarted_client, "backup")],
-    )
-
-    assert [stack["name"] for stack in backup_result.plan["stacks"]] == ["backup"]
-    assert backup_result.job["status"] == "success"
-    assert case.wud_file.read_text(encoding="utf-8") == unrelated
-    final_pending = restarted_client.get("/api/v1/pending").json()
-    assert final_pending["count"] == 1
-    assert final_pending["grouping"]["groups"] == []
-    final_calls = _fake_docker_calls(case.fake_root)
-    final_active_mutations = [
-        line
-        for line in final_calls.splitlines()
-        if str(case.active_dir) in line
-        and (" pull app" in line or " up -d " in line)
-    ]
-    final_backup_mutations = [
-        line
-        for line in final_calls.splitlines()
-        if str(case.backup_dir) in line
-        and (" pull app" in line or " up -d " in line)
-    ]
-    assert final_active_mutations == active_mutations
-    assert final_backup_mutations
-    assert {
-        event["stack"]
-        for event in backup_result.job["progress"]
-        if event["stack"]
-    } == {"backup"}
 
 
 @pytest.mark.parametrize("mode", ["stop", "pause", "live"])
@@ -967,102 +986,6 @@ def test_apply_job_fails_closed_when_protected_identity_is_unavailable(
     )
 
 
-def test_scoped_apply_preserves_completions_for_other_pending_lines(
-    tmp_path: Path,
-) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    environ = {
-        "WUD_WEB_DEV_NO_AUTH": "true",
-        "WUD_WEB_MUTATIONS_ENABLED": "true",
-        **fake_env,
-    }
-    client = _client(tmp_path, environ)
-    wud_file = tmp_path / "state" / "images.todo"
-    original = "repo/one:latest\nrepo/two:latest\n"
-    wud_file.write_text(original, encoding="utf-8")
-    for image_name in ("one", "two"):
-        for stack_role in ("active", "backup"):
-            _make_fake_stack(
-                tmp_path,
-                fake_root,
-                f"{image_name}-{stack_role}",
-                [
-                    (
-                        "app",
-                        f"repo/{image_name}:latest",
-                        f"cid-{image_name}-{stack_role}",
-                    )
-                ],
-            )
-        _write_fake_image_after_pull(
-            fake_root,
-            f"repo/{image_name}:latest",
-            f"sha256:{image_name}-new-id",
-            f"sha256:{image_name}-new",
-        )
-    headers = _csrf_headers(client)
-
-    for group_name in ("one-active", "two-active"):
-        result = _plan_and_apply(
-            client,
-            headers,
-            [_selection_for_group(client, group_name)],
-        )
-        assert result.job["status"] == "success"
-
-    assert wud_file.read_text(encoding="utf-8") == original
-    restarted_client = _client(tmp_path, environ)
-    remaining = restarted_client.get("/api/v1/pending").json()
-    assert {
-        group["name"] for group in remaining["grouping"]["groups"]
-    } == {"one-backup", "two-backup"}
-
-
-def test_legacy_broad_apply_clears_scoped_completion_for_target(
-    tmp_path: Path,
-) -> None:
-    case = _shared_update_case(tmp_path)
-    scoped_result = _plan_and_apply(
-        case.client,
-        case.headers,
-        [_selection_for_group(case.client, "active")],
-    )
-    assert scoped_result.job["status"] == "success"
-    assert case.wud_file.read_text(encoding="utf-8") == case.original
-
-    legacy_plan_response = case.client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=case.headers,
-    )
-    legacy_plan = legacy_plan_response.json()
-    legacy_apply = case.client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": legacy_plan["plan_id"],
-            "line_numbers": [1],
-            "confirmation": "apply",
-        },
-        headers=case.headers,
-    )
-    legacy_job = _wait_apply_job(case.client, legacy_apply.json()["job_id"])
-
-    assert legacy_plan_response.status_code == 200
-    assert {
-        stack["name"] for stack in legacy_plan["stacks"]
-    } == {"active", "backup"}
-    assert legacy_apply.status_code == 202
-    assert legacy_job["status"] == "success"
-    assert case.wud_file.read_text(encoding="utf-8") == ""
-
-    case.wud_file.write_text(case.original, encoding="utf-8")
-    restarted_client = _client(tmp_path, case.environ)
-    requeued = restarted_client.get("/api/v1/pending").json()
-    assert {
-        group["name"] for group in requeued["grouping"]["groups"]
-    } == {"active", "backup"}
-
-
 def test_scoped_tag_rewrite_keeps_completed_stack_hidden_after_restart(
     tmp_path: Path,
 ) -> None:
@@ -1093,131 +1016,6 @@ def test_scoped_tag_rewrite_keeps_completed_stack_hidden_after_restart(
     assert [
         group["name"] for group in remaining["grouping"]["groups"]
     ] == ["backup"]
-
-
-def test_scoped_apply_checkpoints_successful_stack_when_sibling_fails(
-    tmp_path: Path,
-) -> None:
-    case = _shared_update_case(tmp_path)
-    pull_failure = case.fake_root / "stacks" / "backup" / "pull_fail"
-    pull_failure.write_text(
-        "fail\n",
-        encoding="utf-8",
-    )
-    result = _plan_and_apply(
-        case.client,
-        case.headers,
-        _all_group_selections(case.client),
-    )
-
-    assert result.job["status"] == "failure"
-    assert case.wud_file.read_text(encoding="utf-8") == case.original
-    first_calls = _fake_docker_calls(case.fake_root)
-    active_mutations = [
-        line
-        for line in first_calls.splitlines()
-        if str(case.active_dir) in line
-        and (" pull app" in line or " up -d " in line)
-    ]
-    assert active_mutations
-    assert any(
-        str(case.backup_dir) in line and " pull app" in line
-        for line in first_calls.splitlines()
-    )
-
-    restarted_client = _client(tmp_path, case.environ)
-    restarted_headers = _csrf_headers(restarted_client)
-    remaining = restarted_client.get("/api/v1/pending").json()
-    assert [
-        group["name"] for group in remaining["grouping"]["groups"]
-    ] == ["backup"]
-    pull_failure.unlink()
-    retry_result = _plan_and_apply(
-        restarted_client,
-        restarted_headers,
-        [_selection_for_group(restarted_client, "backup")],
-    )
-
-    assert [stack["name"] for stack in retry_result.plan["stacks"]] == ["backup"]
-    assert retry_result.job["status"] == "success"
-    assert case.wud_file.read_text(encoding="utf-8") == ""
-    final_calls = _fake_docker_calls(case.fake_root)
-    final_active_mutations = [
-        line
-        for line in final_calls.splitlines()
-        if str(case.active_dir) in line
-        and (" pull app" in line or " up -d " in line)
-    ]
-    assert final_active_mutations == active_mutations
-
-
-def test_scoped_apply_fails_when_completion_checkpoint_cannot_persist(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    case = _shared_update_case(tmp_path)
-    plan_response = case.client.post(
-        "/api/v1/plans",
-        json={"selections": [_selection_for_group(case.client, "active")]},
-        headers=case.headers,
-    )
-    plan = plan_response.json()
-
-    def fail_checkpoint(*_args, **_kwargs) -> None:
-        raise RuntimeError("private database path")
-
-    monkeypatch.setattr(
-        web_jobs.web_file_selection_store,
-        "replace_completed_update_selections",
-        fail_checkpoint,
-    )
-    apply_response = case.client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": plan["plan_id"],
-            "selections": plan["selected_selections"],
-            "confirmation": "apply",
-        },
-        headers=case.headers,
-    )
-    job = _wait_apply_job(case.client, apply_response.json()["job_id"])
-
-    assert plan_response.status_code == 200
-    assert apply_response.status_code == 202
-    assert job["status"] == "failure"
-    assert job["error"] == "Could not persist partial update completion state."
-    assert "private database path" not in str(job)
-    assert case.wud_file.read_text(encoding="utf-8") == case.original
-
-
-def test_file_selection_checkpoint_read_failure_is_not_reported_as_success(
-    tmp_path: Path,
-) -> None:
-    settings = _settings_for_lock_timeout(tmp_path, {})
-    settings.config.wud_out_file.parent.mkdir(parents=True)
-    settings.config.wud_out_file.mkdir()
-    selection = CompletedUpdateSelection("target", "current")
-    runner = SimpleNamespace(
-        options=SimpleNamespace(
-            update_selections=(SimpleNamespace(line_no=1, selection_id="selected"),),
-            completed_update_selections=(),
-        ),
-        successful_completed_update_selections=(selection,),
-        discovered_completed_update_selections=(selection,),
-    )
-    run_context = web_jobs.ApplyJobRunContext(
-        pending_source_active="file",
-    )
-
-    with pytest.raises(
-        web_jobs.web_file_selection_store.FileSelectionCheckpointError,
-        match="Could not persist partial update completion state",
-    ):
-        web_jobs._checkpoint_file_selection_completions(
-            settings,
-            runner,
-            run_context=run_context,
-        )
 
 
 def test_job_stream_caps_live_log_tail_size(tmp_path: Path) -> None:
