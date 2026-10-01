@@ -4,6 +4,14 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.65.2](https://github.com/magrhino/wudup/compare/v0.65.1...v0.65.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **updater:** track release line after digest unpin ([#797](https://github.com/magrhino/wudup/issues/797)) ([c520684](https://github.com/magrhino/wudup/commit/c5206847e16298eb005406bf4c0f18b042417cfb))
+* **webui:** suggest tracking filters for date-release tags ([#794](https://github.com/magrhino/wudup/issues/794)) ([152a96e](https://github.com/magrhino/wudup/commit/152a96e750f13624306f8302128836968a42f3cb))
+
 ## [0.65.1](https://github.com/magrhino/wudup/compare/v0.65.0...v0.65.1) (2026-09-30)
 
 
