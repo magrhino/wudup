@@ -78,7 +78,8 @@ COPY --from=webui-build /webui/dist/ /app/src/wudup/web_static/
 # remove build-only pip.
 RUN python -m pip wheel --no-deps --no-build-isolation --no-cache-dir \
       --wheel-dir /tmp/wudup-dist . \
-    && python -m pip install --no-deps --no-cache-dir /tmp/wudup-dist/*.whl \
+    && PIP_ONLY_BINARY=:all: python -m pip install --no-deps --no-cache-dir \
+      /tmp/wudup-dist/*.whl \
     && rm -rf /tmp/wudup-dist \
     && python -m pip uninstall --yes pip
 
