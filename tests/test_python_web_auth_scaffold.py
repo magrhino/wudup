@@ -615,15 +615,21 @@ def test_partial_x_forwarded_headers_disable_client_forwarded_fallback(
         client=SimpleNamespace(host=_DOC_PROXY_V4),
         headers={"forwarded": client_forwarded, "x-forwarded-proto": "https"},
     )
-    unusable_forwarded_for = SimpleNamespace(
+    host_only = SimpleNamespace(
         client=SimpleNamespace(host=_DOC_PROXY_V4),
-        headers={"forwarded": client_forwarded, "x-forwarded-for": "unknown"},
+        headers={"forwarded": client_forwarded, "x-forwarded-host": "wud.test"},
     )
 
     assert web_auth_module._trusted_forwarded_origin(proto_only, settings) == ""
-    assert web_auth_module._request_client_address(
-        unusable_forwarded_for, settings
-    ) == _DOC_PROXY_V4
+    assert web_auth_module._trusted_forwarded_origin(host_only, settings) == ""
+    for value in ("unknown", "evil", f"{_DOC_FORWARDED_CLIENT_V4}, evil"):
+        unusable_forwarded_for = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={"forwarded": client_forwarded, "x-forwarded-for": value},
+        )
+        assert web_auth_module._request_client_address(
+            unusable_forwarded_for, settings
+        ) == _DOC_PROXY_V4, value
 
 
 def test_forwarded_client_address_keeps_bare_ipv6_suffix(tmp_path: Path) -> None:
