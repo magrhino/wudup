@@ -82,7 +82,6 @@ class UpdaterOptions:
         DigestPinLabelRewriteApproval, ...
     ] = ()
     update_selections: tuple[UpdateSelection, ...] = ()
-    completed_update_selections: tuple[CompletedUpdateSelection, ...] = ()
     tag_stream_updates: tuple[TagStreamUpdate, ...] = ()
     # None disables WebUI self-protection; empty enables image checks without a runtime target.
     protected_container: str | None = None
@@ -92,12 +91,6 @@ class UpdaterOptions:
 class UpdateSelection:
     line_no: int
     selection_id: str = ""
-
-
-@dataclass(frozen=True)
-class CompletedUpdateSelection:
-    target_key: str
-    completion_id: str
 
 
 @dataclass(frozen=True)

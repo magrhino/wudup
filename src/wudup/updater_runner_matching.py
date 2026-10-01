@@ -11,8 +11,6 @@ from .digest_provenance import digest_from_image
 from .images import image_has_tag, image_tag, normalize_digest, repo_key
 from .line_specs import parse_line_spec
 from .plan_matching import (
-    completed_update_selections_for_matches,
-    filter_matches_for_completed_update_selections,
     filter_matches_for_selections,
     partially_selected_line_numbers,
 )
@@ -28,24 +26,6 @@ from .wud_file import (
 
 
 class _RunnerMatchingMixin:
-    def _record_successful_completed_update_selections(
-        self,
-        matches: Sequence[Match],
-    ) -> None:
-        completed = {
-            (item.target_key, item.completion_id): item
-            for item in self.successful_completed_update_selections
-        }
-        completed.update(
-            {
-                (item.target_key, item.completion_id): item
-                for item in completed_update_selections_for_matches(matches)
-            }
-        )
-        self.successful_completed_update_selections = tuple(
-            item for _key, item in sorted(completed.items())
-        )
-
     def _parse_wud_files(self) -> tuple[ParsedWudFile, ParsedWudFile]:
         opts = self.options
         full_parse = parse_wud_file(opts.wud_file)
@@ -164,13 +144,7 @@ class _RunnerMatchingMixin:
                 item.service,
             )
         )
-        self.discovered_completed_update_selections = (
-            completed_update_selections_for_matches(matches)
-        )
-        all_matches = filter_matches_for_completed_update_selections(
-            matches,
-            self.options.completed_update_selections,
-        )
+        all_matches = matches
         try:
             matches, _normalized = filter_matches_for_selections(
                 all_matches,
