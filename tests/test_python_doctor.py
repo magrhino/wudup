@@ -14,6 +14,7 @@ from wudup.command import CommandResult
 from wudup.doctor import (
     Doctor,
     DoctorOptions,
+    _check_category,
     _write_probe,
     doctor_result_from_namespace,
     run_doctor_from_namespace,
@@ -102,6 +103,21 @@ class DoctorTests(unittest.TestCase):
             stdout,
         )
         self.assertIn("Result: 1 failure(s), 0 warning(s)", stdout)
+
+    def test_check_category_maps_remaining_check_names(self) -> None:
+        cases = {
+            "python rich": "runtime",
+            "docker cli": "docker",
+            "compose discovery": "compose",
+            "bind mount path safety": "compose",
+            "WUD_OUT_FILE": "paths",
+            "DOCKER_BASE": "paths",
+            "configuration": "configuration",
+            "WebUI database": "general",
+        }
+        for name, category in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(_check_category(name), category)
 
     def test_doctor_result_includes_structured_checks(self) -> None:
         for path in self.stack_dir.iterdir():

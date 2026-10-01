@@ -605,6 +605,39 @@ class InitConfigTests(unittest.TestCase):
             ],
         )
 
+    def test_container_doctor_guidance_printed_when_not_run(self) -> None:
+        for non_interactive, answer in ((True, None), (False, "no")):
+            with self.subTest(non_interactive=non_interactive):
+                config_file = self.root / f"helper-{non_interactive}.env"
+                answers = answers_from_namespace(
+                    self._args(
+                        profile="helper",
+                        config_file=str(config_file),
+                        no_compose_override=True,
+                        stack_root=str(self.root / "docker"),
+                        log_dir=str(self.root / "logs"),
+                        uid="1000",
+                        gid="1000",
+                        non_interactive=non_interactive,
+                    ),
+                    environ=self._env(),
+                )
+                stdout = StringIO()
+                with (
+                    mock.patch("builtins.input", return_value=answer or ""),
+                    mock.patch("wudup.init_config.subprocess.run") as run,
+                    redirect_stdout(stdout),
+                ):
+                    result = run_init(answers, repo_root=self.root, environ=self._env())
+
+                self.assertIsNone(result.doctor_status)
+                run.assert_not_called()
+                self.assertIn(
+                    "Container doctor was not run automatically. Run:",
+                    stdout.getvalue(),
+                )
+                self.assertIn(str(config_file), stdout.getvalue())
+
     def _env(self) -> dict[str, str]:
         return {"HOME": str(self.root), "PATH": ""}
 
