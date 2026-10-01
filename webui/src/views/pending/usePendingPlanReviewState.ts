@@ -16,7 +16,6 @@ import { useAuthStore } from "../../stores/auth";
 import { useUpdatesStore } from "../../stores/updates";
 import { pendingMetadataStatus } from "./pendingDisplay";
 import {
-  assistantDetailList,
   cleanupIssueKeys,
   digestPinLabelApprovalFromIssue,
   digestPinLabelApprovalKey,
@@ -64,12 +63,10 @@ export type PendingApplyPlanPayload = {
 };
 
 export type UsePendingPlanReviewStateOptions = {
-  selectedLineNumbers: Ref<number[]>;
   selectedSelections: Ref<PlanSelectionRequest[]>;
   selectedSelectionKeySet: ComputedRef<Set<string>>;
   stackGroups: ComputedRef<PendingStackGroup[]>;
   unmatchedItems: ComputedRef<PendingGroupedItem[]>;
-  pendingSourceLabel: ComputedRef<string>;
   tagOverrideErrorForLines: (lineNumbers: number[]) => string;
 };
 
@@ -91,9 +88,6 @@ export function usePendingPlanReviewState(
     auth.session?.mutations_enabled
       ? "Apply starts a server-side job, streams the live log, and writes a run record you can verify afterward."
       : "Read-only mode keeps Apply disabled. You can still preview impact now, then enable browser mutations server-side when you are ready to apply.",
-  );
-  const pendingSourceAllowsFileEdits = computed(
-    () => (updates.pending?.source?.active ?? "file") === "file",
   );
   const selectedFreshLineNumbers = computed(() => {
     const byLine = new Map(
@@ -121,25 +115,6 @@ export function usePendingPlanReviewState(
       updates.loading ||
       Boolean(selectedTagOverrideError.value),
   );
-  const removeSelectedDisabled = computed(
-    () =>
-      options.selectedLineNumbers.value.length === 0 ||
-      updates.loading ||
-      !auth.session?.mutations_enabled ||
-      !pendingSourceAllowsFileEdits.value,
-  );
-  const removeSelectedDisabledMessage = computed(() => {
-    if (!options.selectedLineNumbers.value.length) {
-      return "";
-    }
-    if (!pendingSourceAllowsFileEdits.value) {
-      return `${options.pendingSourceLabel.value} entries cannot be removed from the WebUI because this source is read from WUD.`;
-    }
-    if (auth.session?.mutations_enabled) {
-      return "";
-    }
-    return "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to remove selected entries.";
-  });
   const planAlertType = computed(() => {
     if (
       updates.plan?.status === "blocked" ||
@@ -349,61 +324,10 @@ export function usePendingPlanReviewState(
   const unmatchedIssueSummary = computed(() =>
     staleIssueSummary(options.unmatchedItems.value),
   );
-  const cleanupAssistantFindings = computed(() =>
-    assistantDetailList(cleanupItems.value, "preflight_findings"),
-  );
-  const cleanupAssistantReasons = computed(() =>
-    assistantDetailList(cleanupItems.value, "possible_reasons"),
-  );
-  const cleanupAssistantActions = computed(() =>
-    assistantDetailList(cleanupItems.value, "recommended_actions"),
-  );
-  const cleanupReviewSummary = computed(() => {
-    const summary = staleReviewSummary(cleanupItems.value, "entry", "entries");
-    return summary
-      ? `${summary} Cleanup only removes WUD pending lines.`
-      : "Cleanup only removes WUD pending lines.";
-  });
-  const cleanupButtonLabel = computed(
+  const cleanupReviewSummary = computed(
     () =>
-      `Remove ${pluralize(cleanupItems.value.length, "unmatched entry", "unmatched entries")}`,
-  );
-  const cleanupDisabled = computed(
-    () => !updates.plan?.cleanup.can_remove_unmatched || updates.loading,
-  );
-  const cleanupDisabledMessage = computed(() => {
-    if (
-      !updates.plan ||
-      !cleanupAvailable.value ||
-      updates.plan.cleanup.can_remove_unmatched
-    ) {
-      return "";
-    }
-    if (!auth.session?.mutations_enabled) {
-      return "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to remove stale pending entries.";
-    }
-    if (!pendingSourceAllowsFileEdits.value) {
-      return `${options.pendingSourceLabel.value} entries cannot be removed from the WebUI because this source is read from WUD.`;
-    }
-    return "These pending entries cannot be removed right now.";
-  });
-  const pendingCleanupMessage = computed(() => {
-    if (!updates.pendingCleanup) {
-      return "";
-    }
-    return `${pluralize(updates.pendingCleanup.removed_count, "pending entry", "pending entries")} removed from ${options.pendingSourceLabel.value}.`;
-  });
-  const removalItems = computed(() => updates.pendingRemovalPlan?.lines ?? []);
-  const removalButtonLabel = computed(
-    () =>
-      `Remove ${pluralize(options.selectedLineNumbers.value.length, "selected entry", "selected entries")}`,
-  );
-  const removalConfirmButtonLabel = computed(
-    () =>
-      `Remove ${pluralize(removalItems.value.length, "selected entry", "selected entries")}`,
-  );
-  const removalDisabled = computed(
-    () => !updates.pendingRemovalPlan?.can_remove || updates.loading,
+      staleReviewSummary(cleanupItems.value, "entry", "entries") ||
+      "No Compose service matched these pending entries.",
   );
   const mutationDisabledMessage = computed(() => {
     if (!updates.plan || updates.plan.status !== "ready" || updates.plan.can_apply) {
@@ -739,13 +663,7 @@ export function usePendingPlanReviewState(
     applyReadinessSummary,
     applyVisible,
     batchSummaryLabel,
-    cleanupAssistantActions,
-    cleanupAssistantFindings,
-    cleanupAssistantReasons,
     cleanupAvailable,
-    cleanupButtonLabel,
-    cleanupDisabled,
-    cleanupDisabledMessage,
     cleanupItems,
     cleanupReviewSummary,
     approveDigestPinLabelRewrite,
@@ -757,7 +675,6 @@ export function usePendingPlanReviewState(
     mutationStateLabel,
     mutationStateType,
     pendingApplyTourDetail,
-    pendingCleanupMessage,
     planActions,
     planAlertType,
     planContextLabel,
@@ -773,12 +690,6 @@ export function usePendingPlanReviewState(
     preflightSummary,
     preflightTagRewriteNotice,
     preflightTitle,
-    removalButtonLabel,
-    removalConfirmButtonLabel,
-    removalDisabled,
-    removalItems,
-    removeSelectedDisabled,
-    removeSelectedDisabledMessage,
     selectedTagOverrideError,
     selectedMetadataWarning,
     selectedUpdateContext,

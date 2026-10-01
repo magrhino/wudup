@@ -204,8 +204,6 @@ class DryRunPlanCleanupItem:
 
 @dataclass(frozen=True)
 class DryRunPlanCleanup:
-    cleanup_id: str = ""
-    can_remove_unmatched: bool = False
     items: tuple[DryRunPlanCleanupItem, ...] = ()
 
 

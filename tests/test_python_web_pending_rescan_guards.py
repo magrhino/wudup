@@ -119,6 +119,39 @@ def test_pending_all_rescan_runs_global_watch_and_audits(
     assert metadata["wud_api"]["state"] == "ready"
 
 
+def test_pending_rescan_does_not_wait_for_or_release_the_wud_file_lock(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = install_recording_wud_api(
+        monkeypatch,
+        [container_payload(name="app")],
+    )
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_API_BASE_URL": "https://wud.rescan-lock.test:3000",
+            "WUD_LOCK_TIMEOUT": "0",
+        },
+    )
+    lock_dir = tmp_path / "state" / "images.todo.lock"
+    lock_dir.mkdir()
+    calls.clear()
+
+    response = client.post(
+        "/api/v1/pending/rescan",
+        json=rescan_payload(),
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert ("POST", "/api/containers/watch") in calls
+    assert lock_dir.is_dir()
+
+
 @pytest.mark.parametrize("initial_store", ["empty", "stale", "up-to-date"])
 @pytest.mark.parametrize("pending_source", ["api", "file"])
 def test_pending_all_rescan_discovers_containers_outside_pending_store(

@@ -11,7 +11,6 @@ from .compose import COMPOSE_FILENAMES, ComposeStack
 from .config import UpdaterConfig
 from .docker_cli import DockerCli
 from .images import image_has_tag, image_matches_resolved_target
-from .plan_identity import _cleanup_id
 from .plan_models import (
     DryRunPlanCleanup,
     DryRunPlanCleanupItem,
@@ -828,12 +827,9 @@ def _join_display_values(values: Sequence[str]) -> str:
 
 
 def _cleanup_for_skipped(
-    config: UpdaterConfig,
     targets: Sequence[WudTarget],
     skipped: Sequence[DryRunPlanSkipped],
     diagnostics: Mapping[int, UnmatchedDiagnostic],
-    *,
-    host_docker_base: Path | None,
 ) -> DryRunPlanCleanup:
     skipped_reasons = {item.line_no: item.reason for item in skipped}
     items = tuple(
@@ -849,17 +845,7 @@ def _cleanup_for_skipped(
         for target in targets
         if skipped_reasons.get(target.line_no) == "unmatched"
     )
-    if not items:
-        return DryRunPlanCleanup()
-    return DryRunPlanCleanup(
-        cleanup_id=_cleanup_id(
-            config,
-            items,
-            host_docker_base=host_docker_base,
-        ),
-        can_remove_unmatched=True,
-        items=items,
-    )
+    return DryRunPlanCleanup(items=items)
 
 
 def _skipped(target: WudTarget, reason: str) -> DryRunPlanSkipped:

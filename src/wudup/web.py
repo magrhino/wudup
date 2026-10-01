@@ -366,12 +366,6 @@ def create_app(
         status_code=202,
     )
     router.add_api_route(
-        "/pending/cleanup",
-        web_pending.api_pending_cleanup,
-        methods=["POST"],
-        response_model=web_models.PendingCleanupResponse,
-    )
-    router.add_api_route(
         "/pending/rescan",
         web_pending_rescan.api_pending_rescan,
         methods=["POST"],
@@ -381,18 +375,6 @@ def create_app(
         "/pending/rescan",
         api_post_only_method_not_allowed,
         methods=["GET"],
-    )
-    router.add_api_route(
-        "/pending/removal-plan",
-        web_pending.api_pending_removal_plan,
-        methods=["POST"],
-        response_model=web_models.PendingRemovalPlanResponse,
-    )
-    router.add_api_route(
-        "/pending/removal",
-        web_pending.api_pending_removal,
-        methods=["POST"],
-        response_model=web_models.PendingCleanupResponse,
     )
     router.add_api_route(
         "/release-notes",

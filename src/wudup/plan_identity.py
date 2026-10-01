@@ -1,4 +1,4 @@
-"""Stable identity helpers for WebUI dry-run plans and cleanup previews."""
+"""Stable identity helpers for WebUI dry-run plans."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import UpdaterConfig
-from .plan_models import DryRunPlan, DryRunPlanCleanupItem, PlanFileMissing
+from .plan_models import DryRunPlan, PlanFileMissing
 from .updater_models import (
     DigestPinLabelRewriteApproval,
     TagOverride,
@@ -121,39 +121,6 @@ def _plan_id(
         "plan": plan_payload,
         "source_file": source_file or str(config.wud_out_file),
         "wud_file_sha256": wud_file_hash,
-    }
-    canonical = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _cleanup_id(
-    config: UpdaterConfig,
-    items: Sequence[DryRunPlanCleanupItem],
-    *,
-    host_docker_base: Path | None,
-) -> str:
-    payload = {
-        "version": 1,
-        "docker_base": str(config.docker_base),
-        "digest_pin_updates": config.digest_pin_updates,
-        "host_docker_base": "" if host_docker_base is None else str(host_docker_base),
-        "items": [
-            {
-                "line_no": item.line_no,
-                "raw": item.raw,
-                "image": item.image,
-                "desired_tag": item.desired_tag,
-                "digest": item.digest,
-                "reason": item.reason,
-            }
-            for item in items
-        ],
-        "source_file": str(config.wud_out_file),
     }
     canonical = json.dumps(
         payload,

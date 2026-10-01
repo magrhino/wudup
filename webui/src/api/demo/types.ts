@@ -70,7 +70,6 @@ export type DemoGeneratedFixtures = {
   pending: PendingResponse;
   updateTargets: UpdateTargetsResponse;
   planCases: never[];
-  removalCases: never[];
   retagTargets: RetagTargetsResponse;
   retagCases: never[];
   releaseNotes: DemoReleaseNotesResponse;

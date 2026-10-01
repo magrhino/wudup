@@ -19,7 +19,7 @@ Keep the static demo boring:
 - Use the real SPA routes, stores, components, and theme.
 - Keep sessions and status read-only with `mutations_enabled: false`.
 - Keep fixture data small and hand-auditable.
-- Do not generate all possible plan, removal, retag, or apply-job catalogs.
+- Do not generate all possible plan, retag, or apply-job catalogs.
 - Let plan preview show impact, but keep Apply disabled through the mutation
   gate.
 - Reject mutation endpoints with the shared static-demo read-only error.

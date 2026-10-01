@@ -684,8 +684,7 @@ def test_plan_endpoint_returns_unmatched_cleanup_preview(
     assert body["issues"][0]["code"] == "compose-label-active-file-missing"
     assert "homarr/docker-compose.archive.yml" in body["issues"][0]["message"]
     assert body["issues"][0]["hint"]
-    assert body["cleanup"]["can_remove_unmatched"] is True
-    assert body["cleanup"]["cleanup_id"]
+    assert set(body["cleanup"]) == {"items"}
     assert body["cleanup"]["items"][0]["line_no"] == 1
     assert body["cleanup"]["items"][0]["raw"] == "homarr-labs/homarr:latest"
     cleanup_diagnostic = body["cleanup"]["items"][0]["diagnostic"]

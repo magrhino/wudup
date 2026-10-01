@@ -266,23 +266,6 @@ export interface PendingResponse {
   warnings: string[];
 }
 
-export interface PendingCleanupLine {
-  line_no: number;
-  raw: string;
-}
-
-export interface PendingCleanupRemovedLine extends PendingCleanupLine {
-  image: string;
-  reason: string;
-}
-
-export interface PendingCleanupResponse {
-  status: "success";
-  audit_run_id: number;
-  removed_count: number;
-  removed: PendingCleanupRemovedLine[];
-}
-
 export type PendingMetadataRefreshStatus = "ready" | "stale";
 
 export interface PendingMetadataRefreshLine {
@@ -443,22 +426,6 @@ export interface SecurityScanJobResponse {
   completed_count: number;
   result: SecurityScansResponse | null;
   error: string;
-}
-
-export interface PendingRemovalPlanLine {
-  line_no: number;
-  raw: string;
-  image: string;
-  desired_tag: string;
-  digest: string;
-}
-
-export interface PendingRemovalPlanResponse {
-  removal_id: string;
-  source_file: string;
-  can_remove: boolean;
-  selected_line_numbers: number[];
-  lines: PendingRemovalPlanLine[];
 }
 
 // ---------------------------------------------------------------------------
@@ -971,8 +938,6 @@ export interface PlanCleanupItem {
 }
 
 export interface PlanCleanup {
-  cleanup_id: string;
-  can_remove_unmatched: boolean;
   items: PlanCleanupItem[];
 }
 

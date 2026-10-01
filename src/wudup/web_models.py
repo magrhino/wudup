@@ -66,10 +66,6 @@ __all__ = (
     "OnboardingChecklistResponse",
     "OnboardingDismissResponse",
     "OnboardingDocLink",
-    "PendingCleanupLine",
-    "PendingCleanupRemovedLine",
-    "PendingCleanupRequest",
-    "PendingCleanupResponse",
     "PendingDiagnostic",
     "PendingGroupedItem",
     "PendingGrouping",
@@ -81,10 +77,6 @@ __all__ = (
     "PendingMetadataRefreshResponse",
     "PendingMetadataRefreshStatus",
     "PendingMetadataStatus",
-    "PendingRemovalPlanLine",
-    "PendingRemovalPlanRequest",
-    "PendingRemovalPlanResponse",
-    "PendingRemovalRequest",
     "PendingRescanLine",
     "PendingRescanRequest",
     "PendingRescanResponse",
@@ -1745,8 +1737,6 @@ class PlanCleanupItem(BaseModel):
     diagnostic: PendingDiagnostic | None = None
 
 class PlanCleanup(BaseModel):
-    cleanup_id: str = ""
-    can_remove_unmatched: bool = False
     items: list[PlanCleanupItem] = Field(default_factory=list)
 
 class PlanResponse(BaseModel):
@@ -1768,27 +1758,6 @@ class PlanResponse(BaseModel):
     issues: list[PlanIssue] = Field(default_factory=list)
     cleanup: PlanCleanup = Field(default_factory=PlanCleanup)
     apply_preflight: ApplyPreflightResponse
-
-class PendingCleanupLine(BaseModel):
-    line_no: LineNumber
-    raw: str
-
-class PendingCleanupRequest(BaseModel):
-    cleanup_id: str = Field(min_length=1)
-    lines: list[PendingCleanupLine] = Field(min_length=1)
-    confirmation: Literal["remove_unmatched"]
-
-class PendingCleanupRemovedLine(BaseModel):
-    line_no: int
-    raw: str
-    image: str
-    reason: str
-
-class PendingCleanupResponse(BaseModel):
-    status: Literal["success"]
-    audit_run_id: int
-    removed_count: int
-    removed: list[PendingCleanupRemovedLine] = Field(default_factory=list)
 
 class PendingMetadataRefreshLine(BaseModel):
     line_no: LineNumber
@@ -1840,28 +1809,6 @@ class PendingRescanResponse(BaseModel):
     watched_count: int
     skipped: list[PendingRescanSkippedLine] = Field(default_factory=list)
     wud_api: WudApiStatus
-
-class PendingRemovalPlanRequest(BaseModel):
-    line_numbers: list[LineNumber] = Field(min_length=1)
-
-class PendingRemovalPlanLine(BaseModel):
-    line_no: int
-    raw: str
-    image: str
-    desired_tag: str = ""
-    digest: str = ""
-
-class PendingRemovalPlanResponse(BaseModel):
-    removal_id: str
-    source_file: str
-    can_remove: bool
-    selected_line_numbers: list[int] = Field(default_factory=list)
-    lines: list[PendingRemovalPlanLine] = Field(default_factory=list)
-
-class PendingRemovalRequest(BaseModel):
-    removal_id: str = Field(min_length=1)
-    lines: list[PendingCleanupLine] = Field(min_length=1)
-    confirmation: Literal["remove_selected"]
 
 class ApplyPlanRequest(BaseModel):
     plan_id: str = Field(min_length=1)

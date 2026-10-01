@@ -61,6 +61,44 @@ def test_pending_selected_rescan_maps_lines_to_wud_container_ids(
     assert wud_file.read_text(encoding="utf-8") == original
 
 
+def test_pending_selected_rescan_reads_file_source_while_wud_lock_is_held(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = install_recording_wud_api(monkeypatch, [container_payload(name="app")])
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_API_BASE_URL": "https://wud.rescan-selected-lock.test:3000",
+            "WUD_LOCK_TIMEOUT": "0",
+        },
+    )
+    wud_file = tmp_path / "state" / "images.todo"
+    original = "app\n"
+    wud_file.write_text(original, encoding="utf-8")
+    pending_body = client.get("/api/v1/pending").json()
+    lines = rescan_lines_from_pending(pending_body, [1])
+    lock_dir = tmp_path / "state" / "images.todo.lock"
+    lock_dir.mkdir()
+    calls.clear()
+
+    response = client.post(
+        "/api/v1/pending/rescan",
+        json=rescan_payload("selected", [1], lines),
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["watched_count"] == 1
+    assert ("POST", "/api/containers/docker.local.app/watch") in calls
+    assert lock_dir.is_dir()
+    assert wud_file.read_text(encoding="utf-8") == original
+
+
 def test_pending_selected_rescan_api_source_watches_all_deduped_container_ids(
     tmp_path: Path,
     monkeypatch,

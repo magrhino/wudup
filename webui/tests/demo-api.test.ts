@@ -493,9 +493,6 @@ describe("demo web API", () => {
       api.dismissOnboarding("csrf"),
       api.updateCoreUpdateTour("completed", "runs_history", "csrf"),
       api.refreshRetagGithubLatest("csrf"),
-      api.cleanupPending("demo", [{ line_no: 6, raw: "" }], "csrf"),
-      api.createRemovalPlan([6], "csrf"),
-      api.removeSelectedPending("demo", [{ line_no: 6, raw: "" }], "csrf"),
       api.previewReleaseNotifications({ line_numbers: [2] }, "csrf"),
       api.sendReleaseNotifications({ line_numbers: [2] }, "csrf"),
       api.testReleaseNotificationWebhook("csrf"),
@@ -534,7 +531,6 @@ describe("demo web API", () => {
 
   it("keeps static fixture catalogs empty", () => {
     expect(generatedFixtures.planCases).toEqual([]);
-    expect(generatedFixtures.removalCases).toEqual([]);
     expect(generatedFixtures.retagCases).toEqual([]);
   });
 });

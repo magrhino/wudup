@@ -1240,8 +1240,6 @@ export function planResponse(overrides: Partial<PlanResponse> = {}): PlanRespons
     skipped: [],
     issues: [],
     cleanup: {
-      cleanup_id: "",
-      can_remove_unmatched: false,
       items: [],
     },
     apply_preflight: applyPreflightResponse(),

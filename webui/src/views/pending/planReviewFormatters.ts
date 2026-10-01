@@ -2,7 +2,6 @@ import type {
   ApplyPreflightStatus,
   DigestPinLabelRewriteApprovalRequest,
   PendingDiagnostic,
-  PendingRemovalPlanLine,
   PlanAction,
   PlanCleanupItem,
   PlanIssue,
@@ -250,12 +249,4 @@ function diagnosticDetailList(
     const cleaned = entry.trim();
     return cleaned ? [cleaned] : [];
   });
-}
-
-export function cleanupLineLabel(item: PlanCleanupItem): string {
-  return `#${item.line_no} ${item.image}`;
-}
-
-export function removalLineLabel(item: PendingRemovalPlanLine): string {
-  return `#${item.line_no} ${item.image}`;
 }

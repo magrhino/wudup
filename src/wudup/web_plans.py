@@ -396,11 +396,6 @@ def plan_response(
         for line in stack["lines"]:
             line["metadata_status"] = plan.metadata_status_for_line(line["line_no"])
     payload["can_apply"] = plan_can_apply(plan, settings) and apply_preflight.ok
-    payload["cleanup"]["can_remove_unmatched"] = (
-        settings.mutations_enabled
-        and plan.source.active == "file"
-        and bool(plan.cleanup.items)
-    )
     payload["apply_preflight"] = apply_preflight.model_dump()
     return PlanResponse.model_validate(payload)
 

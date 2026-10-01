@@ -141,9 +141,6 @@ export function createDemoWebApi(): WebApi {
     ) => state.createRetagPlan(choices),
     applyRetagPlan: rejectStaticDemoMutationAsync,
     diagnosticsSupportBundle: async () => state.diagnosticsSupportBundle(),
-    cleanupPending: rejectStaticDemoMutationAsync,
-    createRemovalPlan: rejectStaticDemoMutationAsync,
-    removeSelectedPending: rejectStaticDemoMutationAsync,
     rescanPending: async (
       scope: PendingRescanScope,
       lines: PendingRescanLine[],

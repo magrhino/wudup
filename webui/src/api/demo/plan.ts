@@ -472,8 +472,6 @@ export function readOnlyPlanFromPending(
     skipped,
     issues,
     cleanup: {
-      cleanup_id: "demo-session-cleanup",
-      can_remove_unmatched: false,
       items: selectedUnmatched.map((item) => ({
         line_no: item.line_no,
         raw: item.raw,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Play, RefreshCw, Trash2, X } from "@lucide/vue";
+import { Check, Play, RefreshCw, X } from "@lucide/vue";
 import { NButton, NFlex } from "naive-ui";
 
 defineProps<{
@@ -10,9 +10,6 @@ defineProps<{
   hasSelectedTagUpdates: boolean;
   loading: boolean;
   pendingLoaded: boolean;
-  removalButtonLabel: string;
-  removeSelectedDisabled: boolean;
-  removeSelectedDisabledMessage: string;
   selectableCount: number;
   selectAllLabel: string;
   selectedCount: number;
@@ -35,7 +32,6 @@ const emit = defineEmits<{
   rescanAll: [];
   rescanSelected: [];
   selectAll: [];
-  startRemoval: [];
   startUpdate: [];
 }>();
 </script>
@@ -87,23 +83,10 @@ const emit = defineEmits<{
             <template #icon><RefreshCw :size="16" /></template>
             Rescan selected in WUD
           </n-button>
-          <n-button
-            v-if="selectedCount"
-            type="warning"
-            size="small"
-            secondary
-            :disabled="removeSelectedDisabled"
-            :loading="loading"
-            @click="emit('startRemoval')"
-          >
-            <template #icon><Trash2 :size="16" /></template>
-            {{ removalButtonLabel }}
-          </n-button>
         </n-flex>
         <slot name="tools" />
         <p v-if="globalRescanDisabledMessage">{{ globalRescanDisabledMessage }}</p>
         <p v-if="selectedCount && selectedRescanDisabledMessage">{{ selectedRescanDisabledMessage }}</p>
-        <p v-if="selectedCount && removeSelectedDisabledMessage">{{ removeSelectedDisabledMessage }}</p>
       </div>
     </details>
     <div class="selection-tools-actions">

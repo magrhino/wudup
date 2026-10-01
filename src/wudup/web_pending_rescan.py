@@ -45,75 +45,71 @@ def api_pending_rescan(
             detail="selected rescan lines are required",
         )
 
-    wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
+    if payload.scope == "all":
+        audit_line_numbers: tuple[int, ...] = ()
+        requested_count = 1
+        selected_lines: tuple[PendingRescanLine, ...] = ()
+    else:
+        selected_lines = web_pending_rescan_payload.rescan_payload_lines(payload)
+        audit_line_numbers = tuple(line.line_no for line in selected_lines)
+        requested_count = len(selected_lines)
+
+    try:
+        audit_run_id = (
+            web_pending_rescan_audit.insert_pending_rescan_audit_start(
+                settings,
+                request,
+                scope=payload.scope,
+                requested_count=requested_count,
+                line_numbers=audit_line_numbers,
+            )
+        )
+    except (OSError, sqlite3.Error, DatabaseError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=_safe_exception_detail(
+                settings,
+                "could not record WUD rescan audit",
+                exc,
+            ),
+        ) from exc
+
     try:
         if payload.scope == "all":
-            audit_line_numbers: tuple[int, ...] = ()
-            requested_count = 1
-            selected_lines: tuple[PendingRescanLine, ...] = ()
+            response = _pending_rescan_all(settings)
         else:
-            selected_lines = web_pending_rescan_payload.rescan_payload_lines(payload)
-            audit_line_numbers = tuple(line.line_no for line in selected_lines)
-            requested_count = len(selected_lines)
-
-        try:
-            audit_run_id = (
-                web_pending_rescan_audit.insert_pending_rescan_audit_start(
-                    settings,
-                    request,
-                    scope=payload.scope,
-                    requested_count=requested_count,
-                    line_numbers=audit_line_numbers,
-                )
-            )
-        except (OSError, sqlite3.Error, DatabaseError) as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=_safe_exception_detail(
-                    settings,
-                    "could not record WUD rescan audit",
-                    exc,
-                ),
-            ) from exc
-
-        try:
-            if payload.scope == "all":
-                response = _pending_rescan_all(settings)
-            else:
-                response = _pending_rescan_selected(settings, selected_lines)
-        except HTTPException as exc:
-            web_pending_rescan_audit.safe_update_pending_rescan_audit_error(
-                settings,
-                request,
-                audit_run_id,
-                scope=payload.scope,
-                requested_count=requested_count,
-                line_numbers=audit_line_numbers,
-                error=str(exc.detail),
-            )
-            raise
-        except Exception as exc:
-            web_pending_rescan_audit.safe_update_pending_rescan_audit_error(
-                settings,
-                request,
-                audit_run_id,
-                scope=payload.scope,
-                requested_count=requested_count,
-                line_numbers=audit_line_numbers,
-                error=_safe_exception_detail(settings, "WUD rescan failed", exc),
-            )
-            raise
-
-        web_pending_rescan_audit.safe_update_pending_rescan_audit_response(
+            response = _pending_rescan_selected(settings, selected_lines)
+    except HTTPException as exc:
+        web_pending_rescan_audit.safe_update_pending_rescan_audit_error(
             settings,
             request,
             audit_run_id,
-            response=response,
+            scope=payload.scope,
+            requested_count=requested_count,
             line_numbers=audit_line_numbers,
+            error=str(exc.detail),
         )
-        return response.model_copy(update={"audit_run_id": audit_run_id})
-    finally:
-        wud_lock.close()
+        raise
+    except Exception as exc:
+        web_pending_rescan_audit.safe_update_pending_rescan_audit_error(
+            settings,
+            request,
+            audit_run_id,
+            scope=payload.scope,
+            requested_count=requested_count,
+            line_numbers=audit_line_numbers,
+            error=_safe_exception_detail(settings, "WUD rescan failed", exc),
+        )
+        raise
+
+    web_pending_rescan_audit.safe_update_pending_rescan_audit_response(
+        settings,
+        request,
+        audit_run_id,
+        response=response,
+        line_numbers=audit_line_numbers,
+    )
+    return response.model_copy(update={"audit_run_id": audit_run_id})
 
 
 def _pending_rescan_all(settings: WebSettings) -> PendingRescanResponse:

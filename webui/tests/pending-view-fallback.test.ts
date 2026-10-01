@@ -798,8 +798,8 @@ describe("pending view fallback and release notes", () => {
       ?.trigger("click");
     await nextTick();
 
-    expect(wrapper.text()).toContain("2 selected");
-    expect(wrapper.text()).not.toContain("3 selected");
+    expect(wrapper.text()).toContain("2 updates selected");
+    expect(wrapper.text()).not.toContain("3 updates selected");
   });
 
   it("wraps long pending values in the fallback table", () => {
