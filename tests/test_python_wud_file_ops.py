@@ -107,7 +107,8 @@ class WudFileCleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:latest\n", encoding="utf-8")
-            os.chmod(path, 0o660)
+            # Owner-only, and unlike mkstemp's 0o600 so a lost chmod fails.
+            os.chmod(path, 0o700)
             before = path.stat()
             parsed = parse_wud_file(path)
 
@@ -121,7 +122,7 @@ class WudFileCleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("repo/app:latest\n", encoding="utf-8")
-            os.chmod(path, 0o440)
+            os.chmod(path, 0o400)
             before = path.stat()
             parsed = parse_wud_file(path)
 
@@ -147,7 +148,7 @@ class FileOpsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("old\n", encoding="utf-8")
-            os.chmod(path, 0o640)
+            os.chmod(path, 0o700)
             before = path.stat()
             owner = OwnerConfig.from_values(
                 str(os.getuid()),
