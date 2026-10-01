@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import HTTPException, Request
 
 from .db import utc_timestamp
-from .locks import DirectoryLock, WudLockError
 from .updater_models import UpdaterProgressEvent
 from .web_models import (
     APPLY_JOB_PROGRESS_STATUSES,
@@ -46,27 +45,6 @@ def initialize_apply_job_state(state: Any) -> None:
 def shutdown_apply_job_state(state: Any) -> None:
     executor: ThreadPoolExecutor = state.web_apply_executor
     executor.shutdown(wait=False, cancel_futures=True)
-
-
-def _apply_wud_lock_timeout_seconds(settings: WebSettings) -> int:
-    raw_timeout = (settings.command_env or {}).get("WUD_LOCK_TIMEOUT", "30")
-    try:
-        timeout_seconds = int(raw_timeout)
-    except (TypeError, ValueError):
-        return 30
-    return timeout_seconds if timeout_seconds >= 0 else 30
-
-
-def _acquire_apply_wud_lock(settings: WebSettings) -> DirectoryLock:
-    lock = DirectoryLock(
-        settings.config.wud_out_file,
-        timeout_seconds=_apply_wud_lock_timeout_seconds(settings),
-    )
-    try:
-        lock.acquire()
-    except WudLockError as exc:
-        raise HTTPException(status_code=409, detail="WUD file is locked") from exc
-    return lock
 
 
 def _register_apply_job_unlocked(

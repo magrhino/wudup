@@ -59,8 +59,7 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(status, 0, stdout)
         self.assertIn(
             f"[PASS] WUD_OUT_FILE: {wud_file} does not exist yet; "
-            "docker-update-from-wud and the file pending source need it before "
-            "they can run",
+            "docker-update-from-wud needs it before it can run",
             stdout,
         )
 

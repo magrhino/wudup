@@ -38,6 +38,11 @@ warn_ignored_env(){
       printf 'Ignoring %s: WUD script sync was removed, so this setting has no effect and can be deleted.\n' "$name" >&2
     fi
   done
+  for name in WUD_PENDING_SOURCE WUDUP_LEGACY_SCRIPTS; do
+    if [[ -n "${!name+x}" ]]; then
+      printf 'Ignoring %s: the WebUI always reads pending updates from the WUD API, so this setting has no effect and can be deleted.\n' "$name" >&2
+    fi
+  done
 }
 
 if [[ "$#" -eq 0 ]]; then

@@ -313,7 +313,7 @@ def release_notes_disabled_state(settings: WebSettings) -> ReleaseNotesDisabledS
     return ReleaseNotesDisabledState(
         reason=RELEASE_NOTES_DISABLED_DETAIL,
         source=PendingSourceInfo(
-            configured=settings.pending_source,
+            configured="file",
             active="file",
             label="Release notes disabled",
             fresh=True,

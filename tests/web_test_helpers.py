@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -17,8 +18,8 @@ from fastapi.testclient import TestClient
 
 from wudup import web as web_module
 from wudup import web_discord as discord_module
+from wudup import web_pending_sources, web_wud_api, web_wud_transport
 from wudup import web_release_notifications as notifications_module
-from wudup import web_wud_transport
 from wudup.db import (
     init_db,
     insert_update_run,
@@ -28,7 +29,8 @@ from wudup.release_notes import ReleaseNoteInfo as ReleaseNoteData
 from wudup.release_notes import ReleaseNoteLink as ReleaseNoteLinkData
 from wudup.web import create_app
 from wudup.web_job_registry import WEB_APPLY_JOB_LIMIT
-from wudup.web_models import WebApplyJob
+from wudup.web_models import WebApplyJob, WebSettings
+from wudup.wud_file import parse_wud_text
 
 DEFAULT_CLAIM_PHRASE = " ".join(("correct", "horse", "battery", "staple"))
 SSE_EVENT_PREFIX = "event: "
@@ -112,6 +114,95 @@ def _shutdown_created_web_apps() -> Iterator[None]:
                     handler()
 
 
+# Production ignores WUD_PENDING_SOURCE: the WebUI always reads pending updates
+# from the WUD API. Tests reuse WUD_PENDING_SOURCE=file to swap that source for
+# a fake that serves the test's own images.todo, so existing fixtures can keep
+# writing pending lines directly. Dedicated WUD API tests set it to "api" (or
+# leave _client's default out) and exercise the real derivation.
+TEST_FILE_PENDING_SOURCE_VALUE = "file"
+
+
+def _file_backed_pending_source(
+    settings: WebSettings,
+    *,
+    include_wud_metadata: bool,
+) -> web_pending_sources.PendingSourceResult:
+    path = settings.config.wud_out_file
+    try:
+        text = path.read_text(encoding="utf-8")
+        exists = True
+    except FileNotFoundError:
+        text, exists = "", False
+    parsed = parse_wud_text(text)
+    snapshot = None
+    metadata_by_line: dict[int, web_wud_api.WudApiContainer] = {}
+    if include_wud_metadata:
+        snapshot = web_wud_api.get_snapshot(settings, include_containers=True)
+        if parsed.targets:
+            metadata_by_line = dict(
+                web_wud_api.metadata_by_target(
+                    settings,
+                    parsed.targets,
+                    snapshot=snapshot,
+                )
+            )
+    return web_pending_sources.PendingSourceResult(
+        configured="file",
+        active="file",
+        label="Pending file",
+        source_file=str(path),
+        exists=exists,
+        parsed=parsed,
+        text=text,
+        source_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        warnings=parsed.warnings,
+        wud_snapshot=snapshot,
+        metadata_by_line=metadata_by_line,
+        container_ids_by_line={
+            line_no: (container.id,)
+            for line_no, container in metadata_by_line.items()
+            if container.id
+        },
+        source_ids_by_line={
+            target.line_no: f"file:{target.line_no}" for target in parsed.targets
+        },
+        metadata_status_by_line={
+            target.line_no: "fresh" for target in parsed.targets
+        },
+    )
+
+
+@contextmanager
+def _file_backed_pending_source_seam() -> Iterator[None]:
+    original = web_pending_sources.resolve_pending_source
+
+    def resolve_pending_source(
+        settings: WebSettings,
+        *,
+        include_wud_metadata: bool = False,
+        force_api: bool = False,
+    ) -> web_pending_sources.PendingSourceResult:
+        env = settings.command_env or {}
+        if env.get("WUD_PENDING_SOURCE") == TEST_FILE_PENDING_SOURCE_VALUE:
+            return _file_backed_pending_source(
+                settings,
+                include_wud_metadata=include_wud_metadata,
+            )
+        return original(
+            settings,
+            include_wud_metadata=include_wud_metadata,
+            force_api=force_api,
+        )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            web_pending_sources,
+            "resolve_pending_source",
+            resolve_pending_source,
+        )
+        yield
+
+
 def _client(
     tmp_path: Path,
     env: dict[str, str] | None = None,
@@ -119,7 +210,7 @@ def _client(
     create_root: bool = True,
 ) -> TestClient:
     values = _web_env(tmp_path, env, create_root=create_root)
-    values.setdefault("WUD_PENDING_SOURCE", "file")
+    values.setdefault("WUD_PENDING_SOURCE", TEST_FILE_PENDING_SOURCE_VALUE)
     return TestClient(create_app(environ=values))
 
 

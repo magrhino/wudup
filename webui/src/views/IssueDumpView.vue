@@ -14,7 +14,6 @@ function affectedContainerDetails(bundle: DiagnosticsSupportBundleResponse) {
     summary: {
       containers_affected: observations.counts.degraded,
       using_previous_results: observations.counts.retained,
-      recovered_from_pending_file: observations.counts.recovered,
       update_status_unknown: observations.counts.unresolved,
     },
     containers: observations.items.filter(

@@ -11,7 +11,7 @@ import { useReleaseChangelogStore } from "../../stores/releaseChangelog";
 import { useRunsStore } from "../../stores/runs";
 import { useSettingsStore } from "../../stores/settings";
 import { useUpdatesStore } from "../../stores/updates";
-import { pendingSourceFileName, uniqueSorted } from "./pendingDisplay";
+import { uniqueSorted } from "./pendingDisplay";
 import {
   safetyCues as buildSafetyCues,
   type SafetyCue,
@@ -42,9 +42,6 @@ function pendingHeadingTextFor(
 }
 
 function pendingSourceDisplayFor(label: string): string {
-  if (label === "Pending file") {
-    return "Pending file";
-  }
   return `Source ${label}`;
 }
 
@@ -165,16 +162,9 @@ export function usePendingQueueState() {
     return notes;
   });
   const latestRun = computed(() => runs.runs[0] ?? null);
-  const pendingSourceFile = computed(
-    () => updates.pending?.source_file ?? "Pending file",
+  const pendingSourceLabel = computed(
+    () => updates.pending?.source?.label || "WUD API",
   );
-  const pendingSourceLabel = computed(() => {
-    const source = updates.pending?.source;
-    if (source && source.active !== "file") {
-      return source.label || pendingSourceFileName(pendingSourceFile.value);
-    }
-    return pendingSourceFileName(pendingSourceFile.value);
-  });
   const pendingSourceDisplay = computed(() =>
     pendingSourceDisplayFor(pendingSourceLabel.value),
   );
@@ -233,7 +223,6 @@ export function usePendingQueueState() {
     pendingServiceKeys,
     pendingSourceDisplay,
     pendingSourceDegraded,
-    pendingSourceFile,
     pendingSourceLabel,
     pendingSourceWarning,
     rawStackGroups,

@@ -61,43 +61,6 @@ def test_pending_endpoint_reads_wud_file_without_mutation(tmp_path: Path) -> Non
     assert wud_file.read_text(encoding="utf-8") == original
 
 
-def test_pending_endpoint_fails_closed_when_completion_state_is_unreadable(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    redacted_value = "pending-completion-redaction-fixture"
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_TOKEN": redacted_value,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/shared:latest\n", encoding="utf-8")
-
-    def fail_load(*_args, **_kwargs):
-        raise OSError(
-            f"read failed for {tmp_path / 'state' / 'wud.sqlite'} "
-            f"with {redacted_value}"
-        )
-
-    monkeypatch.setattr(
-        pending_module.web_file_selection_store,
-        "load_completed_update_selections",
-        fail_load,
-    )
-    response = client.get("/api/v1/pending")
-    detail = response.json()["detail"]
-
-    assert response.status_code == 500
-    assert detail.startswith("could not read pending source: ")
-    assert redacted_value not in detail
-    assert str(tmp_path) not in detail
-    assert "<redacted>" in detail
-    assert "[REDACTED_PATH]" in detail
-
-
 def test_pending_shared_line_has_stable_stack_scoped_selection_ids(
     tmp_path: Path,
 ) -> None:
@@ -597,38 +560,6 @@ def test_pending_endpoint_returns_hidden_wud_api_snoozed_candidates(
     _assert_pending_grouping_did_not_mutate(_fake_docker_calls(fake_root))
 
 
-def test_legacy_disabled_forces_api_pending_source_without_wud_file(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _install_wud_api(monkeypatch, containers=[_wud_api_container(name="app")])
-
-    def fail_file_read(_path: Path):
-        raise AssertionError("legacy-disabled WebUI should not read images.todo")
-
-    monkeypatch.setattr(
-        pending_module.web_pending_sources,
-        "_read_pending_file",
-        fail_file_read,
-    )
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUDUP_LEGACY_SCRIPTS": "FALSE",
-            "WUD_PENDING_SOURCE": "file",
-        },
-    )
-
-    response = client.get("/api/v1/pending")
-    body = response.json()
-
-    assert response.status_code == 200
-    assert body["source"]["configured"] == "api"
-    assert body["source"]["active"] == "api"
-    assert body["count"] == 1
-
-
 def test_pending_endpoint_preserves_tag_for_wud_api_digest_source(
     tmp_path: Path,
     monkeypatch,
@@ -895,41 +826,6 @@ def test_pending_metadata_endpoint_refreshes_api_source(
     assert body["items"][0]["wud_metadata"]["remote_tag"] == "2.0"
 
 
-def test_pending_endpoint_auto_falls_back_to_wud_file_when_api_unavailable(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _install_wud_api(
-        monkeypatch,
-        containers=[],
-        health_error=OSError("connection refused"),
-    )
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_PENDING_SOURCE": "auto",
-            "WUD_API_BASE_URL": "https://wud.unavailable-source.test:3000",
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/file:latest\n", encoding="utf-8")
-
-    response = client.get("/api/v1/pending")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"]["configured"] == "auto"
-    assert body["source"]["active"] == "file"
-    assert body["source"]["degraded"] is True
-    assert body["source"]["fresh"] is False
-    assert "connection refused" in body["source"]["fallback_reason"]
-    assert body["count"] == 1
-    assert body["items"][0]["raw"] == "repo/file:latest"
-    assert body["items"][0]["source"] == "file"
-    assert body["warnings"][0].startswith("WUD API pending source degraded")
-
-
 def test_pending_endpoint_api_mode_does_not_fallback_to_wud_file(
     tmp_path: Path,
     monkeypatch,
@@ -990,37 +886,6 @@ def test_pending_endpoint_wraps_effective_config_error(
 
     assert response.status_code == 400
     assert detail.startswith("could not read effective config: ")
-    assert secret not in detail
-    assert str(tmp_path) not in detail
-    assert "<redacted>" in detail
-    assert "[REDACTED_PATH]" in detail
-
-
-def test_pending_endpoint_sanitizes_wud_file_errors(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    secret = "pending-read-secret"
-
-    def failed_read(_path):
-        raise OSError(
-            f"open failed for {tmp_path / 'state' / 'images.todo'} with {secret}"
-        )
-
-    monkeypatch.setattr(pending_module.web_pending_sources, "_read_pending_file", failed_read)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_TOKEN": secret,
-        },
-    )
-
-    response = client.get("/api/v1/pending")
-    detail = response.json()["detail"]
-
-    assert response.status_code == 500
-    assert detail.startswith("could not read pending source: ")
     assert secret not in detail
     assert str(tmp_path) not in detail
     assert "<redacted>" in detail

@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from . import web_wud_cache, web_wud_observations
+from . import web_pending_sources, web_wud_cache, web_wud_observations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATED_FIXTURE_PATH = REPO_ROOT / "webui" / "src" / "api" / "demo" / "generatedFixtures.ts"
@@ -1011,7 +1011,6 @@ def _demo_environ(paths: dict[str, Path], static_dir: Path) -> dict[str, str]:
         "WUD_WEB_DEMO_SELF_UPDATE": "true",
         "WUD_WEB_ALLOWED_HOSTS": "testserver, 127.0.0.1, localhost",
         "WUD_WEB_ALLOWED_ORIGINS": "http://testserver",
-        "WUD_PENDING_SOURCE": "file",
         "WUD_WEB_UPSTREAM_MAP": str(REPO_ROOT / "wud" / "upstreams.txt"),
         "DOCKER_HOST": "tcp://demo-docker:2375",
         "PATH": command_path,
@@ -1152,6 +1151,20 @@ def _seed_wud_api_snapshot(settings: WebSettings) -> None:
                 DEMO_OCI_SOURCE_LABEL: DEMO_WUDUP_REPO_URL
             },
         ),
+        _demo_tag_update_container(
+            "cid-jarvis-task-runner",
+            "task-runner",
+            DEMO_RUNNER_CURRENT_IMAGE,
+            "2.34.4",
+        ),
+        *(
+            _demo_tag_update_container(f"cid-unmatched-{name}", name, image, target)
+            for (name, image), target in zip(
+                DEMO_UNMATCHED_CONTAINERS,
+                ("v0.10.9", "1.32.0", "1.7.2"),
+                strict=True,
+            )
+        ),
     )
     update_count = sum(
         bool(
@@ -1175,7 +1188,6 @@ def _seed_wud_api_snapshot(settings: WebSettings) -> None:
                 0,
                 0,
                 0,
-                0,
             ),
         ),
         containers=containers,
@@ -1186,6 +1198,30 @@ def _seed_wud_api_snapshot(settings: WebSettings) -> None:
         web_wud_cache._snapshot_cache[
             web_wud_cache._cache_key(settings, base_url)
         ] = snapshot
+
+
+def _demo_tag_update_container(
+    container_id: str,
+    name: str,
+    image: str,
+    remote_tag: str,
+) -> web_wud_api.WudApiContainer:
+    return web_wud_api.WudApiContainer(
+        id=container_id,
+        name=name,
+        display_name=name,
+        status="running",
+        watcher="docker",
+        image=image,
+        local_tag=image.rpartition(":")[2],
+        local_digest="",
+        remote_tag=remote_tag,
+        remote_digest="",
+        update_kind="tag",
+        semver_diff="minor",
+        link="",
+        error="",
+    )
 
 
 def _seed_wud_api_configuration_diagnostics(settings: WebSettings) -> None:
@@ -1273,15 +1309,11 @@ def _seed_wud_api_configuration_diagnostics(settings: WebSettings) -> None:
 
 
 def _seed_release_note_cache(settings: WebSettings) -> None:
-    exists, parsed = web_pending.parse_pending_file(settings)
-    if not exists:
+    source = web_pending_sources.resolve_pending_source(settings)
+    parsed = source.parsed
+    if not parsed.targets:
         return
-    wud_snapshot = web_wud_api.get_snapshot(settings, include_containers=True)
-    wud_metadata = web_wud_api.metadata_by_target(
-        settings,
-        parsed.targets,
-        snapshot=wud_snapshot,
-    )
+    wud_metadata = dict(source.metadata_by_line or {})
     source_resolver = _demo_release_source_resolver(settings, wud_metadata)
     target_tag_resolver = web_wud_api.target_tag_resolver_from_metadata(wud_metadata)
     with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:

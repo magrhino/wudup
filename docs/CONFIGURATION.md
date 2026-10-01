@@ -24,7 +24,7 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 | `WUD_DB_PATH` | `$WUD_LOG_DIR/wudup.sqlite` | SQLite database path for setup state, sessions, run history, audit records, and managed tag exclusions. Preserve this file for WebUI login continuity and history. |
 | `WUD_UPDATE_MODE` | `stop` | Update mode for matched Compose services or stacks: `pause`, `stop`, or `live`. |
 | `WUD_MAX_WAIT` | `180` | Seconds to wait for health after recreation. |
-| `WUD_LOCK_TIMEOUT` | `30` | Seconds to wait for the shared todo-file lock. |
+| `WUD_LOCK_TIMEOUT` | `30` | Whole seconds `docker-update-from-wud` waits for its todo-file lock. Digits only; the WebUI refuses to start with any other value. |
 | `WUD_TIMEZONE` | `UTC` | IANA timezone name, such as `America/Chicago`, used for WebUI auto-update policy schedules. |
 | `WUD_COMPOSE_IGNORE_PATHS` | empty | Comma-separated relative directory names or paths excluded from Compose discovery. When unset in the WebUI, the managed Settings value can control this. |
 | `WUD_REGISTRY_AUTH_ORIGINS` | `{}` | JSON mapping of registry HTTPS origins to explicitly trusted separate token-server HTTPS origins. See [Registry Authentication](wiki/digest-verification.md#registry-authentication). Set in the WUDup process environment. |
@@ -56,13 +56,11 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WUD_API_BASE_URL` | `http://wud:3000` | Internal WUD API base URL used for best-effort WebUI metadata discovery and API-backed pending source modes. |
+| `WUD_API_BASE_URL` | `http://wud:3000` | Internal WUD API base URL the WebUI reads pending updates and container metadata from. |
 | `WUD_API_STARTUP_WAIT_SECONDS` | `0`, `5` in Compose examples | Seconds to retry the initial WUD API health probe during WebUI startup before reporting degraded WUD API discovery. |
 | `WUD_API_AUTH_BEARER_TOKEN_FILE` / `WUD_API_AUTH_BEARER_TOKEN` | unset | Optional bearer token for WUDup's outbound WUD API calls. Prefer the `_FILE` form in containers; direct values are intended for local development. Do not combine bearer and basic auth. |
 | `WUD_API_AUTH_BASIC_USER` + `WUD_API_AUTH_BASIC_PASSWORD_FILE` / `WUD_API_AUTH_BASIC_PASSWORD` | unset | Optional basic auth credentials for WUDup's outbound WUD API calls. The user and one password source must be set together. Prefer the `_FILE` password form in containers. |
 | `WUD_API_HEADERS_FILE` | unset | Optional UTF-8 JSON object of static WUD API request headers, such as `{"X-Api-Key":"example"}`. Header names and values are validated, values are redacted, and an `Authorization` header cannot be combined with bearer or basic auth. |
-| `WUD_PENDING_SOURCE` | `api` | WebUI pending-update source: `api` derives pending lines from WUD `/api/containers`, `file` reads `WUD_OUT_FILE`, and `auto` uses API metadata when usable before falling back to `WUD_OUT_FILE`. |
-| `WUDUP_LEGACY_SCRIPTS` | `true` | Set `false` to disable the deprecated WebUI `images.todo` fallback and force the WUD API pending source. |
 
 WUD 9 requires authentication for `/api/containers` even on a private Docker
 network. A successful unauthenticated `/health` probe does not establish API

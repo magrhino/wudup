@@ -143,7 +143,7 @@ export interface WudApiConfigurationDiagnostics {
   registries: WudApiRegistryDiagnostics[];
 }
 
-export type PendingSourceMode = "file" | "api" | "auto";
+export type PendingSourceMode = "file" | "api";
 export type PendingSourceActive = "file" | "api";
 export type PendingMetadataStatus = "fresh" | "retained" | "recovered";
 
@@ -1371,7 +1371,6 @@ export interface LogTail {
 
 export type WudApiObservationOutcome =
   | "retained"
-  | "recovered"
   | "unresolved"
   | "unsupported_ignored";
 
@@ -1402,7 +1401,6 @@ export interface WudApiObservationDiagnostics {
     available: number;
     degraded: number;
     retained: number;
-    recovered: number;
     unresolved: number;
     unsupported_ignored: number;
   };

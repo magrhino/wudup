@@ -246,9 +246,9 @@ export function pendingSourceInfo(
   overrides: Partial<PendingSourceInfo> = {},
 ): PendingSourceInfo {
   return {
-    configured: "file",
-    active: "file",
-    label: "Pending file",
+    configured: "api",
+    active: "api",
+    label: "WUD API",
     fresh: true,
     degraded: false,
     fallback_reason: "",
@@ -793,7 +793,7 @@ export function pendingGrouping(
 export function pendingResponse(items = [pendingItem()]): PendingResponse {
   const groupedItems = items.map((item) => pendingGroupedItem(item));
   return {
-    source_file: "/out/images.todo",
+    source_file: "WUD API",
     source: pendingSourceInfo(),
     source_hash: "pending-source-hash",
     exists: true,

@@ -137,7 +137,6 @@ class UpdateFromWudRunner(
         lock = DirectoryLock(
             opts.wud_file,
             timeout_seconds=self.environ.get("WUD_LOCK_TIMEOUT", "30"),
-            parent_held=self.environ.get("WUD_LOCK_HELD_BY_PARENT") == "1",
         )
 
         try:
@@ -150,12 +149,7 @@ class UpdateFromWudRunner(
             if not opts.wud_file.is_file():
                 raise UpdaterError(f"List file not found: {opts.wud_file}")
 
-            if lock.parent_held:
-                lock.acquire()
-
             parsed, excluded_tags = self._parse_wud_files()
-            if opts.dry_run or not opts.remove_lines_before_run:
-                lock.release_parent()
 
             if not parsed.targets and not excluded_tags.targets:
                 if opts.tag_stream_updates and not self._validate_tag_update_plan(()):
@@ -475,7 +469,6 @@ class UpdateFromWudRunner(
             owner=self.owner,
         )
         self.log.info("Removed in-flight WUD entries before update.")
-        lock.release_parent()
         return audit_parsed
 
     def _update_matching_stacks(

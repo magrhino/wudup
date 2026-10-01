@@ -1,7 +1,7 @@
 """Directory-based WUD file locks.
 
-The shell scripts use ``mkdir path.lock`` as the lock primitive.
-These helpers intentionally mirror that behavior for Python and Bash parity.
+``docker-update-from-wud`` takes ``mkdir path.lock`` around rewrites of its WUD
+file so concurrent updater runs cannot interleave edits.
 """
 
 from __future__ import annotations
@@ -25,13 +25,13 @@ class WudLockTimeout(WudLockError):
 
 
 def lock_dir_for(path: str | Path) -> Path:
-    """Return the lock directory path used by the shell scripts."""
+    """Return the lock directory path for a WUD file."""
 
     return Path(f"{Path(path)}.lock")
 
 
 def parse_lock_timeout(value: int | str) -> int:
-    """Parse a shell-compatible lock timeout value."""
+    """Parse a ``WUD_LOCK_TIMEOUT`` value as whole seconds."""
 
     if isinstance(value, int) and not isinstance(value, bool):
         if value >= 0:
@@ -44,30 +44,12 @@ def parse_lock_timeout(value: int | str) -> int:
     return int(text, 10)
 
 
-def expect_parent_wud_lock(path: str | Path) -> None:
-    """Verify that a parent process already holds the WUD lock."""
-
-    lock_dir = lock_dir_for(path)
-    if not lock_dir.is_dir():
-        raise WudLockError(f"Expected WUD file lock to be held: {lock_dir}")
-
-
-def release_parent_wud_lock(path: str | Path) -> None:
-    """Release a parent-held WUD lock, ignoring missing lock directories."""
-
-    try:
-        os.rmdir(lock_dir_for(path))
-    except OSError:
-        pass
-
-
 @dataclass
 class DirectoryLock:
-    """Directory lock with shell-compatible timeout and parent reuse behavior."""
+    """Directory lock with a whole-second acquisition timeout."""
 
     path: str | Path
     timeout_seconds: int | str = 30
-    parent_held: bool = False
     sleep: Callable[[float], None] = time.sleep
     _held: bool = field(default=False, init=False)
 
@@ -81,10 +63,6 @@ class DirectoryLock:
 
     def acquire(self) -> None:
         timeout = parse_lock_timeout(self.timeout_seconds)
-
-        if self.parent_held:
-            expect_parent_wud_lock(self.path)
-            return
 
         if self._held:
             return
@@ -116,15 +94,8 @@ class DirectoryLock:
             pass
         self._held = False
 
-    def release_parent(self) -> None:
-        if not self.parent_held:
-            return
-        release_parent_wud_lock(self.path)
-        self.parent_held = False
-
     def close(self) -> None:
         self.release()
-        self.release_parent()
 
     def __enter__(self) -> DirectoryLock:
         self.acquire()

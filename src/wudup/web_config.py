@@ -10,7 +10,6 @@ from . import (
     web_auth,
     web_effective_settings,
     web_models,
-    web_pending_sources,
     web_security,
     web_self_update,
     web_settings,
@@ -36,11 +35,6 @@ def load_web_settings(
         env.get("WUD_WEB_PUBLIC_ORIGIN", "")
     )
     host_docker_base = _parse_host_docker_base(env, config)
-    legacy_scripts_enabled = parse_bool_env(
-        web_settings.LEGACY_SCRIPTS_ENV,
-        env.get(web_settings.LEGACY_SCRIPTS_ENV),
-        default=True,
-    )
     return web_models.WebSettings(
         config=config,
         auth_token=env.get("WUD_WEB_TOKEN", ""),
@@ -73,12 +67,6 @@ def load_web_settings(
         wud_api_base_url=web_wud_api.configured_base_url(env),
         wud_api_startup_wait_seconds=web_wud_api.configured_startup_wait_seconds(env),
         wud_api_client=web_wud_api.configured_client_config(env),
-        pending_source=(
-            "api"
-            if not legacy_scripts_enabled
-            else web_pending_sources.configured_pending_source(env)
-        ),
-        legacy_scripts_enabled=legacy_scripts_enabled,
         release_notes_enabled_env=(
             parse_bool_env(
                 web_effective_settings.RELEASE_NOTES_ENABLED_ENV,

@@ -241,7 +241,7 @@ def _rewrite_wud_file(
 ) -> None:
     target = Path(path)
     active_lock = lock or DirectoryLock(target, timeout_seconds=lock_timeout)
-    release_after = lock is None or (not active_lock.parent_held and not active_lock.held)
+    release_after = lock is None or not active_lock.held
 
     active_lock.acquire()
     try:

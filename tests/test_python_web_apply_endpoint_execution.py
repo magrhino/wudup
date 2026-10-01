@@ -22,7 +22,7 @@ from tests.web_test_helpers import (
 from wudup import web_jobs, web_plans, web_wud_transport
 from wudup.db import open_db
 from wudup.digest_verifier import ManifestLookupError, RegistryHttpManifestResolver
-from wudup.locks import DirectoryLock, WudLockError, lock_dir_for
+from wudup.locks import lock_dir_for
 
 
 @mock.patch.object(
@@ -160,7 +160,8 @@ def test_apply_endpoint_applies_digest_unpin_plan_and_records_provenance(
     assert "image: repo/app:latest" in rendered
     assert "wudup.resolved-tag" not in rendered
     assert "wud.tag.include=^latest$" in rendered
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "repo/app:latest@sha256:new\n"
     calls = _fake_docker_calls(fake_root)
     registry_fetch.assert_called_once()
     assert "manifest inspect docker.io/repo/app:latest" in calls
@@ -346,7 +347,8 @@ def test_apply_endpoint_runs_existing_updater_and_records_audit(
     assert job["status"] == "success"
     assert job["run_id"]
     assert job["selected_line_numbers"] == [1]
-    assert wud_file.read_text(encoding="utf-8") == "repo/db:latest\n"
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == original
     calls = _fake_docker_calls(fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
     assert "compose -f docker-compose.yml stop app" in calls
@@ -448,6 +450,11 @@ def test_apply_endpoint_uses_api_pending_source_without_editing_wud_file(
     assert detail["metadata"]["pending_source_label"] == "WUD API"
     assert wud_api_posts == ["/api/containers/docker.local.app/watch"]
     assert "/api/containers/watch" not in wud_api_posts
+    refresh_events = [
+        event for event in job["progress"] if event["phase"] == "wud-api-refresh"
+    ]
+    assert refresh_events
+    assert refresh_events[-1]["status"] == "success"
     pending = client.get("/api/v1/pending").json()
     assert pending["source"]["active"] == "api"
     assert pending["count"] == 0
@@ -606,7 +613,7 @@ def test_plan_allows_fresh_update_with_unrelated_unsupported_registry_row(
     assert " up -d " not in calls
 
 
-def test_apply_allows_fresh_update_with_unrelated_degraded_observation_in_auto_mode(
+def test_apply_allows_fresh_update_with_unrelated_degraded_observation(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -633,7 +640,7 @@ def test_apply_allows_fresh_update_with_unrelated_degraded_observation_in_auto_m
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_PENDING_SOURCE": "auto",
+            "WUD_PENDING_SOURCE": "api",
             "WUD_API_BASE_URL": "https://wud.apply-api-mixed.test:3000",
             **fake_env,
         },
@@ -717,7 +724,7 @@ def test_plan_blocks_fresh_update_with_unresolved_matching_container(
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_PENDING_SOURCE": "auto",
+            "WUD_PENDING_SOURCE": "api",
             "WUD_API_BASE_URL": "https://wud.apply-api-related.test:3000",
             **fake_env,
         },
@@ -1220,7 +1227,8 @@ def test_apply_endpoint_passes_tag_overrides_to_updater(tmp_path: Path) -> None:
 
     assert apply_response.status_code == 202
     assert job["status"] == "success"
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "repo/app:1.0 tag=wrong\n"
     assert "image: repo/app:3.0" in (
         compose_dir / "docker-compose.yml"
     ).read_text(encoding="utf-8")
@@ -1288,7 +1296,8 @@ def test_apply_endpoint_applies_stream_image_and_label_as_one_plan(
     rendered = (compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
     assert "image: n8nio/runners:2.34.4-distroless" in rendered
     assert r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$" in rendered
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "n8nio/runners:2.33.5-distroless tag=2.34.4\n"
 
 
 def test_apply_endpoint_preserves_stream_only_for_candidate_service(
@@ -1349,7 +1358,8 @@ def test_apply_endpoint_preserves_stream_only_for_candidate_service(
     assert "    image: n8nio/runners:2.34.4-distroless\n" in rendered
     assert "    image: n8nio/runners:2.33.5\n" in rendered
     assert rendered.count(r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$") == 1
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "n8nio/runners:2.33.5-distroless tag=2.34.4\n"
 
 
 def test_apply_endpoint_coalesces_duplicate_stream_entries(tmp_path: Path) -> None:
@@ -1401,7 +1411,8 @@ def test_apply_endpoint_coalesces_duplicate_stream_entries(tmp_path: Path) -> No
     rendered = (compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
     assert rendered.count("    image: n8nio/runners:2.34.4-distroless\n") == 1
     assert rendered.count(r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$") == 1
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == line * 2
 
 
 def test_apply_endpoint_preserves_stream_rule_when_digest_pinning(
@@ -1471,7 +1482,8 @@ def test_apply_endpoint_preserves_stream_rule_when_digest_pinning(
     rendered = (compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
     assert "image: n8nio/runners@sha256:index" in rendered
     assert r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$" in rendered
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "n8nio/runners:2.33.5-distroless tag=2.34.4\n"
 
 
 def test_apply_endpoint_keeps_same_named_nested_stacks_separate(
@@ -1549,7 +1561,8 @@ def test_apply_endpoint_keeps_same_named_nested_stacks_separate(
         rendered = (stack / "docker-compose.yml").read_text(encoding="utf-8")
         assert "image: n8nio/runners:2.34.4-distroless" in rendered
         assert r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$" in rendered
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "n8nio/runners:2.33.5-distroless tag=2.34.4\n"
 
 
 def test_apply_endpoint_routes_same_directory_compose_files_separately(
@@ -1616,7 +1629,8 @@ def test_apply_endpoint_routes_same_directory_compose_files_separately(
         rendered = compose_file.read_text(encoding="utf-8")
         assert "image: n8nio/runners:2.34.4-distroless" in rendered
         assert r"wud.tag.include=^\d+\.\d+\.\d+-distroless$$" in rendered
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "n8nio/runners:2.33.5-distroless tag=2.34.4\n"
 
 
 def test_apply_endpoint_rejects_stale_stream_label_approval(
@@ -1709,136 +1723,7 @@ def test_apply_endpoint_rejects_stale_stream_label_approval(
     assert "wud.tag.include: ^beta-.+$$" in rendered
 
 
-def test_apply_endpoint_holds_wud_lock_for_worker_handoff(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            **fake_env,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-    _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "stack",
-        [("app", "repo/app:latest", "cid-app")],
-    )
-    observed: dict[str, object] = {}
-
-    def fake_run(runner: object) -> int:
-        environ = runner.environ
-        observed["lock_flag"] = environ.get("WUD_LOCK_HELD_BY_PARENT")
-        observed["lock_exists"] = lock_dir_for(wud_file).is_dir()
-        contender = DirectoryLock(wud_file, timeout_seconds=0)
-        try:
-            contender.acquire()
-        except WudLockError:
-            observed["contended"] = True
-        else:
-            contender.close()
-            observed["contended"] = False
-        return 0
-
-    monkeypatch.setattr(web_jobs.UpdateFromWudRunner, "run", fake_run)
-    headers = _csrf_headers(client)
-    plan = client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=headers,
-    ).json()
-
-    apply_response = client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": plan["plan_id"],
-            "line_numbers": [1],
-            "confirmation": "apply",
-        },
-        headers=headers,
-    )
-    job = _wait_apply_job(client, apply_response.json()["job_id"])
-
-    assert apply_response.status_code == 202
-    assert job["status"] == "success"
-    assert observed == {
-        "lock_flag": "1",
-        "lock_exists": True,
-        "contended": True,
-    }
-    assert not lock_dir_for(wud_file).exists()
-    calls = _fake_docker_calls(fake_root)
-    assert " pull " not in calls
-    assert " up -d " not in calls
-
-
-def test_apply_endpoint_marks_job_terminal_when_wud_lock_cleanup_raises(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            **fake_env,
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-    _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "stack",
-        [("app", "repo/app:latest", "cid-app")],
-    )
-    close_calls = 0
-    original_close = DirectoryLock.close
-
-    def close_then_raise(lock: DirectoryLock) -> None:
-        nonlocal close_calls
-        close_calls += 1
-        original_close(lock)
-        raise RuntimeError("lock cleanup exploded")
-
-    monkeypatch.setattr(DirectoryLock, "close", close_then_raise)
-    monkeypatch.setattr(web_jobs.UpdateFromWudRunner, "run", lambda _runner: 0)
-    headers = _csrf_headers(client)
-    plan = client.post(
-        "/api/v1/plans",
-        json={"line_numbers": [1]},
-        headers=headers,
-    ).json()
-
-    apply_response = client.post(
-        "/api/v1/jobs",
-        json={
-            "plan_id": plan["plan_id"],
-            "line_numbers": [1],
-            "confirmation": "apply",
-        },
-        headers=headers,
-    )
-    job = _wait_apply_job(client, apply_response.json()["job_id"])
-
-    assert apply_response.status_code == 202
-    assert job["status"] == "success"
-    assert job["error"] == ""
-    assert close_calls == 1
-    assert not lock_dir_for(wud_file).exists()
-    calls = _fake_docker_calls(fake_root)
-    assert " pull " not in calls
-    assert " up -d " not in calls
-
-
-def test_apply_endpoint_releases_wud_lock_when_runner_raises(
+def test_apply_endpoint_records_failure_when_runner_raises(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1861,7 +1746,6 @@ def test_apply_endpoint_releases_wud_lock_when_runner_raises(
     )
 
     def fake_run(_runner: object) -> int:
-        assert lock_dir_for(wud_file).is_dir()
         raise RuntimeError("runner exploded")
 
     monkeypatch.setattr(web_jobs.UpdateFromWudRunner, "run", fake_run)
@@ -1886,13 +1770,12 @@ def test_apply_endpoint_releases_wud_lock_when_runner_raises(
     assert apply_response.status_code == 202
     assert job["status"] == "failure"
     assert job["error"] == "runner exploded"
-    assert not lock_dir_for(wud_file).exists()
     calls = _fake_docker_calls(fake_root)
     assert " pull " not in calls
     assert " up -d " not in calls
 
 
-def test_apply_endpoint_releases_wud_lock_when_pending_source_reread_fails(
+def test_apply_endpoint_reports_pending_source_read_failure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1922,17 +1805,17 @@ def test_apply_endpoint_releases_wud_lock_when_pending_source_reread_fails(
     original_resolve = web_plans.web_pending_sources.resolve_pending_source
     calls = 0
 
-    def fail_second_source_read(*args, **kwargs):
+    def fail_source_read(*args, **kwargs):
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 1:
             raise OSError("pending source re-read failed")
         return original_resolve(*args, **kwargs)
 
     monkeypatch.setattr(
         web_plans.web_pending_sources,
         "resolve_pending_source",
-        fail_second_source_read,
+        fail_source_read,
     )
 
     response = client.post(
@@ -1949,8 +1832,7 @@ def test_apply_endpoint_releases_wud_lock_when_pending_source_reread_fails(
     assert response.json()["detail"] == (
         "could not revalidate plan: pending source re-read failed"
     )
-    assert calls == 2
-    assert not lock_dir_for(wud_file).exists()
+    assert calls == 1
     assert wud_file.read_text(encoding="utf-8") == "repo/app:latest\n"
     calls_text = _fake_docker_calls(fake_root)
     assert " pull " not in calls_text

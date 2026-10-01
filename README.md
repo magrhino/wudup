@@ -32,9 +32,9 @@ attention.
 
 Try the [public, fixture-backed demo](https://magrhino.github.io/wudup/).
 
-New WebUI deployments read available updates from WUD's API over a private
-Compose network and queue them on the Pending page. The deprecated todo file
-remains an explicit fallback/import source, and the CLI updater stays file-based.
+The WebUI reads available updates from WUD's API over a private Compose network
+and queues them on the Pending page. The legacy `docker-update-from-wud` CLI
+still reads a todo file you provide.
 
 ```text
 WUD detects an image update

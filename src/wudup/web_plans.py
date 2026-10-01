@@ -11,7 +11,6 @@ from fastapi import HTTPException, Request
 from . import (
     web_database,
     web_diagnostics,
-    web_file_selection_store,
     web_job_registry,
     web_jobs,
     web_pending_sources,
@@ -20,8 +19,6 @@ from . import (
 )
 from .config import ConfigError, UpdaterConfig
 from .images import tag_value_valid
-from .locks import DirectoryLock
-from .plan_matching import pending_target_key
 from .plans import (
     DryRunPlan,
     PlanFileMissing,
@@ -86,77 +83,64 @@ def api_create_job(payload: ApplyPlanRequest, request: Request) -> ApplyJobRespo
     active_error = web_job_registry._active_mutation_error(request)
     if active_error:
         raise HTTPException(status_code=409, detail=active_error)
-    wud_lock: DirectoryLock | None = None
+    pending_source = _resolve_pending_source_for_apply(settings)
     try:
-        pending_source = _resolve_pending_source_for_apply(settings)
-        if pending_source.active == "file":
-            wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
-            pending_source = _resolve_pending_source_for_apply(settings)
-            if pending_source.active != "file":
-                wud_lock.close()
-                wud_lock = None
-        try:
-            plan = build_web_plan(
-                settings,
-                PlanRequest(
-                    line_numbers=payload.line_numbers,
-                    selections=payload.selections,
-                    allow_tag_updates=payload.allow_tag_updates,
-                    tag_overrides=payload.tag_overrides,
-                    tag_stream_decisions=payload.tag_stream_decisions,
-                    tag_stream_label_rewrite_approvals=(
-                        payload.tag_stream_label_rewrite_approvals
-                    ),
-                    digest_pin_label_rewrite_approvals=(
-                        payload.digest_pin_label_rewrite_approvals
-                    ),
-                ),
-                pending_source=pending_source,
-            )
-        except (PlanInputError, PlanFileMissing) as exc:
-            raise HTTPException(status_code=409, detail="plan is stale") from exc
-        except ConfigError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=_safe_exception_detail(
-                    settings,
-                    _PLAN_REVALIDATION_ERROR,
-                    exc,
-                ),
-            ) from exc
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=_safe_exception_detail(
-                    settings,
-                    _PLAN_REVALIDATION_ERROR,
-                    exc,
-                ),
-            ) from exc
-
-        if not secrets.compare_digest(plan.plan_id, payload.plan_id):
-            raise HTTPException(status_code=409, detail="plan is stale")
-        if not plan_can_apply(plan, settings):
-            raise HTTPException(status_code=409, detail="plan is not ready to apply")
-        apply_preflight = web_diagnostics.apply_preflight_response(
+        plan = build_web_plan(
             settings,
-            request,
-            plan,
-        )
-        if not apply_preflight.ok:
-            raise HTTPException(status_code=409, detail="apply preflight failed")
-        return submit_apply_job(
-            request,
-            settings,
-            plan,
-            payload,
-            wud_lock,
+            PlanRequest(
+                line_numbers=payload.line_numbers,
+                selections=payload.selections,
+                allow_tag_updates=payload.allow_tag_updates,
+                tag_overrides=payload.tag_overrides,
+                tag_stream_decisions=payload.tag_stream_decisions,
+                tag_stream_label_rewrite_approvals=(
+                    payload.tag_stream_label_rewrite_approvals
+                ),
+                digest_pin_label_rewrite_approvals=(
+                    payload.digest_pin_label_rewrite_approvals
+                ),
+            ),
             pending_source=pending_source,
         )
-    except Exception:
-        if wud_lock is not None:
-            wud_lock.close()
-        raise
+    except (PlanInputError, PlanFileMissing) as exc:
+        raise HTTPException(status_code=409, detail="plan is stale") from exc
+    except ConfigError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_safe_exception_detail(
+                settings,
+                _PLAN_REVALIDATION_ERROR,
+                exc,
+            ),
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=_safe_exception_detail(
+                settings,
+                _PLAN_REVALIDATION_ERROR,
+                exc,
+            ),
+        ) from exc
+
+    if not secrets.compare_digest(plan.plan_id, payload.plan_id):
+        raise HTTPException(status_code=409, detail="plan is stale")
+    if not plan_can_apply(plan, settings):
+        raise HTTPException(status_code=409, detail="plan is not ready to apply")
+    apply_preflight = web_diagnostics.apply_preflight_response(
+        settings,
+        request,
+        plan,
+    )
+    if not apply_preflight.ok:
+        raise HTTPException(status_code=409, detail="apply preflight failed")
+    return submit_apply_job(
+        request,
+        settings,
+        plan,
+        payload,
+        pending_source=pending_source,
+    )
 
 
 def api_apply_plan(payload: ApplyPlanRequest, request: Request) -> ApplyJobResponse:
@@ -202,20 +186,6 @@ def build_web_plan(
         include_wud_metadata=False,
         force=force_api,
     ).source
-    if source.active == "file" and not source.exists:
-        raise PlanFileMissing(f"WUD file not found: {settings.config.wud_out_file}")
-    completed_update_selections = (
-        web_file_selection_store.load_completed_update_selections(
-            settings.config.db_path,
-            pending_file=settings.config.wud_out_file,
-            pending_target_keys={
-                pending_target_key(target.raw)
-                for target in source.parsed.targets
-            },
-        )
-        if source.active == "file" and payload.selections
-        else ()
-    )
     return build_dry_run_plan_from_pending_source(
         config,
         source.parsed,
@@ -225,7 +195,6 @@ def build_web_plan(
         line_numbers=payload.line_numbers,
         selection_scope=_PlanSelectionScope(
             update_selections=update_selections_from_payload(payload),
-            completed_update_selections=completed_update_selections,
         ),
         allow_tag_updates=payload.allow_tag_updates,
         tag_overrides=tag_overrides_from_payload(payload),
@@ -405,7 +374,6 @@ def submit_apply_job(
     settings: WebSettings,
     plan: DryRunPlan,
     payload: ApplyPlanRequest,
-    wud_lock: DirectoryLock | None,
     *,
     pending_source: web_pending_sources.PendingSourceResult,
 ) -> ApplyJobResponse:
@@ -420,7 +388,6 @@ def submit_apply_job(
         digest_pin_label_rewrite_approvals=(
             digest_pin_label_rewrite_approvals_from_payload(payload)
         ),
-        wud_lock=wud_lock,
         effective_config_loader=_effective_config,
         auto_update_schedule_run_updater=(
             web_scheduler._safe_update_auto_update_schedule_runs
@@ -432,9 +399,7 @@ def submit_apply_job(
                 "pending_source_degraded": plan.source.degraded,
                 "pending_source_label": plan.source.label,
             },
-            pending_source_text=(
-                pending_source.text if pending_source.active == "api" else None
-            ),
+            pending_source_text=pending_source.text,
             pending_source_active=pending_source.active,
             pending_source_label=pending_source.label,
             pending_source_container_ids=(

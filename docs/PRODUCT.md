@@ -38,9 +38,9 @@ explicit plan or lets an eligible policy handle the update. Results remain
 available through run history, audit records, logs, Doctor checks, and
 diagnostics.
 
-WUD's API is the primary pending-update source for new WebUI deployments. The
-deprecated todo file remains a fallback/import source, and the retained
-helper-container CLI workflow remains file-based. Deployments interact with a
+WUD's API is the WebUI's only pending-update source. The retained
+helper-container CLI workflow reads a todo file the operator provides.
+Deployments interact with a
 Docker daemon and mounted Compose stack roots; optional integrations include
 Discord release-note notifications, GitHub release metadata, and Trivy-backed
 candidate security scans.

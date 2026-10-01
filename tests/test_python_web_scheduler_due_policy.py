@@ -99,7 +99,8 @@ def test_auto_update_scheduler_applies_due_policy_at_configured_local_time(
     assert job["status"] == "success"
     assert job["selected_line_numbers"] == [1]
     assert second_response is None
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "repo/app:latest\n"
     calls = _fake_docker_calls(fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
     assert "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app" in calls
@@ -186,7 +187,8 @@ def test_auto_update_scheduler_applies_due_policy_within_grace_window(
 
     assert policy.status_code == 200
     assert job["status"] == "success"
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "repo/app:latest\n"
 
 
 def test_auto_update_scheduler_applies_due_policy_after_local_midnight(
@@ -236,7 +238,8 @@ def test_auto_update_scheduler_applies_due_policy_after_local_midnight(
 
     assert policy.status_code == 200
     assert job["status"] == "success"
-    assert wud_file.read_text(encoding="utf-8") == ""
+    # The WebUI applies from a private copy and never edits the shared WUD file.
+    assert wud_file.read_text(encoding="utf-8") == "repo/app:latest\n"
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         schedule_row = conn.execute(
             """
@@ -535,7 +538,7 @@ def test_auto_update_candidate_reuses_effective_config_snapshot(
     assert plan_provenance is grouping_provenance
 
 
-def test_auto_update_scheduler_uses_api_pending_source_without_wud_lock(
+def test_auto_update_scheduler_uses_api_pending_source(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -619,7 +622,7 @@ def test_auto_update_scheduler_uses_api_pending_source_without_wud_lock(
     assert response.job_id == "api-source-job"
     submit_kwargs = observed["kwargs"]
     run_context = submit_kwargs["run_context"]
-    assert submit_kwargs["wud_lock"] is None
+    assert "wud_lock" not in submit_kwargs
     assert run_context.pending_source_text == f"repo/app:latest@{remote_digest}\n"
     assert run_context.pending_source_active == "api"
     assert run_context.pending_source_label == "WUD API"

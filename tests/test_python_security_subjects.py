@@ -188,7 +188,7 @@ class SecuritySubjectTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "wudup.security_subjects.resolve_pending_source",
+            "wudup.security_subjects.web_pending_sources.resolve_pending_source",
             return_value=source,
         ), mock.patch(
             "wudup.security_subjects.default_digest_verifier",
@@ -223,7 +223,7 @@ class SecuritySubjectTests(unittest.TestCase):
         source = _pending_source("repo/app:1.0 tag=2.0 platform=linux/amd64\n")
 
         with mock.patch(
-            "wudup.security_subjects.resolve_pending_source",
+            "wudup.security_subjects.web_pending_sources.resolve_pending_source",
             return_value=source,
         ), mock.patch(
             "wudup.security_subjects.default_digest_verifier",
@@ -260,7 +260,7 @@ class SecuritySubjectTests(unittest.TestCase):
         source = _pending_source("repo/app:1.0 tag=2.0 platform=linux/amd64\n")
 
         with mock.patch(
-            "wudup.security_subjects.resolve_pending_source",
+            "wudup.security_subjects.web_pending_sources.resolve_pending_source",
             return_value=source,
         ), mock.patch(
             "wudup.security_subjects.default_digest_verifier",

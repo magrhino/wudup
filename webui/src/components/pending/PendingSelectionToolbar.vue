@@ -57,7 +57,7 @@ const emit = defineEmits<{
           Stopped/unverified services are excluded from bulk selection.
           Needs review means no actionable Compose match; inspect those entries below.
         </p>
-        <p v-else>Pending file order. Compose grouping is unavailable; review checks the selected entries.</p>
+        <p v-else>Pending entries in source order. Compose grouping is unavailable; review checks the selected entries.</p>
         <p>Select all replaces the selection with the visible selectable updates. Review includes hidden selections; Clear selection clears all selections.</p>
         <n-flex class="pending-actions" align="center" :size="8">
           <n-button

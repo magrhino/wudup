@@ -20,7 +20,6 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from . import (
-    web_file_selection_store,
     web_job_registry,
     web_request_context,
     web_runs,
@@ -29,7 +28,6 @@ from . import (
 from .command import CommandRunner
 from .config import UpdaterConfig
 from .db import utc_timestamp
-from .locks import DirectoryLock
 from .plans import DryRunPlan
 from .updater import UpdateFromWudRunner
 from .updater_digest_pin import digest_pin_update_from_values
@@ -94,7 +92,7 @@ class ApplyJobRunContext:
     metadata_extra: Mapping[str, Any] | None = None
     auto_update_schedule_keys: tuple[str, ...] = ()
     start_event: Event | None = None
-    pending_source_active: PendingSourceActive = "file"
+    pending_source_active: PendingSourceActive = "api"
     pending_source_text: str | None = None
     pending_source_label: str = ""
     pending_source_container_ids: tuple[str, ...] = ()
@@ -136,7 +134,6 @@ def _submit_apply_job_state(
     *,
     allow_tag_updates: bool,
     tag_overrides: tuple[TagOverride, ...],
-    wud_lock: DirectoryLock | None,
     effective_config_loader: EffectiveConfigLoader,
     auto_update_schedule_run_updater: AutoUpdateScheduleRunUpdater,
     digest_pin_label_rewrite_approvals: tuple[DigestPinLabelRewriteApproval, ...] = (),
@@ -173,7 +170,6 @@ def _submit_apply_job_state(
                 jobs,
                 apply_condition,
                 job.id,
-                wud_lock,
                 effective_config_loader,
                 auto_update_schedule_run_updater,
                 active_run_context,
@@ -346,7 +342,6 @@ def _run_apply_job(
     jobs: dict[str, WebApplyJob],
     apply_condition: Condition,
     job_id: str,
-    wud_lock: DirectoryLock | None,
     effective_config_loader: EffectiveConfigLoader,
     auto_update_schedule_run_updater: AutoUpdateScheduleRunUpdater,
     run_context: ApplyJobRunContext,
@@ -373,7 +368,7 @@ def _run_apply_job(
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     status_code: int | None = None
     try:
-        temp_dir, wud_file_override, wud_file_label_override = (
+        temp_dir, pending_wud_file, pending_wud_file_label = (
             _pending_source_wud_file(run_context)
         )
         options = _apply_options(
@@ -397,12 +392,10 @@ def _run_apply_job(
             effective_config_loader=effective_config_loader,
             update_mode_override=run_context.update_mode_override,
             metadata_extra=run_context.metadata_extra,
-            wud_file_override=wud_file_override,
-            wud_file_label_override=wud_file_label_override,
+            wud_file=pending_wud_file,
+            wud_file_label=pending_wud_file_label,
         )
         apply_env = dict(settings.command_env or {})
-        if wud_lock is not None:
-            apply_env["WUD_LOCK_HELD_BY_PARENT"] = "1"
         runner = UpdateFromWudRunner(
             options,
             environ=apply_env,
@@ -421,11 +414,6 @@ def _run_apply_job(
             log_file=str(runner.log_file),
         )
         status_code = runner.run()
-        _checkpoint_file_selection_completions(
-            settings,
-            runner,
-            run_context=run_context,
-        )
         terminal_job_fields = _handle_apply_job_run_result(
             settings,
             jobs,
@@ -438,21 +426,6 @@ def _run_apply_job(
         )
     except Exception as exc:  # noqa: BLE001 - the background job records all failures.
         error = exc
-        if (
-            runner is not None
-            and status_code is None
-            and runner.successful_completed_update_selections
-        ):
-            try:
-                _checkpoint_file_selection_completions(
-                    settings,
-                    runner,
-                    run_context=run_context,
-                )
-            except (
-                web_file_selection_store.FileSelectionCheckpointError
-            ) as checkpoint_exc:
-                error = checkpoint_exc
         run_id = None if runner is None else runner.audit_run_id
         web_job_registry._append_apply_job_progress(
             jobs,
@@ -478,7 +451,7 @@ def _run_apply_job(
             "error": str(error),
         }
     finally:
-        cleanup_error = _cleanup_apply_job_resources(wud_lock, temp_dir)
+        cleanup_error = _cleanup_apply_job_resources(temp_dir)
         web_job_registry._update_apply_job(
             jobs,
             apply_condition,
@@ -492,9 +465,13 @@ def _run_apply_job(
 
 def _pending_source_wud_file(
     run_context: ApplyJobRunContext,
-) -> tuple[tempfile.TemporaryDirectory[str] | None, Path | None, str | None]:
+) -> tuple[tempfile.TemporaryDirectory[str], Path, str]:
     if run_context.pending_source_text is None:
-        return None, None, None
+        # Never fall back to the shared WUD_OUT_FILE: the WebUI applies only the
+        # pending lines it read from the WUD API for this plan.
+        raise RuntimeError(
+            "apply job has no pending-update snapshot; preview the plan again"
+        )
 
     temp_dir = tempfile.TemporaryDirectory(prefix="wudup-api-pending-")
     wud_file = Path(temp_dir.name) / "images.todo"
@@ -504,25 +481,6 @@ def _pending_source_wud_file(
         temp_dir.cleanup()
         raise
     return temp_dir, wud_file, run_context.pending_source_label or "WUD API"
-
-
-def _checkpoint_file_selection_completions(
-    settings: WebSettings,
-    runner: UpdateFromWudRunner,
-    *,
-    run_context: ApplyJobRunContext,
-) -> None:
-    if run_context.pending_source_active != "file":
-        return
-    web_file_selection_store.checkpoint_completed_update_selections(
-        settings.config.db_path,
-        owner_uid=settings.config.out_uid,
-        pending_file=settings.config.wud_out_file,
-        scoped=bool(runner.options.update_selections),
-        previous=runner.options.completed_update_selections,
-        successful=runner.successful_completed_update_selections,
-        discovered=runner.discovered_completed_update_selections,
-    )
 
 
 def _handle_apply_job_run_result(
@@ -574,22 +532,15 @@ def _apply_job_exit_error(status_code: int) -> str:
 
 
 def _cleanup_apply_job_resources(
-    wud_lock: DirectoryLock | None,
     temp_dir: tempfile.TemporaryDirectory[str] | None,
 ) -> Exception | None:
-    cleanup_error: Exception | None = None
-    if wud_lock is not None:
-        try:
-            wud_lock.close()
-        except Exception as exc:  # noqa: BLE001 - cleanup must attempt every resource.
-            cleanup_error = exc
-    if temp_dir is not None:
-        try:
-            temp_dir.cleanup()
-        except Exception as exc:  # noqa: BLE001 - cleanup must attempt every resource.
-            if cleanup_error is None:
-                cleanup_error = exc
-    return cleanup_error
+    if temp_dir is None:
+        return None
+    try:
+        temp_dir.cleanup()
+    except Exception as exc:  # noqa: BLE001 - cleanup failures surface after the job finishes.
+        return exc
+    return None
 
 
 def _refresh_api_pending_source_after_apply(
@@ -640,10 +591,10 @@ def _apply_options(
     plan_inputs: _ApplyPlanInputs,
     plan_id: str,
     effective_config_loader: EffectiveConfigLoader,
+    wud_file: Path,
+    wud_file_label: str,
     update_mode_override: str | None = None,
     metadata_extra: Mapping[str, Any] | None = None,
-    wud_file_override: Path | None = None,
-    wud_file_label_override: str | None = None,
 ) -> UpdaterOptions:
     line_spec = _line_spec(selection_scope.line_numbers)
     metadata = {
@@ -664,8 +615,6 @@ def _apply_options(
         separators=(",", ":"),
     )
     config = effective_config_loader(settings)
-    wud_file = wud_file_override or config.wud_out_file
-    wud_file_label = wud_file_label_override or str(config.wud_out_file)
     host_docker_base_label = (
         None if settings.host_docker_base is None else str(settings.host_docker_base)
     )

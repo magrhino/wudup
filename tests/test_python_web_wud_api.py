@@ -43,7 +43,6 @@ from wudup import (
 from wudup import (
     web_release_notes as release_notes_module,
 )
-from wudup.config import ConfigError
 from wudup.release_notes import (
     ReleaseNoteInfo as ReleaseNoteData,
 )
@@ -298,7 +297,6 @@ def test_wud_api_snapshot_tracks_only_retryable_degraded_container_ids(
     )
     assert snapshot.degraded_container_count == 1
     assert snapshot.retained_update_count == 0
-    assert snapshot.recovered_update_count == 0
     assert "Update status is unknown for 1 container" in snapshot.status.detail
     assert "WUD skipped 1 container" in snapshot.status.detail
     diagnostics = web_wud_api.get_observation_diagnostics(settings)
@@ -306,7 +304,6 @@ def test_wud_api_snapshot_tracks_only_retryable_degraded_container_ids(
         "available": 1,
         "degraded": 1,
         "retained": 0,
-        "recovered": 0,
         "unresolved": 1,
         "unsupported_ignored": 1,
     }
@@ -868,7 +865,6 @@ def test_wud_api_ignores_unsupported_registry_observation_with_pending_target(
     assert snapshot.containers[0].name == "app"
     assert snapshot.degraded_container_count == 0
     assert snapshot.retained_update_count == 0
-    assert snapshot.recovered_update_count == 0
     assert snapshot.status.detail == (
         "1 update is available. "
         "WUD skipped 1 container because its registry is unsupported."
@@ -911,7 +907,7 @@ def test_wud_api_retains_prior_update_when_registry_becomes_unsupported(
     assert diagnostic.retryable is False
 
 
-def test_wud_api_recovers_cold_start_update_from_matching_pending_file(
+def test_wud_api_does_not_recover_cold_start_update_from_stale_pending_file(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -933,153 +929,23 @@ def test_wud_api_recovers_cold_start_update_from_matching_pending_file(
         force=True,
     )
 
-    assert len(snapshot.containers) == 1
-    recovered = snapshot.containers[0]
-    assert recovered.id == "docker.local.app"
-    assert recovered.remote_tag == "1.1.0"
-    assert recovered.remote_digest == target_digest
-    assert recovered.update_kind == "tag"
-    assert recovered.error == "registry lookup failed"
-    assert recovered.metadata_status == "recovered"
+    # images.todo is no longer written by anything, so a failed WUD check must
+    # report the update as unknown instead of reviving a possibly stale line.
+    assert snapshot.containers == ()
+    assert [container.id for container in snapshot.unresolved_containers] == [
+        "docker.local.app"
+    ]
     assert snapshot.degraded_container_count == 1
     assert snapshot.retained_update_count == 0
-    assert snapshot.recovered_update_count == 1
     assert snapshot.status.detail == (
-        "1 update is available. "
+        "0 updates are available. "
         "The last WUD update check failed for 1 container. "
-        "1 update was recovered from the pending file."
+        "Update status is unknown for 1 container."
     )
     diagnostic = snapshot.observation_diagnostics[0]
-    assert diagnostic.outcome == "recovered"
+    assert diagnostic.outcome == "unresolved"
     assert diagnostic.reason_code == "reported_error"
     assert diagnostic.retryable is True
-
-
-def test_wud_api_pending_file_recovery_requires_matching_registry(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    degraded = _container_payload(
-        name="app",
-        image="registry-b.example/acme/app",
-        update_available=False,
-    )
-    degraded["result"] = None
-    degraded["error"] = {"message": "registry lookup failed"}
-    _install_wud_api(monkeypatch, containers=[degraded])
-    settings = _settings(tmp_path, "https://wud.pending-recovery-registry.test:3000")
-    settings.config.wud_out_file.write_text(
-        "registry-a.example/acme/app:1.0.0 tag=1.1.0\n",
-        encoding="utf-8",
-    )
-
-    snapshot = web_wud_api.get_snapshot(
-        settings,
-        include_containers=True,
-        force=True,
-    )
-
-    assert snapshot.containers == ()
-    assert snapshot.recovered_update_count == 0
-
-
-def test_wud_api_pending_file_recovery_treats_docker_hub_alias_as_default(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    degraded = _container_payload(
-        name="app",
-        image="acme/app",
-        update_available=False,
-    )
-    degraded["result"] = None
-    degraded["error"] = {"message": "registry lookup failed"}
-    _install_wud_api(monkeypatch, containers=[degraded])
-    settings = _settings(tmp_path, "https://wud.pending-recovery-docker-hub.test:3000")
-    settings.config.wud_out_file.write_text(
-        "docker.io/acme/app:1.0.0 tag=1.1.0\n",
-        encoding="utf-8",
-    )
-
-    snapshot = web_wud_api.get_snapshot(
-        settings,
-        include_containers=True,
-        force=True,
-    )
-
-    assert len(snapshot.containers) == 1
-    assert snapshot.containers[0].remote_tag == "1.1.0"
-    assert snapshot.recovered_update_count == 1
-
-
-def test_wud_api_pending_file_recovery_ignores_entry_without_update_metadata(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    degraded = _container_payload(name="app", update_available=False)
-    degraded["result"] = None
-    degraded["error"] = {"message": "registry lookup failed"}
-    _install_wud_api(monkeypatch, containers=[degraded])
-    settings = _settings(tmp_path, "https://wud.pending-recovery-bare.test:3000")
-    settings.config.wud_out_file.write_text(
-        "registry.example/acme/app:1.0.0\n",
-        encoding="utf-8",
-    )
-
-    snapshot = web_wud_api.get_snapshot(
-        settings,
-        include_containers=True,
-        force=True,
-    )
-
-    assert snapshot.containers == ()
-    assert snapshot.recovered_update_count == 0
-
-
-def test_wud_api_does_not_recover_applied_or_legacy_disabled_pending_file(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    degraded = _container_payload(name="app", update_available=False)
-    degraded["result"] = None
-    degraded["error"] = {"message": "registry lookup failed"}
-    _install_wud_api(monkeypatch, containers=[degraded])
-
-    applied_settings = _settings(
-        tmp_path,
-        "https://wud.pending-recovery-applied.test:3000",
-    )
-    applied_settings.config.wud_out_file.write_text(
-        "registry.example/acme/app:1.0.0 tag=1.0.0\n",
-        encoding="utf-8",
-    )
-    applied = web_wud_api.get_snapshot(
-        applied_settings,
-        include_containers=True,
-        force=True,
-    )
-
-    disabled_root = tmp_path / "disabled"
-    disabled_root.mkdir()
-    disabled_settings = _settings(
-        disabled_root,
-        "https://wud.pending-recovery-disabled.test:3000",
-        {"WUDUP_LEGACY_SCRIPTS": "false"},
-    )
-    disabled_settings.config.wud_out_file.write_text(
-        "registry.example/acme/app:1.0.0 tag=1.1.0\n",
-        encoding="utf-8",
-    )
-    disabled = web_wud_api.get_snapshot(
-        disabled_settings,
-        include_containers=True,
-        force=True,
-    )
-
-    assert applied.containers == ()
-    assert applied.recovered_update_count == 0
-    assert disabled.containers == ()
-    assert disabled.recovered_update_count == 0
 
 
 def test_wud_api_snapshot_reads_hidden_update_candidates_from_update_kind_delta(
@@ -1948,34 +1814,6 @@ def test_wud_api_startup_wait_rejects_invalid_values(
         )
 
 
-def test_pending_source_rejects_invalid_values(tmp_path: Path) -> None:
-    with pytest.raises(WebConfigError) as exc_info:
-        load_web_settings(
-            environ=_web_env(
-                tmp_path,
-                {"WUD_PENDING_SOURCE": "queue"},
-            ),
-        )
-
-    assert str(exc_info.value) == "WUD_PENDING_SOURCE must be one of: api, auto, file"
-
-
-def test_pending_source_defaults_to_api(tmp_path: Path) -> None:
-    settings = load_web_settings(environ=_web_env(tmp_path))
-
-    assert settings.pending_source == "api"
-
-
-def test_legacy_scripts_rejects_invalid_bool(tmp_path: Path) -> None:
-    environ = _web_env(
-        tmp_path,
-        {"WUDUP_LEGACY_SCRIPTS": "treu"},
-    )
-
-    with pytest.raises(ConfigError, match="WUDUP_LEGACY_SCRIPTS"):
-        load_web_settings(environ=environ)
-
-
 def test_wud_api_snapshot_reports_auth_required_metadata(
     tmp_path: Path,
     monkeypatch,
@@ -2223,68 +2061,6 @@ def test_pending_endpoint_enriches_items_from_wud_metadata(
     assert metadata["platform_architecture"] == "arm64"
     assert metadata["platform_variant"] == "v8"
     assert body["grouping"]["unmatched"][0]["wud_metadata"] == metadata
-    assert wud_file.read_text(encoding="utf-8") == original
-
-
-def test_pending_endpoint_keeps_images_todo_fallback_when_wud_unavailable(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _install_wud_api(monkeypatch, health=OSError("connection refused"))
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_API_BASE_URL": "https://wud.fallback.test:3000",
-            "WUD_PENDING_SOURCE": "auto",
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    wud_file.write_text("registry.example/acme/app:1.0.0\n", encoding="utf-8")
-
-    response = client.get("/api/v1/pending")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["count"] == 1
-    assert body["items"][0]["image"] == "registry.example/acme/app:1.0.0"
-    assert body["items"][0]["wud_metadata"] is None
-    assert body["wud_api"]["metadata_available"] is False
-
-
-def test_pending_endpoint_falls_back_after_wud_api_connection_loss(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    api = _ToggleableWudApi(monkeypatch, reachable=True)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_API_BASE_URL": "https://wud.pending-loss.test:3000",
-            "WUD_PENDING_SOURCE": "auto",
-        },
-    )
-    wud_file = tmp_path / "state" / "images.todo"
-    original = "app\n"
-    wud_file.write_text(original, encoding="utf-8")
-
-    ready_response = client.get("/api/v1/pending")
-    assert ready_response.status_code == 200
-    ready_body = ready_response.json()
-    assert ready_body["wud_api"]["metadata_available"] is True
-    assert ready_body["items"][0]["wud_metadata"]["name"] == "app"
-
-    api.reachable = False
-    api.now = web_wud_api.WUD_API_CACHE_TTL_SECONDS + 0.1
-    degraded_response = client.get("/api/v1/pending")
-
-    assert degraded_response.status_code == 200
-    degraded_body = degraded_response.json()
-    assert degraded_body["count"] == 1
-    assert degraded_body["items"][0]["image"] == "app"
-    assert degraded_body["items"][0]["wud_metadata"] is None
-    assert degraded_body["wud_api"]["state"] == "unavailable"
     assert wud_file.read_text(encoding="utf-8") == original
 
 

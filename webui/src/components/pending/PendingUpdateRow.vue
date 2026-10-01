@@ -97,7 +97,7 @@ function groupedItemTarget(item: PendingGroupedItem): string {
       :release-note-reason="releaseNoteReason"
     />
     <div class="pending-update-meta">
-      <span class="wrap-anywhere">Pending file line #{{ item.line_no }}</span>
+      <span class="wrap-anywhere">Pending entry #{{ item.line_no }}</span>
       <n-tag
         size="small"
         :type="pendingMetadataStatusTagType(item)"

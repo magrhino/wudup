@@ -129,7 +129,6 @@ def _run_retag_apply_job(
     )
     run_id: int | None = None
     build: _RetagPlanBuild | None = None
-    wud_lock: object | None = None
     preflight = True
     successful_updates: tuple[_RetagPlanUpdate, ...] = ()
     retained_known_image_updates: tuple[_RetagPlanUpdate, ...] = ()
@@ -144,7 +143,6 @@ def _run_retag_apply_job(
         ),
     )
     try:
-        wud_lock = web_job_registry._acquire_apply_wud_lock(settings)
         build = build_plan(
             settings,
             RetagPlanRequest(
@@ -230,10 +228,6 @@ def _run_retag_apply_job(
                 successful_updates=successful_updates,
                 retained_known_image_updates=retained_known_image_updates,
             )
-    finally:
-        close = getattr(wud_lock, "close", None) if wud_lock is not None else None
-        if close is not None:
-            close()
 
 
 def _apply_retag_updates(

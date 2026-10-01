@@ -78,7 +78,6 @@ const {
   pendingLoading,
   pendingSourceDegraded,
   pendingSourceDisplay,
-  pendingSourceFile,
   pendingSourceLabel,
   pendingSourceWarning,
   releaseChangelogFor,
@@ -584,7 +583,7 @@ onBeforeUnmount(() => {
 
     <div class="section-heading pending-heading">
       <div>
-        <p class="eyebrow value-eyebrow pending-source" :title="pendingSourceFile">
+        <p class="eyebrow value-eyebrow pending-source">
           {{ pendingSourceDisplay }}
         </p>
         <h2>{{ pendingHeadingText }}</h2>
@@ -661,7 +660,7 @@ onBeforeUnmount(() => {
         </span>
         <span v-else>Loading stack matches</span>
         <span v-if="pendingLoaded">{{ visibleUnmatchedReviewCountLabel }}</span>
-        <span v-else>Waiting for pending file</span>
+        <span v-else>Waiting for pending updates</span>
         <span>{{ mutationStateLabel }}</span>
       </div>
     </CoreUpdateTourPanel>

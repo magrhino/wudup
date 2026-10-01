@@ -253,7 +253,6 @@ DoctorCheckStatus = Literal["PASS", "WARN", "FAIL"]
 WudApiState = Literal["ready", "unavailable", "auth_required", "error"]
 WudApiObservationOutcome = Literal[
     "retained",
-    "recovered",
     "unresolved",
     "unsupported_ignored",
 ]
@@ -369,8 +368,6 @@ class WebSettings:
     wud_api_client: WudApiClientConfig = dataclass_field(
         default_factory=WudApiClientConfig
     )
-    pending_source: PendingSourceMode = "api"
-    legacy_scripts_enabled: bool = True
     release_notes_enabled_env: bool | None = None
     security_scan: SecurityScanConfig = dataclass_field(
         default_factory=SecurityScanConfig
@@ -491,7 +488,7 @@ class WudContainerMetadata(BaseModel):
     platform_architecture: str = ""
     platform_variant: str = ""
 
-PendingSourceMode = Literal["file", "api", "auto"]
+PendingSourceMode = Literal["file", "api"]
 PendingSourceActive = Literal["file", "api"]
 
 
@@ -587,7 +584,6 @@ class WudApiObservationCounts(BaseModel):
     available: int = 0
     degraded: int = 0
     retained: int = 0
-    recovered: int = 0
     unresolved: int = 0
     unsupported_ignored: int = 0
 

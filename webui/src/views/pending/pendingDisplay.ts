@@ -36,7 +36,7 @@ export function pendingMetadataStatusTitle(
     case "retained":
       return "Last-known update metadata kept because the current WUD check failed.";
     case "recovered":
-      return "Update metadata recovered from the pending file because the current WUD check failed.";
+      return "Update metadata could not be confirmed by the current WUD check.";
     default:
       return "Verified by the latest WUD scan.";
   }
@@ -116,21 +116,6 @@ export function groupedItemServiceKeys(
   return item.services
     .filter(Boolean)
     .map((service) => `${group.name}/${service}`);
-}
-
-export function pendingSourceFileName(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "Pending file") {
-    return "Pending file";
-  }
-  const pathParts = trimmed.split(/[\\/]/);
-  for (let index = pathParts.length - 1; index >= 0; index -= 1) {
-    const part = pathParts[index];
-    if (part) {
-      return part;
-    }
-  }
-  return trimmed;
 }
 
 export function releaseNoteStatus(

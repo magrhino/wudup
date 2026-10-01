@@ -140,45 +140,21 @@ def _auto_update_tick(
         started_at = now_utc
     started_at_utc = started_at.astimezone(timezone.utc)
 
-    with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
-        init_db(conn)
-        candidate = _auto_update_candidate(
-            conn,
-            settings,
-            effective_config_loader=effective_config_loader,
-            now_utc=now_utc,
-            started_at=started_at_utc,
-        )
-    if candidate is None:
-        return None
-    _selection, _plan, pending_source = candidate
-    wud_lock = (
-        web_job_registry._acquire_apply_wud_lock(settings)
-        if pending_source.active == "file"
-        else None
-    )
-    lock_transferred = False
+    job_submitted = False
     start_event: Event | None = None
     try:
-        locked_now_utc = now_utc if now is not None else datetime.now(timezone.utc)
-        locked_now_utc = locked_now_utc.astimezone(timezone.utc)
         with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
             candidate = _auto_update_candidate(
                 conn,
                 settings,
                 effective_config_loader=effective_config_loader,
-                now_utc=locked_now_utc,
+                now_utc=now_utc,
                 started_at=started_at_utc,
             )
             if candidate is None:
                 return None
             selection, plan, pending_source = candidate
-            if pending_source.active == "file" and wud_lock is None:
-                return None
-            if pending_source.active != "file" and wud_lock is not None:
-                wud_lock.close()
-                wud_lock = None
             with _immediate_transaction(conn):
                 _reserve_auto_update_schedule_runs(conn, settings, selection)
                 start_event = Event()
@@ -189,7 +165,6 @@ def _auto_update_tick(
                     plan,
                     allow_tag_updates=False,
                     tag_overrides=(),
-                    wud_lock=wud_lock,
                     effective_config_loader=effective_config_loader,
                     auto_update_schedule_run_updater=(
                         _safe_update_auto_update_schedule_runs
@@ -208,11 +183,7 @@ def _auto_update_tick(
                         },
                         auto_update_schedule_keys=selection.schedule_keys,
                         start_event=start_event,
-                        pending_source_text=(
-                            pending_source.text
-                            if pending_source.active == "api"
-                            else None
-                        ),
+                        pending_source_text=pending_source.text,
                         pending_source_active=pending_source.active,
                         pending_source_label=pending_source.label,
                         pending_source_container_ids=(
@@ -232,7 +203,7 @@ def _auto_update_tick(
                         "failed to release auto update schedule reservation"
                     )
                 raise
-            lock_transferred = True
+            job_submitted = True
             with _immediate_transaction(conn):
                 _queue_auto_update_schedule_runs(
                     conn,
@@ -246,12 +217,9 @@ def _auto_update_tick(
     except AutoUpdateScheduleReservationError:
         return None
     except Exception:
-        if lock_transferred and start_event is not None:
+        if job_submitted and start_event is not None:
             start_event.set()
         raise
-    finally:
-        if wud_lock is not None and not lock_transferred:
-            wud_lock.close()
 
 
 def _auto_update_candidate(
@@ -278,8 +246,6 @@ def _auto_update_candidate(
         settings,
         force_api=True,
     )
-    if pending_source.active == "file" and not pending_source.exists:
-        return None
     parsed = pending_source.parsed
 
     effective_config = effective_config_loader(settings)

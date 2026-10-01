@@ -437,19 +437,18 @@ HOOK
   teardown_case
 }
 
-test_parent_wud_lock_is_reused_and_released(){
+test_remove_lines_before_run_takes_and_releases_wud_lock(){
   setup_case
   printf 'repo/app:one\nrepo/app:two\nrepo/app:three\n' > "$WUD_FILE"
   make_single_service_stack two "$BASE/two" docker-compose.yml repo/app:two cid-two
   set_image_state repo/app:two old-two sha256:old-two
   set_image_after_pull repo/app:two new-two sha256:new-two
-  mkdir "$WUD_FILE.lock"
 
-  run_script WUD_LOCK_HELD_BY_PARENT=1 WUD_LOCK_TIMEOUT=0 --yes --only-lines 2 --remove-lines-before-run 1,3
+  run_script WUD_LOCK_TIMEOUT=0 --yes --only-lines 2 --remove-lines-before-run 1,3
 
   assert_status 0
   assert_file_equals "$WUD_FILE" ''
-  [[ ! -d "$WUD_FILE.lock" ]] || fail "parent WUD lock was not released"
+  [[ ! -d "$WUD_FILE.lock" ]] || fail "WUD lock was not released"
   teardown_case
 }
 
@@ -1094,7 +1093,7 @@ main(){
   run_test test_remove_lines_before_run_removes_requested_lines_before_pull
   run_test test_same_image_wud_callback_survives_successful_update
   run_test test_cleanup_does_not_resurrect_replaced_unselected_line
-  run_test test_parent_wud_lock_is_reused_and_released
+  run_test test_remove_lines_before_run_takes_and_releases_wud_lock
   run_test test_invalid_line_spec_fails_before_docker_calls
   run_test test_one_line_two_stacks_one_fails_keeps_line
   run_test test_sha_suffix_does_not_block_cleanup

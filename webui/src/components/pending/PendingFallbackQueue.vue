@@ -52,7 +52,7 @@ const emit = defineEmits<{
 
 <template>
   <n-alert type="info">
-    Stack grouping is unavailable. Showing pending file order.
+    Stack grouping is unavailable. Showing pending entries in source order.
   </n-alert>
 
   <PendingEmptyQueueState

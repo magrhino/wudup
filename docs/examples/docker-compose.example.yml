@@ -24,8 +24,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_DOCKER_BASE:-/srv/docker}:${HOST_DOCKER_BASE:-/srv/docker}
       - ./logs:/logs
-      # Deprecated file pending source: WUDup no longer ships a WUD callback
-      # that writes images.todo. Prefer docker-compose.webui.yml (API source).
+      # docker-update-from-wud reads /out/images.todo, which you maintain; WUDup
+      # no longer ships a WUD callback that writes it. Use docker-compose.webui.yml
+      # for the WebUI, which reads pending updates from the WUD API.
       - wud-out:/out
     # Checks Docker access, paths, and Compose discovery without changing anything.
     # Preview queued updates with: docker compose run --rm wudup docker-update-from-wud --dry-run

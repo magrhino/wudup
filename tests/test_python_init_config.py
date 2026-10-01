@@ -54,8 +54,8 @@ class InitConfigTests(unittest.TestCase):
         self.assertIn("WUD_WEB_ALLOWED_HOSTS=", content)
         self.assertIn("WUD_API_BASE_URL=http://wud:3000", content)
         self.assertIn("WUD_API_STARTUP_WAIT_SECONDS=5", content)
-        self.assertIn("WUD_PENDING_SOURCE=api", content)
-        self.assertIn("WUDUP_LEGACY_SCRIPTS=true", content)
+        self.assertNotIn("WUD_PENDING_SOURCE", content)
+        self.assertNotIn("WUDUP_LEGACY_SCRIPTS", content)
         self.assertNotIn("WUDUP_TRIGGER_TOKEN=", content)
         self.assertNotIn("WUDUP_TRIGGER_TOKEN_FILE=", content)
 
@@ -435,14 +435,8 @@ class InitConfigTests(unittest.TestCase):
             environment["WUD_API_STARTUP_WAIT_SECONDS"],
             "${WUD_API_STARTUP_WAIT_SECONDS:-5}",
         )
-        self.assertEqual(
-            environment["WUD_PENDING_SOURCE"],
-            "${WUD_PENDING_SOURCE:-api}",
-        )
-        self.assertEqual(
-            environment["WUDUP_LEGACY_SCRIPTS"],
-            "${WUDUP_LEGACY_SCRIPTS:-true}",
-        )
+        self.assertNotIn("WUD_PENDING_SOURCE", environment)
+        self.assertNotIn("WUDUP_LEGACY_SCRIPTS", environment)
         self.assertNotIn("WUDUP_TRIGGER_TOKEN", environment)
         self.assertNotIn("WUDUP_TRIGGER_TOKEN_FILE", environment)
         self.assertEqual(
@@ -521,14 +515,8 @@ class InitConfigTests(unittest.TestCase):
             service["environment"]["WUD_API_STARTUP_WAIT_SECONDS"],
             "${WUD_API_STARTUP_WAIT_SECONDS:-5}",
         )
-        self.assertEqual(
-            service["environment"]["WUD_PENDING_SOURCE"],
-            "${WUD_PENDING_SOURCE:-api}",
-        )
-        self.assertEqual(
-            service["environment"]["WUDUP_LEGACY_SCRIPTS"],
-            "${WUDUP_LEGACY_SCRIPTS:-true}",
-        )
+        self.assertNotIn("WUD_PENDING_SOURCE", service["environment"])
+        self.assertNotIn("WUDUP_LEGACY_SCRIPTS", service["environment"])
         self.assertNotIn("WUDUP_TRIGGER_TOKEN", service["environment"])
         self.assertNotIn("WUDUP_TRIGGER_TOKEN_FILE", service["environment"])
         self.assertEqual(
@@ -564,9 +552,9 @@ class InitConfigTests(unittest.TestCase):
                     ],
                     "${WUD_API_BASE_URL:-http://wud:3000}",
                 )
-                self.assertEqual(
-                    compose["services"]["wudup"]["environment"]["WUD_PENDING_SOURCE"],
-                    "${WUD_PENDING_SOURCE:-api}",
+                self.assertNotIn(
+                    "WUD_PENDING_SOURCE",
+                    compose["services"]["wudup"]["environment"],
                 )
 
     def test_container_doctor_runs_only_after_interactive_confirmation(self) -> None:

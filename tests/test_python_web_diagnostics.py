@@ -232,7 +232,6 @@ def test_diagnostics_support_bundle_includes_wud_observation_issue_dump(
         "available": 7,
         "degraded": 12,
         "retained": 0,
-        "recovered": 0,
         "unresolved": 12,
         "unsupported_ignored": 9,
     }

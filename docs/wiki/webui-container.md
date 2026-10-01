@@ -70,21 +70,11 @@ lost.
 
 ## Pending Updates
 
-The WebUI can read pending updates from WUD's API, from a shared todo file, or
-from API-first mode with file fallback:
-
-```dotenv
-WUD_PENDING_SOURCE=api
-# WUD_PENDING_SOURCE=file
-# WUD_PENDING_SOURCE=auto
-```
-
-The default `api` mode derives pending lines from WUD's `/api/containers`
-metadata over the private Compose app network. `file` uses the deprecated todo
-file, which needs an external writer because WUDup no longer ships a WUD
-callback, and `auto` uses the API when usable before falling back to
-`WUD_OUT_FILE`. The `docker-update-from-wud` command remains a legacy file-mode
-helper.
+The WebUI derives pending updates from WUD's `/api/containers` metadata over
+the private Compose app network. When a WUD update check fails, the affected
+update keeps its last successful result if WUDup saw one; otherwise its status
+is shown as unknown rather than guessed. The `docker-update-from-wud` command
+remains a legacy helper that reads a todo file you provide.
 
 Pending shows current WUD health with its last check time and affected-container
 diagnostics. Collapse the summary to keep its unresolved status and last check
@@ -116,11 +106,6 @@ The Compose examples place WUD and WUDup on a private app network and set
 `WUD_API_BASE_URL=http://wud:3000` so WUDup can read WUD metadata without
 publishing WUD's port to the host. WUD 9 requires API credentials on this private
 network too; configure them as described below.
-
-After WUD API access is healthy, you can set `WUDUP_LEGACY_SCRIPTS=false`.
-Remove any WUD command triggers that call `/wud/*.sh` scripts, then recreate
-the stack so stale trigger configuration is gone. In that mode, WebUI pending
-behavior is API-first.
 
 ## Tracked Containers
 
