@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -547,3 +548,109 @@ def test_login_requires_csrf_origin_headers(tmp_path: Path) -> None:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "origin header is required"
+
+
+def test_concurrent_login_attempts_cannot_exceed_failure_limit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(web_auth_module.time, "monotonic", lambda: 1_000.0)
+    app = create_app(environ=_web_env(tmp_path))
+    setup_client = TestClient(app)
+    _setup_admin(setup_client)
+    client = TestClient(app)
+    headers = _csrf_headers(client)
+    attempts = 20
+    verified = []
+    release = threading.Event()
+
+    def slow_failed_verify(_settings, _username, _password):
+        verified.append(1)
+        release.wait(timeout=10)
+
+    monkeypatch.setattr(web_auth_module, "_verify_web_user", slow_failed_verify)
+    responses = []
+
+    def attempt() -> None:
+        responses.append(
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": "wrong"},
+                headers=headers,
+            )
+        )
+
+    threads = [threading.Thread(target=attempt) for _ in range(attempts)]
+    for thread in threads:
+        thread.start()
+    # Requests over the limit are refused without waiting on verification.
+    for _ in range(1000):
+        if len(responses) >= attempts - web_auth_module.LOGIN_THROTTLE_MAX_FAILURES:
+            break
+        threading.Event().wait(0.01)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert len(verified) == web_auth_module.LOGIN_THROTTLE_MAX_FAILURES
+    assert len(responses) == attempts
+    for response in responses:
+        _assert_generic_auth_failed(response)
+    assert not app.state.web_login_pending
+    assert not app.state.web_login_client_pending
+
+
+def test_login_attempt_reservation_is_released_after_server_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(environ=_web_env(tmp_path))
+    setup_client = TestClient(app)
+    _setup_admin(setup_client)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    def failing_verify(_settings, _username, _password):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(web_auth_module, "_verify_web_user", failing_verify)
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "wrong"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 500
+    assert not app.state.web_login_pending
+    assert not app.state.web_login_client_pending
+
+
+def test_unknown_username_runs_the_same_password_hash_check(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    setup_client = _client(tmp_path)
+    _setup_admin(setup_client)
+    settings = setup_client.app.state.web_settings
+    real_hasher = web_auth_module.PASSWORD_HASHER
+    verified_hashes = []
+
+    class RecordingHasher:
+        def verify(self, password_hash, password):
+            verified_hashes.append(password_hash)
+            return real_hasher.verify(password_hash, password)
+
+        def hash(self, password):
+            return real_hasher.hash(password)
+
+        def check_needs_rehash(self, password_hash):
+            return real_hasher.check_needs_rehash(password_hash)
+
+    monkeypatch.setattr(web_auth_module, "_password_hasher", RecordingHasher)
+
+    assert web_auth_module._verify_web_user(settings, "missing", "wrong") is None
+    assert web_auth_module._verify_web_user(settings, "admin", "wrong") is None
+
+    assert len(verified_hashes) == 2
+    assert verified_hashes[0] == web_auth_module._dummy_password_hash()
+    assert verified_hashes[0].startswith("$argon2")
+    assert verified_hashes[1] != verified_hashes[0]

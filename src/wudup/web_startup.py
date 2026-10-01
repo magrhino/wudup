@@ -11,7 +11,7 @@ from contextlib import ExitStack
 import uvicorn
 from fastapi import FastAPI
 
-from .web_auth import _setup_url
+from .web_auth import _setup_url, weak_auth_token_warning
 from .web_models import WebSettings
 
 DOCTOR_COMMAND = "docker compose exec wudup doctor"
@@ -84,6 +84,9 @@ def print_web_startup_summary(
         f"  WUD output: {settings.config.wud_out_file}",
         f"  Doctor: {DOCTOR_COMMAND}",
     ]
+    token_warning = weak_auth_token_warning(settings)
+    if token_warning:
+        lines.append(f"  Warning: {token_warning}")
     print("\n".join(lines), file=sys.stderr)
 
 

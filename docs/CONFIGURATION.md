@@ -38,7 +38,7 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 | `WUDUP_IMAGE` | `ghcr.io/magrhino/wudup:latest` | Image reference used by the long-running WebUI Compose examples. Use a `-trivy` tag when enabling candidate security scan refreshes in a container. |
 | `WEBUI_LOG_DIR` | `./logs` | Host-side directory mounted at `/logs` by the long-running WebUI Compose examples; persists updater logs and SQLite state. |
 | `WEBUI_HTTP_BIND` | `127.0.0.1` | Host-side bind address used by the long-running WebUI Compose examples. Keep loopback for first run; use a LAN address or `0.0.0.0` only with `WUD_WEB_PUBLIC_ORIGIN` configured. |
-| `WUD_WEB_TOKEN` | unset | Optional bearer token for API clients after first-run setup. This token is not accepted by the browser login form and does not bypass setup. |
+| `WUD_WEB_TOKEN` | unset | Optional bearer token for API clients after first-run setup. Use a long random value of at least 32 characters; startup warns about shorter tokens. Repeated wrong tokens from one client address are locked out for a minute, separately from password logins. This token is not accepted by the browser login form and does not bypass setup. |
 | `WUD_WEB_DEV_NO_AUTH` | `false` | Explicitly disables WebUI API auth for tests or local development only. |
 | `WUD_WEB_ALLOWED_ORIGINS` | same origin only | Comma-separated extra origins accepted by the CSRF/Origin checks for login, logout, and future mutating WebUI routes. |
 | `WUD_WEB_PUBLIC_ORIGIN` | unset | Public `http://` or `https://` origin used for setup links, CSRF origin checks, allowed-host derivation, and secure-cookie auto-detection. Set this for LAN or reverse-proxy exposure. |

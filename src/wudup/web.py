@@ -80,6 +80,9 @@ def create_app(
     app.state.web_login_throttle_lock = Lock()
     app.state.web_login_throttle = {}
     app.state.web_login_client_throttle = {}
+    app.state.web_login_pending = {}
+    app.state.web_login_client_pending = {}
+    app.state.web_bearer_throttle = {}
     web_scheduler.initialize_auto_update_scheduler_state(app.state)
     web_wud_api.initialize_pending_observation_cache(active_settings)
     web_wud_api.startup_probe(active_settings)
