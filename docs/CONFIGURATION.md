@@ -61,8 +61,8 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 | `WUD_API_AUTH_BEARER_TOKEN_FILE` / `WUD_API_AUTH_BEARER_TOKEN` | unset | Optional bearer token for WUDup's outbound WUD API calls. Prefer the `_FILE` form in containers; direct values are intended for local development. Do not combine bearer and basic auth. |
 | `WUD_API_AUTH_BASIC_USER` + `WUD_API_AUTH_BASIC_PASSWORD_FILE` / `WUD_API_AUTH_BASIC_PASSWORD` | unset | Optional basic auth credentials for WUDup's outbound WUD API calls. The user and one password source must be set together. Prefer the `_FILE` password form in containers. |
 | `WUD_API_HEADERS_FILE` | unset | Optional UTF-8 JSON object of static WUD API request headers, such as `{"X-Api-Key":"example"}`. Header names and values are validated, values are redacted, and an `Authorization` header cannot be combined with bearer or basic auth. |
-| `WUD_PENDING_SOURCE` | `api` | WebUI pending-update source: `api` derives pending lines from WUD `/api/containers`, `file` reads `WUD_OUT_FILE`, and `auto` uses API metadata when usable before falling back to `WUD_OUT_FILE`. Host CLI update commands remain legacy file-mode only. |
-| `WUDUP_LEGACY_SCRIPTS` | `true` | Set `false` to disable WebUI `images.todo` fallback and sync no WUD command scripts. Remove WUD command triggers for legacy scripts and recreate the stack before disabling legacy mode. |
+| `WUD_PENDING_SOURCE` | `api` | WebUI pending-update source: `api` derives pending lines from WUD `/api/containers`, `file` reads `WUD_OUT_FILE`, and `auto` uses API metadata when usable before falling back to `WUD_OUT_FILE`. |
+| `WUDUP_LEGACY_SCRIPTS` | `true` | Set `false` to disable the deprecated WebUI `images.todo` fallback and force the WUD API pending source. |
 
 WUD 9 requires authentication for `/api/containers` even on a private Docker
 network. A successful unauthenticated `/health` probe does not establish API

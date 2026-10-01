@@ -22,9 +22,13 @@ has_arg(){
 }
 
 removed_command(){
-  printf '%s was removed: WUDup now runs as the WebUI container and no longer ships WUD shell scripts, the host updates wrapper, or TrueNAS status checks.\n' "$1" >&2
+  printf '%s\n' "$1" >&2
   printf 'Use the WebUI (default command), doctor, or docker-update-from-wud. The legacy-file-mode git tag keeps the old behavior for reference.\n' >&2
   exit 2
+}
+
+removed_feature_message(){
+  printf '%s was removed: WUDup now runs as the WebUI container and no longer ships WUD shell scripts, the host updates wrapper, or TrueNAS status checks.' "$1"
 }
 
 warn_ignored_env(){
@@ -36,15 +40,17 @@ warn_ignored_env(){
   done
 }
 
-if [[ "$#" -eq 0 || "$1" == -* ]]; then
-  set -- web "$@"
+if [[ "$#" -eq 0 ]]; then
+  set -- web
+elif [[ "$1" == -* ]]; then
+  removed_command "Options without a command (such as $1) used to run the removed updates wrapper. Pass a command before the options."
 fi
 
 warn_ignored_env
 
 case "$1" in
   sync-wud-scripts|updates|truenas-status-export)
-    removed_command "$1"
+    removed_command "$(removed_feature_message "$1")"
     ;;
   doctor)
     shift

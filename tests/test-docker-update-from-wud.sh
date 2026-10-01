@@ -158,6 +158,29 @@ set_manifest_failure(){
   printf '%s\n' "$stderr" > "$FAKE_ROOT/manifests/$safe.stderr"
 }
 
+# Post-pull hook simulating an external WUD-file writer that appends
+# HOOK_APPEND_LINE under the shared <file>.lock directory lock.
+write_locked_append_hook(){
+  cat > "$FAKE_ROOT/post-pull-hook" <<'HOOK'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Simulate an external WUD-file writer that appends under the shared lock.
+lock="${HOOK_WUD_FILE:?}.lock"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  if (( waited >= ${HOOK_LOCK_TIMEOUT:-30} )); then
+    printf 'Timed out waiting for WUD file lock: %s\n' "$lock" >&2
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+printf '%s\n' "${HOOK_APPEND_LINE:?}" >> "$HOOK_WUD_FILE"
+rmdir "$lock"
+HOOK
+  chmod +x "$FAKE_ROOT/post-pull-hook"
+}
+
 run_script(){
   local env_args=()
   while [[ "$#" -gt 0 && "$1" == *=* ]]; do
@@ -373,6 +396,21 @@ HOOK
   assert_status 0
   assert_file_equals "$FAKE_ROOT/wud-during-pull.txt" ''
   assert_file_equals "$WUD_FILE" ''
+  teardown_case
+}
+
+test_same_image_wud_callback_survives_successful_update(){
+  setup_case
+  printf 'repo/app:one\nrepo/app:two\nrepo/app:three\n' > "$WUD_FILE"
+  make_single_service_stack two "$BASE/two" docker-compose.yml repo/app:two cid-two
+  set_image_state repo/app:two old-two sha256:old-two
+  set_image_after_pull repo/app:two new-two sha256:new-two
+  write_locked_append_hook
+
+  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_LINE=repo/app:two HOOK_LOCK_TIMEOUT=0 --yes --only-lines 2 --remove-lines-before-run 1,3
+
+  assert_status 0
+  assert_file_equals "$WUD_FILE" 'repo/app:two'
   teardown_case
 }
 
@@ -750,6 +788,22 @@ test_pinned_digest_match_allows_cleanup(){
   teardown_case
 }
 
+test_cleanup_removes_successful_raw_line_not_current_line_number(){
+  setup_case
+  printf 'repo/b:latest\n' > "$WUD_FILE"
+  make_single_service_stack app "$BASE/app" docker-compose.yml repo/b:latest
+  set_image_state repo/b:latest old "$OLD_DIGEST"
+  set_image_after_pull repo/b:latest new "$NEW_DIGEST"
+  write_locked_append_hook
+
+  run_script HOOK_WUD_FILE="$WUD_FILE" HOOK_APPEND_LINE=repo/a:latest --yes
+
+  assert_status 0
+  assert_file_equals "$WUD_FILE" 'repo/a:latest'
+  [[ ! -d "$WUD_FILE.lock" ]] || fail "WUD lock directory was left behind"
+  teardown_case
+}
+
 test_cleanup_preserves_wud_file_owner_and_mode(){
   setup_case
   printf '%s\n' "$APP_LATEST_IMAGE" > "$WUD_FILE"
@@ -1038,6 +1092,7 @@ main(){
   run_test test_only_lines_updates_subset_and_keeps_unselected
   run_test test_only_lines_keeps_unselected_duplicate_raw_line
   run_test test_remove_lines_before_run_removes_requested_lines_before_pull
+  run_test test_same_image_wud_callback_survives_successful_update
   run_test test_cleanup_does_not_resurrect_replaced_unselected_line
   run_test test_parent_wud_lock_is_reused_and_released
   run_test test_invalid_line_spec_fails_before_docker_calls
@@ -1056,6 +1111,7 @@ main(){
   run_test test_unhealthy_tag_update_rolls_back_and_writes_incident_log
   run_test test_pinned_digest_mismatch_prevents_cleanup
   run_test test_pinned_digest_match_allows_cleanup
+  run_test test_cleanup_removes_successful_raw_line_not_current_line_number
   run_test test_cleanup_preserves_wud_file_owner_and_mode
   run_test test_out_owner_config_accepts_out_guid_for_logs_and_cleanup
   run_test test_out_owner_config_requires_uid_and_group

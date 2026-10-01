@@ -7,6 +7,9 @@ TEST_TMP=""
 APP_DIR=""
 LAST_STATUS=0
 
+# Keep developer shell settings from leaking into entrypoint output.
+unset WUD_LOG_DIR WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUDUP_LEGACY_SCRIPTS
+
 fail(){
   printf 'not ok - %s\n' "$*" >&2
   if [[ -n "${TEST_TMP:-}" && -f "$TEST_TMP/output.log" ]]; then
@@ -90,11 +93,26 @@ test_default_runs_web(){
   teardown_case
 }
 
-test_leading_flag_runs_web(){
+test_leading_flag_exits_with_guidance(){
+  local flag
+  for flag in --yes --dry-run; do
+    setup_case
+    PYTHON_BIN="$TEST_TMP/python" run_entrypoint "$flag"
+    assert_status 2
+    assert_output_contains "Options without a command (such as $flag) used to run the removed updates wrapper"
+    assert_output_contains "legacy-file-mode"
+    if grep -q '^python\|^docker-update-from-wud' "$TEST_TMP/output.log"; then
+      fail "$flag dispatched to another command"
+    fi
+    teardown_case
+  done
+}
+
+test_leading_flag_guidance_prints_arguments_literally(){
   setup_case
-  PYTHON_BIN="$TEST_TMP/python" run_entrypoint --host 0.0.0.0
-  assert_status 0
-  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] [--host] [0.0.0.0]"
+  PYTHON_BIN="$TEST_TMP/python" run_entrypoint '--%s%n%d'
+  assert_status 2
+  assert_output_contains "Options without a command (such as --%s%n%d) used to run the removed updates wrapper"
   teardown_case
 }
 
@@ -192,7 +210,8 @@ run_test(){
 
 main(){
   run_test test_default_runs_web
-  run_test test_leading_flag_runs_web
+  run_test test_leading_flag_exits_with_guidance
+  run_test test_leading_flag_guidance_prints_arguments_literally
   run_test test_doctor_dispatch_injects_paths
   run_test test_updater_dispatch_injects_missing_paths
   run_test test_updater_dispatch_preserves_explicit_paths

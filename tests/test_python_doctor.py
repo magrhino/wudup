@@ -33,8 +33,6 @@ class DoctorTests(unittest.TestCase):
         self.out_dir.mkdir()
         self.log_dir = self.root / "logs"
         self.log_dir.mkdir()
-        self.app_dir = self.root / "app"
-        self.app_dir.mkdir()
         self._write_docker()
         self._write_compose()
 
@@ -50,6 +48,20 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Result: 0 failure(s)", stdout)
         for removed in ("TrueNAS", "WUD script sync", "packaged WUD scripts", "sudo", "updater executable"):
             self.assertNotIn(removed, stdout)
+
+    def test_doctor_explains_missing_wud_file_without_failing(self) -> None:
+        wud_file = self.out_dir / "images.todo"
+        self.assertFalse(wud_file.exists())
+
+        status, stdout = self._run_doctor()
+
+        self.assertEqual(status, 0, stdout)
+        self.assertIn(
+            f"[PASS] WUD_OUT_FILE: {wud_file} does not exist yet; "
+            "docker-update-from-wud and the file pending source need it before "
+            "they can run",
+            stdout,
+        )
 
     def test_doctor_fails_when_no_compose_stacks_are_found(self) -> None:
         for path in self.stack_dir.iterdir():
@@ -206,7 +218,6 @@ class DoctorTests(unittest.TestCase):
             "DOCKER_BASE": str(self.docker_base),
             "WUD_OUT_FILE": str(self.out_dir / "images.todo"),
             "WUD_LOG_DIR": str(self.log_dir),
-            "WUD_APP_DIR": str(self.app_dir),
         }
         if env_overrides is not None:
             env.update(env_overrides)
@@ -225,7 +236,6 @@ class DoctorTests(unittest.TestCase):
             "docker_base": self.docker_base,
             "wud_file": self.out_dir / "images.todo",
             "log_dir": self.log_dir,
-            "app_dir": self.app_dir,
         }
         defaults.update(overrides)
         return DoctorOptions(**defaults)  # type: ignore[arg-type]

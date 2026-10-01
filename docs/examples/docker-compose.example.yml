@@ -27,7 +27,9 @@ services:
       # Deprecated file pending source: WUDup no longer ships a WUD callback
       # that writes images.todo. Prefer docker-compose.webui.yml (API source).
       - wud-out:/out
-    command: [ "docker-update-from-wud", "--dry-run" ]
+    # Checks Docker access, paths, and Compose discovery without changing anything.
+    # Preview queued updates with: docker compose run --rm wudup docker-update-from-wud --dry-run
+    command: [ "doctor" ]
 
 volumes:
   wud-out:

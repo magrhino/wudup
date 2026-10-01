@@ -29,7 +29,6 @@ class DoctorOptions:
     docker_base: Path
     wud_file: Path
     log_dir: Path
-    app_dir: Path
     host_docker_base: Path | None = None
     docker_host: str = ""
     compose_ignore_paths: tuple[Path, ...] = ()
@@ -321,7 +320,12 @@ class Doctor:
         self._record("PASS", "WUD_OUT_FILE directory", str(parent))
 
         if not wud_file.exists():
-            self._record("PASS", "WUD_OUT_FILE", f"{wud_file} may be created by WUD")
+            self._record(
+                "PASS",
+                "WUD_OUT_FILE",
+                f"{wud_file} does not exist yet; docker-update-from-wud and the "
+                "file pending source need it before they can run",
+            )
         elif not wud_file.is_file():
             self._record("FAIL", "WUD_OUT_FILE", f"{wud_file} is not a file")
         elif not os.access(wud_file, os.R_OK | os.W_OK):
@@ -631,7 +635,6 @@ def options_from_namespace(
     environ: Mapping[str, str],
 ) -> DoctorOptions:
     repo_path = Path(repo_root)
-    app_dir = Path(environ.get("WUD_APP_DIR") or _default_app_dir(repo_path))
     docker_base_label = (
         str(getattr(args, "base", "") or "")
         or environ.get("DOCKER_BASE")
@@ -660,18 +663,11 @@ def options_from_namespace(
         docker_base=docker_base,
         wud_file=wud_file,
         log_dir=log_dir,
-        app_dir=app_dir,
         host_docker_base=Path(host_docker_base) if host_docker_base else None,
         docker_host=environ.get("DOCKER_HOST") or "",
         compose_ignore_paths=compose_ignore_paths,
         no_color=bool(getattr(args, "no_color", False)),
     )
-
-
-def _default_app_dir(repo_root: Path) -> str:
-    if (DEFAULT_CONTAINER_APP_DIR / "wud").is_dir():
-        return str(DEFAULT_CONTAINER_APP_DIR)
-    return str(repo_root)
 
 
 def _default_docker_base(repo_root: Path) -> str:
