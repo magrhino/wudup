@@ -12,7 +12,11 @@ from .compose import (
     ComposeRuntimePortIssue,
     ComposeStack,
 )
-from .compose_rewrite import render_compose_digest_pins, render_compose_digest_unpins
+from .compose_rewrite import (
+    compose_config_wud_tag_transforms,
+    render_compose_digest_pins,
+    render_compose_digest_unpins,
+)
 from .config import UpdaterConfig
 from .digest_verifier import DigestVerifier, DockerManifestResolver
 from .docker_cli import DockerCli
@@ -391,8 +395,14 @@ def _digest_pin_render_issues(
 def digest_unpin_plan_issues(
     matches: Sequence[Match],
     digest_unpin_updates_by_stack: Mapping[int, Sequence[DigestUnpinUpdate]],
-) -> list[DryRunPlanIssue]:
+) -> tuple[
+    list[DryRunPlanIssue],
+    dict[int, dict[tuple[str, str], tuple[tuple[str, str], ...]]],
+]:
+    """Return render issues and the managed transforms each unpin would add."""
+
     issues: list[DryRunPlanIssue] = []
+    transforms: dict[int, dict[tuple[str, str], tuple[tuple[str, str], ...]]] = {}
     stack_by_index = {stack.index: stack for stack in _stacks_to_update(matches)}
     for stack_index, updates in sorted(digest_unpin_updates_by_stack.items()):
         if not updates:
@@ -401,11 +411,17 @@ def digest_unpin_plan_issues(
         if stack is None:
             continue
         try:
-            render_compose_digest_unpins(
+            _rendered, applied = render_compose_digest_unpins(
                 stack.directory / stack.file,
                 updates,
                 stack_name=stack.name,
+                config_transforms=compose_config_wud_tag_transforms(stack.service_images),
             )
+            transforms[stack_index] = {
+                (item.old_image, item.resolved_tag): item.added_transforms
+                for item in applied
+                if item.added_transforms
+            }
         except ComposeTagRewriteError as exc:
             issues.append(
                 DryRunPlanIssue(
@@ -415,7 +431,7 @@ def digest_unpin_plan_issues(
                     stack=stack.name,
                 )
             )
-    return issues
+    return issues, transforms
 
 
 def preflight_issues(

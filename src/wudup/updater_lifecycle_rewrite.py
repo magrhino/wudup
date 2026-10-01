@@ -241,6 +241,9 @@ class _LifecycleRewriteMixin:
                 compose_path,
                 state.digest_unpin_updates,
                 stack_name=stack.name,
+                config_transforms=compose_rewrite.compose_config_wud_tag_transforms(
+                    stack.service_images
+                ),
                 written_hashes=state.compose_written_hashes,
                 expected_source_hash=self._expected_compose_hash(state),
             )

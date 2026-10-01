@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 
 from .compose import ComposeStack
-from .compose_rewrite import WUD_TAG_TRANSFORM_LABEL, compose_unescape_dollars
+from .compose_rewrite import compose_config_wud_tag_transforms
 from .digest_provenance import DigestTagProvenance
 from .updater_models import DigestPinUpdate
 from .web_models import (
@@ -52,12 +52,7 @@ def retag_update_identity(item: RetagPlanUpdate) -> str:
 def retag_config_transforms(stack: ComposeStack) -> dict[str, str]:
     """Each service's wud.tag.transform as resolved by Compose config (extends, variables)."""
 
-    return {
-        service_image.service: compose_unescape_dollars(
-            dict(service_image.labels).get(WUD_TAG_TRANSFORM_LABEL, "")
-        )
-        for service_image in stack.service_images
-    }
+    return compose_config_wud_tag_transforms(stack.service_images)
 
 
 def retag_update_service(item: RetagPlanUpdate) -> str:

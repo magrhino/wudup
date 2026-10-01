@@ -1701,6 +1701,8 @@ class PlanDigestUnpinUpdate(BaseModel):
     label_value: str
     services: list[str] = Field(default_factory=list)
     digest_provenance: DigestTagProvenance | None = None
+    transform_label_value: str = ""
+    transform_services: list[str] = Field(default_factory=list)
 
 class PlanAction(BaseModel):
     kind: str

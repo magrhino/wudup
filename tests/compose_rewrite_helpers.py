@@ -6,6 +6,7 @@ from pathlib import Path
 
 from wudup.compose import ComposeStack, ServiceImage
 from wudup.compose_rewrite import compose_escape_dollars, exact_tags_regex
+from wudup.tag_streams import retag_tag_include_regex
 from wudup.updater_models import (
     DigestPinUpdate,
     DigestUnpinUpdate,
@@ -100,6 +101,6 @@ class ComposeRewriteTestCase(unittest.TestCase):
             watch_tag=resolved_tag,
             marker=f"wudup.resolved-tag={resolved_tag}",
             label_key="wud.tag.include",
-            label_value=compose_escape_dollars(exact_tags_regex((resolved_tag,))),
+            label_value=compose_escape_dollars(retag_tag_include_regex(resolved_tag)),
             services=services,
         )

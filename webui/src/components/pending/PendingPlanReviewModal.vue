@@ -121,6 +121,11 @@ const reviewReasons = computed(() => {
   ].filter(Boolean);
 });
 
+// Compose escapes "$" as "$$"; show the regex WUD actually receives.
+function composeLabelValue(value: string): string {
+  return value.replaceAll("$$", "$");
+}
+
 function tagStreamDecisionsComplete(): boolean {
   return props.tagStreamDecisionIssues.every(
     (issue) =>
@@ -432,6 +437,15 @@ function tagStreamRulePreview(issue: PlanIssue): string {
               <code>{{ item.update.source_image }}</code>
               <span aria-hidden="true"> -> </span>
               <code>{{ item.update.tag_image }}</code>
+              <br />
+              <code>{{ item.update.label_key }}={{ composeLabelValue(item.update.label_value) }}</code>
+              <template v-if="item.update.transform_label_value">
+                <br />
+                <code>wud.tag.transform={{ item.update.transform_label_value }}</code>
+                <span v-if="item.update.transform_services?.length">
+                  ({{ item.update.transform_services.join(", ") }})
+                </span>
+              </template>
             </em>
           </div>
         </div>

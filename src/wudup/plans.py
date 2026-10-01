@@ -179,6 +179,10 @@ class _PlanBuilder(_UpdateScopeMixin):
         init=False,
         default_factory=dict,
     )
+    # Managed wud.tag.transform (service, value) pairs each unpin adds, by stack.
+    digest_unpin_transforms_by_stack: dict[
+        int, dict[tuple[str, str], tuple[tuple[str, str], ...]]
+    ] = field(init=False, default_factory=dict)
     tag_stream_updates_by_stack: dict[int, tuple[TagStreamUpdate, ...]] = field(
         init=False,
         default_factory=dict,
@@ -347,9 +351,10 @@ class _PlanBuilder(_UpdateScopeMixin):
                 )
             }
             issues.extend(digest_pin_result.issues)
-            issues.extend(
-                digest_unpin_plan_issues(matches, self.digest_unpin_updates_by_stack)
+            unpin_issues, self.digest_unpin_transforms_by_stack = digest_unpin_plan_issues(
+                matches, self.digest_unpin_updates_by_stack
             )
+            issues.extend(unpin_issues)
             issues.extend(
                 preflight_issues(self.config, self.compose, matches, self._update_scope)
             )
@@ -582,6 +587,11 @@ class _PlanBuilder(_UpdateScopeMixin):
                         update,
                         provenance_source="plan",
                         provenance_confidence="recovered",
+                    ),
+                    **_unpin_transform_fields(
+                        self.digest_unpin_transforms_by_stack.get(stack.index, {}).get(
+                            (update.old_image, update.resolved_tag), ()
+                        )
                     ),
                 )
                 for update in digest_unpin_updates
@@ -1464,3 +1474,14 @@ def _service_count(stacks: Sequence[DryRunPlanStack]) -> int:
         for service in stack.services or stack.pull_services:
             services.add((stack.name, service))
     return len(services)
+
+
+def _unpin_transform_fields(added: Sequence[tuple[str, str]]) -> dict[str, object]:
+    """Plan fields for the transform an unpin adds; every one comes from the same tag."""
+
+    if not added:
+        return {}
+    return {
+        "transform_label_value": added[0][1],
+        "transform_services": tuple(sorted(service for service, _value in added)),
+    }

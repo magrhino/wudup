@@ -11,6 +11,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
@@ -63,6 +64,9 @@ from .updater_models import (
     TagStreamUpdate,
     TagUpdate,
 )
+
+if TYPE_CHECKING:
+    from .compose import ServiceImage
 
 RESOLVED_TAG_MARKER_PREFIXES = (
     DIGEST_PIN_MARKER_PREFIX,
@@ -554,6 +558,7 @@ def apply_compose_digest_unpins(
     stack_name: str = "",
     written_hashes: list[str] | None = None,
     expected_source_hash: str | None = None,
+    config_transforms: Mapping[str, str] | None = None,
 ) -> tuple[AppliedDigestUnpinUpdate, ...]:
     """Rewrite digest-pinned images back to tag images plus WUD watch metadata."""
 
@@ -562,6 +567,7 @@ def apply_compose_digest_unpins(
         compose_path,
         updates,
         stack_name=stack_name,
+        config_transforms=config_transforms,
     )
     if updates and not rendered:
         raise ComposeTagRewriteError("Compose digest-unpin rewrite produced no output.")
@@ -774,15 +780,20 @@ def render_compose_digest_unpins(
     updates: Sequence[DigestUnpinUpdate],
     *,
     stack_name: str = "",
+    config_transforms: Mapping[str, str] | None = None,
 ) -> tuple[str, tuple[AppliedDigestUnpinUpdate, ...]]:
-    """Return Compose YAML with digest-pinned images rewritten to tag images."""
+    """Return Compose YAML with digest-pinned images rewritten to tag images.
+
+    ``config_transforms`` works as in :func:`render_compose_retag_updates`.
+    """
 
     if not updates:
         return compose_path.read_text(encoding="utf-8"), ()
 
-    source, yaml, parsed, services = _load_compose_yaml(compose_path)
+    source, yaml, parsed, services = _load_compose_yaml(compose_path, width=4096)
     line_offsets = _line_start_offsets(source)
     counts = {id(update): 0 for update in updates}
+    added_transforms: dict[int, list[tuple[str, str]]] = {id(update): [] for update in updates}
     seen_spans: set[tuple[int, int]] = set()
 
     for update in updates:
@@ -826,6 +837,11 @@ def render_compose_digest_unpins(
                 update.label_key,
                 update.label_value,
             )
+            added_transforms[id(update)].extend(
+                _managed_transform_addition(
+                    service_config, service, update.watch_tag, update.label_value, config_transforms
+                )
+            )
             _remove_service_resolved_tag_marker(
                 services,
                 service,
@@ -848,6 +864,7 @@ def render_compose_digest_unpins(
             label_value=update.label_value,
             services=update.services,
             replacements=counts[id(update)],
+            added_transforms=tuple(added_transforms[id(update)]),
         )
         for update in updates
     )
@@ -1286,6 +1303,19 @@ def apply_compose_tracking_label(
         compose_path, rendered, prefix="tracking-repair",
         expected_source_hash=expected_source_hash,
     )
+
+
+def compose_config_wud_tag_transforms(
+    service_images: Iterable[ServiceImage],
+) -> dict[str, str]:
+    """Each service's wud.tag.transform as resolved by Compose config (extends, variables)."""
+
+    return {
+        service_image.service: compose_unescape_dollars(
+            dict(service_image.labels).get(WUD_TAG_TRANSFORM_LABEL, "")
+        )
+        for service_image in service_images
+    }
 
 
 def managed_wud_tag_transform(tag: str) -> str:

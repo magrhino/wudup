@@ -264,6 +264,8 @@ class AppliedDigestPinUpdate(DigestPinUpdate):
 @dataclass(frozen=True)
 class AppliedDigestUnpinUpdate(DigestUnpinUpdate):
     replacements: int
+    # (service, wud.tag.transform) pairs added beside the release-line include.
+    added_transforms: tuple[tuple[str, str], ...] = ()
 
 
 class DigestPinLabelRewriteApprovalRequired(ComposeTagRewriteError):
