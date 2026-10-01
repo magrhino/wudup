@@ -275,12 +275,7 @@ def _doctor_client(
         {
             "DOCKER_HOST": "tcp://docker:2375",
             "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_SYNC_SCRIPTS": "true",
-            "WUD_SCRIPTS_DIR": str(tmp_path / "managed-wud"),
             "WUD_APP_DIR": str(tmp_path / "app"),
-            "WUDUP_UPDATER": str(tmp_path / "app" / "bin" / "docker-update-from-wud"),
-            "WUDUP_USE_SUDO": "false",
-            "TRUENAS_STATUS_CHECK": "false",
             "WUD_API_BASE_URL": "http://127.0.0.1:1",
             "WUD_PENDING_SOURCE": "file",
             **(env or {}),
@@ -483,25 +478,6 @@ def _write_doctor_files(env: Mapping[str, str]) -> None:
     )
     Path(env["WUD_LOG_DIR"]).mkdir(parents=True, exist_ok=True)
     Path(env["WUD_OUT_FILE"]).parent.mkdir(parents=True, exist_ok=True)
-    Path(env["WUD_SCRIPTS_DIR"]).mkdir(parents=True, exist_ok=True)
-    app_dir = Path(env["WUD_APP_DIR"])
-    packaged_scripts = app_dir / "wud"
-    packaged_scripts.mkdir(parents=True)
-    for name in (
-        "on-update.sh",
-        "append-updates.sh",
-        "release-parser.sh",
-        "release-notes-to-discord.sh",
-        "github-release-embed.sh",
-        "tag-manager.sh",
-    ):
-        script = packaged_scripts / name
-        script.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
-        script.chmod(0o755)
-    updater = Path(env["WUDUP_UPDATER"])
-    updater.parent.mkdir(parents=True, exist_ok=True)
-    updater.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-    updater.chmod(0o755)
 
 
 def _contains_key(value: object, target: str) -> bool:

@@ -18,17 +18,7 @@ fail(){
 setup_case(){
   TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/wud-entrypoint-test.XXXXXX")"
   APP_DIR="$TEST_TMP/app"
-  mkdir -p "$APP_DIR/bin" "$APP_DIR/wud/nested" "$TEST_TMP/docker" "$TEST_TMP/out"
-
-  cat > "$APP_DIR/bin/updates" <<'FAKE_UPDATES'
-#!/usr/bin/env bash
-printf 'updates'
-for arg in "$@"; do
-  printf ' [%s]' "$arg"
-done
-printf '\n'
-FAKE_UPDATES
-  chmod +x "$APP_DIR/bin/updates"
+  mkdir -p "$APP_DIR/bin" "$TEST_TMP/docker" "$TEST_TMP/out"
 
   cat > "$APP_DIR/bin/docker-update-from-wud" <<'FAKE_UPDATER'
 #!/usr/bin/env bash
@@ -46,39 +36,9 @@ printf 'python'
 for arg in "$@"; do
   printf ' [%s]' "$arg"
 done
-if [[ "${FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS:-}" == "1" ]]; then
-  printf ' WUD_SCRIPT_SYNC_STATUS=[%s]' "${WUD_SCRIPT_SYNC_STATUS-}"
-fi
 printf '\n'
 FAKE_PYTHON
   chmod +x "$TEST_TMP/python"
-
-  cat > "$APP_DIR/wud/on-update.sh" <<'FAKE_WUD_SCRIPT'
-#!/bin/sh
-echo on-update
-FAKE_WUD_SCRIPT
-  cat > "$APP_DIR/wud/append-updates.sh" <<'FAKE_WUD_SCRIPT'
-#!/bin/sh
-echo append-updates
-FAKE_WUD_SCRIPT
-  cat > "$APP_DIR/wud/release-parser.sh" <<'FAKE_WUD_SCRIPT'
-#!/usr/bin/env bash
-echo release-parser
-FAKE_WUD_SCRIPT
-  cat > "$APP_DIR/wud/release-notes-to-discord.sh" <<'FAKE_WUD_SCRIPT'
-#!/usr/bin/env bash
-echo release-notes-to-discord
-FAKE_WUD_SCRIPT
-  cat > "$APP_DIR/wud/github-release-embed.sh" <<'FAKE_WUD_SCRIPT'
-#!/usr/bin/env bash
-echo github-release-embed
-FAKE_WUD_SCRIPT
-  cat > "$APP_DIR/wud/tag-manager.sh" <<'FAKE_WUD_SCRIPT'
-#!/usr/bin/env bash
-echo tag-manager
-FAKE_WUD_SCRIPT
-  printf 'linuxserver/example|example/example\n' > "$APP_DIR/wud/upstreams.txt"
-  printf 'nested file\n' > "$APP_DIR/wud/nested/example.txt"
 }
 
 teardown_case(){
@@ -91,18 +51,18 @@ run_entrypoint(){
     "WUD_APP_DIR=$APP_DIR"
     "DOCKER_BASE=$TEST_TMP/docker"
     "WUD_OUT_FILE=$TEST_TMP/out/images.todo"
-    "WUD_SCRIPTS_DIR=${WUD_SCRIPTS_DIR-$TEST_TMP/managed-wud}"
     "PYTHON_BIN=${PYTHON_BIN:-}"
   )
-  if [[ -n "${WUD_SYNC_SCRIPTS+x}" ]]; then
-    env_args+=("WUD_SYNC_SCRIPTS=$WUD_SYNC_SCRIPTS")
-  fi
-  if [[ -n "${WUDUP_LEGACY_SCRIPTS+x}" ]]; then
-    env_args+=("WUDUP_LEGACY_SCRIPTS=$WUDUP_LEGACY_SCRIPTS")
-  fi
+  local name
+  for name in WUD_SYNC_SCRIPTS WUD_SCRIPTS_DIR WUDUP_LEGACY_SCRIPTS WUD_LOG_DIR; do
+    if [[ -n "${!name+x}" ]]; then
+      env_args+=("$name=${!name}")
+    fi
+  done
 
   LAST_STATUS=0
-  env "${env_args[@]}" "$SCRIPT" "$@" > "$TEST_TMP/output.log" 2>&1 ||
+  env -u WUD_SYNC_SCRIPTS -u WUD_SCRIPTS_DIR -u WUDUP_LEGACY_SCRIPTS \
+    "${env_args[@]}" "$SCRIPT" "$@" > "$TEST_TMP/output.log" 2>&1 ||
     LAST_STATUS=$?
 }
 
@@ -117,36 +77,9 @@ assert_output(){
   [[ "$actual" == "$expected" ]] || fail "expected output [$expected], got [$actual]"
 }
 
-assert_synced_scripts(){
-  local dst="${WUD_SCRIPTS_DIR:-$TEST_TMP/managed-wud}"
-  [[ -f "$dst/.wudup-managed" ]] || fail "expected synced marker file"
-  [[ -x "$dst/on-update.sh" ]] || fail "expected executable synced on-update.sh"
-  [[ -x "$dst/append-updates.sh" ]] || fail "expected executable synced append-updates.sh"
-  [[ -x "$dst/release-parser.sh" ]] || fail "expected executable synced release-parser.sh"
-  [[ -x "$dst/release-notes-to-discord.sh" ]] || fail "expected executable synced release-notes-to-discord.sh"
-  [[ -x "$dst/github-release-embed.sh" ]] || fail "expected executable synced github-release-embed.sh"
-  [[ -x "$dst/tag-manager.sh" ]] || fail "expected executable synced tag-manager.sh"
-  [[ -f "$dst/upstreams.txt" ]] || fail "expected synced upstreams.txt"
-  [[ -f "$dst/nested/example.txt" ]] || fail "expected synced nested file"
-}
-
-assert_synced_marker_only(){
-  local dst="${WUD_SCRIPTS_DIR:-$TEST_TMP/managed-wud}"
-  [[ -f "$dst/.wudup-managed" ]] || fail "expected synced marker file"
-  [[ ! -e "$dst/append-updates.sh" ]] || fail "legacy append-updates.sh was synced"
-  [[ ! -e "$dst/on-update.sh" ]] || fail "legacy on-update.sh was synced"
-  [[ ! -e "$dst/release-parser.sh" ]] || fail "legacy release-parser.sh was synced"
-  [[ ! -e "$dst/release-notes-to-discord.sh" ]] || fail "legacy release-notes-to-discord.sh was synced"
-  [[ ! -e "$dst/github-release-embed.sh" ]] || fail "legacy github-release-embed.sh was synced"
-  [[ ! -e "$dst/tag-manager.sh" ]] || fail "legacy tag-manager.sh was synced"
-}
-
-assert_refuses_sync_dir(){
-  local dir="$1"
-
-  WUD_SCRIPTS_DIR="$dir" run_entrypoint sync-wud-scripts
-  assert_status 1
-  grep -q 'Refusing unsafe WUD_SCRIPTS_DIR' "$TEST_TMP/output.log" || fail "missing unsafe destination message for $dir"
+assert_output_contains(){
+  local expected="$1"
+  grep -qF -- "$expected" "$TEST_TMP/output.log" || fail "expected output to contain [$expected]"
 }
 
 test_default_runs_web(){
@@ -157,36 +90,19 @@ test_default_runs_web(){
   teardown_case
 }
 
-test_leading_flag_runs_updates(){
+test_leading_flag_runs_web(){
   setup_case
-  run_entrypoint --dry-run --file /out/images.todo
+  PYTHON_BIN="$TEST_TMP/python" run_entrypoint --host 0.0.0.0
   assert_status 0
-  assert_output 'updates [--dry-run] [--file] [/out/images.todo]'
+  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] [--host] [0.0.0.0]"
   teardown_case
 }
 
-test_updates_dispatch_passes_arguments(){
+test_doctor_dispatch_injects_paths(){
   setup_case
-  run_entrypoint updates --yes --allow-tag-updates
+  PYTHON_BIN="$TEST_TMP/python" run_entrypoint doctor --no-color
   assert_status 0
-  assert_output 'updates [--yes] [--allow-tag-updates]'
-  teardown_case
-}
-
-test_truenas_status_export_dispatches_python_cli(){
-  setup_case
-  PYTHON_BIN="$TEST_TMP/python" run_entrypoint truenas-status-export
-  assert_status 0
-  assert_output 'python [-m] [wudup.cli] [truenas-status-export]'
-  teardown_case
-}
-
-test_doctor_dispatch_injects_paths_and_skips_startup_sync(){
-  setup_case
-  PYTHON_BIN="$TEST_TMP/python" WUD_SYNC_SCRIPTS=true run_entrypoint doctor --no-color
-  assert_status 0
-  assert_output "python [-m] [wudup.cli] [doctor] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] [--scripts-dir] [$TEST_TMP/managed-wud] [--no-color]"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "doctor ran startup sync"
+  assert_output "python [-m] [wudup.cli] [doctor] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] [--no-color]"
   teardown_case
 }
 
@@ -222,86 +138,40 @@ test_web_dispatch_injects_paths(){
   teardown_case
 }
 
-test_web_exports_auto_detected_script_sync_status(){
+test_removed_commands_exit_with_guidance(){
+  local command
+  for command in updates sync-wud-scripts truenas-status-export; do
+    setup_case
+    PYTHON_BIN="$TEST_TMP/python" run_entrypoint "$command" --yes
+    assert_status 2
+    assert_output_contains "$command was removed"
+    assert_output_contains "legacy-file-mode"
+    if grep -q '^python\|^docker-update-from-wud' "$TEST_TMP/output.log"; then
+      fail "$command dispatched to another command"
+    fi
+    teardown_case
+  done
+}
+
+test_removed_sync_settings_warn_and_do_not_sync(){
   setup_case
   mkdir -p "$TEST_TMP/managed-wud"
-  PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
+  PYTHON_BIN="$TEST_TMP/python" WUD_SYNC_SCRIPTS=1 WUD_SCRIPTS_DIR="$TEST_TMP/managed-wud" run_entrypoint web
   assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[auto-detected]"
-  assert_synced_scripts
+  assert_output_contains "Ignoring WUD_SYNC_SCRIPTS: WUD script sync was removed"
+  assert_output_contains "Ignoring WUD_SCRIPTS_DIR: WUD script sync was removed"
+  assert_output_contains "python [-m] [wudup.cli] [web]"
+  if [[ -n "$(find "$TEST_TMP/managed-wud" -mindepth 1 -print -quit)" ]]; then
+    fail "entrypoint wrote into the old managed scripts directory"
+  fi
   teardown_case
 }
 
-test_web_exports_auto_not_detected_script_sync_status(){
+test_legacy_scripts_setting_is_not_flagged_as_ignored(){
   setup_case
-  PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
+  PYTHON_BIN="$TEST_TMP/python" WUDUP_LEGACY_SCRIPTS=false run_entrypoint web
   assert_status 0
-  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[auto-not-detected]"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "missing destination enabled sync"
-  teardown_case
-}
-
-test_web_exports_auto_not_detected_for_unsearchable_destination(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  chmod 200 "$TEST_TMP/managed-wud"
-  PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
-  chmod 700 "$TEST_TMP/managed-wud"
-  assert_status 0
-  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[auto-not-detected]"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "unsearchable destination enabled sync"
-  teardown_case
-}
-
-test_web_exports_explicit_auto_script_sync_status(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  WUD_SYNC_SCRIPTS=auto PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[auto-detected]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_web_exports_forced_script_sync_status(){
-  setup_case
-  WUD_SYNC_SCRIPTS=true PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[forced]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_web_exports_disabled_script_sync_status(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  WUD_SYNC_SCRIPTS=0 PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
-  assert_status 0
-  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[disabled]"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "disabled sync created marker"
-  teardown_case
-}
-
-test_web_exports_legacy_disabled_script_sync_status(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  WUDUP_LEGACY_SCRIPTS=FALSE PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint web
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] WUD_SCRIPT_SYNC_STATUS=[auto-detected]"
-  assert_synced_marker_only
-  teardown_case
-}
-
-test_doctor_exports_skipped_script_sync_status(){
-  setup_case
-  WUD_SYNC_SCRIPTS=true PYTHON_BIN="$TEST_TMP/python" FAKE_PYTHON_PRINT_SCRIPT_SYNC_STATUS=1 run_entrypoint doctor --no-color
-  assert_status 0
-  assert_output "python [-m] [wudup.cli] [doctor] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs] [--scripts-dir] [$TEST_TMP/managed-wud] [--no-color] WUD_SCRIPT_SYNC_STATUS=[skipped-doctor]"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "doctor ran startup sync"
+  assert_output "python [-m] [wudup.cli] [web] [--base] [$TEST_TMP/docker] [--file] [$TEST_TMP/out/images.todo] [--log-dir] [/logs]"
   teardown_case
 }
 
@@ -310,167 +180,6 @@ test_debug_command_executes_directly(){
   run_entrypoint /bin/sh -c "printf 'debug [%s]\n' \"\$1\"" shell arg
   assert_status 0
   assert_output 'debug [arg]'
-  teardown_case
-}
-
-test_sync_command_copies_scripts_and_exits(){
-  setup_case
-  run_entrypoint sync-wud-scripts
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_sync_command_copies_no_scripts_when_legacy_scripts_disabled(){
-  setup_case
-  WUDUP_LEGACY_SCRIPTS=false run_entrypoint sync-wud-scripts
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud"
-  assert_synced_marker_only
-  teardown_case
-}
-
-test_sync_command_rejects_invalid_legacy_scripts_bool(){
-  setup_case
-  WUDUP_LEGACY_SCRIPTS=disabled run_entrypoint sync-wud-scripts
-  assert_status 1
-  grep -q 'WUDUP_LEGACY_SCRIPTS must be one of true, false, 1, 0, yes, no, on, or off' "$TEST_TMP/output.log" || fail "missing invalid bool message"
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "invalid config synced scripts"
-  teardown_case
-}
-
-test_startup_auto_sync_runs_for_existing_destination(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  run_entrypoint updates --yes
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-updates [--yes]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_startup_auto_sync_skips_missing_destination(){
-  setup_case
-  run_entrypoint updates --yes
-  assert_status 0
-  assert_output 'updates [--yes]'
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "missing destination enabled sync"
-  teardown_case
-}
-
-test_startup_explicit_auto_sync_runs_for_existing_destination(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  WUD_SYNC_SCRIPTS=auto run_entrypoint updates --yes
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-updates [--yes]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_startup_explicit_auto_sync_skips_missing_destination(){
-  setup_case
-  WUD_SYNC_SCRIPTS=auto run_entrypoint updates --yes
-  assert_status 0
-  assert_output 'updates [--yes]'
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "missing destination enabled sync"
-  teardown_case
-}
-
-test_startup_sync_true_runs_before_command(){
-  setup_case
-  WUD_SYNC_SCRIPTS=true run_entrypoint updates --yes
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-updates [--yes]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_startup_sync_accepts_enabled(){
-  setup_case
-  WUD_SYNC_SCRIPTS=enabled run_entrypoint updates --yes
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-updates [--yes]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_startup_sync_accepts_legacy_one(){
-  setup_case
-  WUD_SYNC_SCRIPTS=1 run_entrypoint updates --yes
-  assert_status 0
-  assert_output "Synced WUD scripts to $TEST_TMP/managed-wud
-updates [--yes]"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_startup_sync_accepts_legacy_zero_as_disabled(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  WUD_SYNC_SCRIPTS=0 run_entrypoint updates --yes
-  assert_status 0
-  assert_output 'updates [--yes]'
-  [[ ! -e "$TEST_TMP/managed-wud/.wudup-managed" ]] || fail "legacy zero enabled sync"
-  teardown_case
-}
-
-test_sync_removes_stale_files(){
-  setup_case
-  mkdir -p "$TEST_TMP/managed-wud"
-  printf 'managed\n' > "$TEST_TMP/managed-wud/.wudup-managed"
-  printf 'stale\n' > "$TEST_TMP/managed-wud/stale.txt"
-  run_entrypoint sync-wud-scripts
-  assert_status 0
-  [[ ! -e "$TEST_TMP/managed-wud/stale.txt" ]] || fail "stale file was not removed"
-  assert_synced_scripts
-  teardown_case
-}
-
-test_sync_refuses_non_empty_unmanaged_destination(){
-  setup_case
-  mkdir -p "$TEST_TMP/unmanaged"
-  printf 'keep\n' > "$TEST_TMP/unmanaged/existing.txt"
-  WUD_SCRIPTS_DIR="$TEST_TMP/unmanaged" run_entrypoint sync-wud-scripts
-  assert_status 1
-  grep -q 'Refusing to sync into non-empty unmanaged WUD_SCRIPTS_DIR' "$TEST_TMP/output.log" || fail "missing unmanaged destination message"
-  [[ -f "$TEST_TMP/unmanaged/existing.txt" ]] || fail "unmanaged file was removed"
-  [[ ! -e "$TEST_TMP/unmanaged/on-update.sh" ]] || fail "scripts were copied to unmanaged directory"
-  teardown_case
-}
-
-test_sync_refuses_empty_destination(){
-  setup_case
-  WUD_SCRIPTS_DIR="" run_entrypoint sync-wud-scripts
-  assert_status 1
-  grep -q 'Refusing unsafe WUD_SCRIPTS_DIR: <empty>' "$TEST_TMP/output.log" || fail "missing empty destination message"
-  teardown_case
-}
-
-test_sync_refuses_reserved_destinations(){
-  setup_case
-  mkdir -p "$APP_DIR/subdir" "$TEST_TMP/docker/subdir" "$TEST_TMP/out/subdir" "$TEST_TMP/managed-wud"
-  assert_refuses_sync_dir /
-  assert_refuses_sync_dir "$APP_DIR"
-  assert_refuses_sync_dir "$APP_DIR/subdir"
-  assert_refuses_sync_dir "$TEST_TMP/docker"
-  assert_refuses_sync_dir "$TEST_TMP/docker/subdir"
-  assert_refuses_sync_dir "$TEST_TMP/out"
-  assert_refuses_sync_dir "$TEST_TMP/out/subdir"
-  assert_refuses_sync_dir "$APP_DIR/../out"
-  assert_refuses_sync_dir "$TEST_TMP/managed-wud/../out"
-  teardown_case
-}
-
-test_sync_refuses_symlinked_reserved_destination(){
-  setup_case
-  ln -s "$TEST_TMP/out" "$TEST_TMP/out-link"
-  assert_refuses_sync_dir "$TEST_TMP/out-link"
   teardown_case
 }
 
@@ -483,39 +192,16 @@ run_test(){
 
 main(){
   run_test test_default_runs_web
-  run_test test_leading_flag_runs_updates
-  run_test test_updates_dispatch_passes_arguments
-  run_test test_truenas_status_export_dispatches_python_cli
-  run_test test_doctor_dispatch_injects_paths_and_skips_startup_sync
+  run_test test_leading_flag_runs_web
+  run_test test_doctor_dispatch_injects_paths
   run_test test_updater_dispatch_injects_missing_paths
   run_test test_updater_dispatch_preserves_explicit_paths
   run_test test_updater_dispatch_preserves_explicit_log_dir
   run_test test_web_dispatch_injects_paths
-  run_test test_web_exports_auto_detected_script_sync_status
-  run_test test_web_exports_auto_not_detected_script_sync_status
-  run_test test_web_exports_auto_not_detected_for_unsearchable_destination
-  run_test test_web_exports_explicit_auto_script_sync_status
-  run_test test_web_exports_forced_script_sync_status
-  run_test test_web_exports_disabled_script_sync_status
-  run_test test_web_exports_legacy_disabled_script_sync_status
-  run_test test_doctor_exports_skipped_script_sync_status
+  run_test test_removed_commands_exit_with_guidance
+  run_test test_removed_sync_settings_warn_and_do_not_sync
+  run_test test_legacy_scripts_setting_is_not_flagged_as_ignored
   run_test test_debug_command_executes_directly
-  run_test test_sync_command_copies_scripts_and_exits
-  run_test test_sync_command_copies_no_scripts_when_legacy_scripts_disabled
-  run_test test_sync_command_rejects_invalid_legacy_scripts_bool
-  run_test test_startup_auto_sync_runs_for_existing_destination
-  run_test test_startup_auto_sync_skips_missing_destination
-  run_test test_startup_explicit_auto_sync_runs_for_existing_destination
-  run_test test_startup_explicit_auto_sync_skips_missing_destination
-  run_test test_startup_sync_true_runs_before_command
-  run_test test_startup_sync_accepts_enabled
-  run_test test_startup_sync_accepts_legacy_one
-  run_test test_startup_sync_accepts_legacy_zero_as_disabled
-  run_test test_sync_removes_stale_files
-  run_test test_sync_refuses_non_empty_unmanaged_destination
-  run_test test_sync_refuses_empty_destination
-  run_test test_sync_refuses_reserved_destinations
-  run_test test_sync_refuses_symlinked_reserved_destination
 }
 
 trap teardown_case EXIT

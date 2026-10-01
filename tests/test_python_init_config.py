@@ -4,7 +4,7 @@ import argparse
 import tempfile
 import unittest
 from collections.abc import Sequence
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -18,7 +18,6 @@ from wudup.init_config import (
     answers_from_namespace,
     generate_files,
     run_init,
-    run_init_from_namespace,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -31,33 +30,6 @@ class InitConfigTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
-
-    def test_host_config_generation(self) -> None:
-        config_file = self.root / "env"
-        answers = answers_from_namespace(
-            self._args(
-                profile="host",
-                config_file=str(config_file),
-                stack_root=str(self.root / "docker"),
-                log_dir=str(self.root / "logs"),
-                db_path=str(self.root / "logs" / "state.sqlite"),
-                no_doctor=True,
-            ),
-            environ=self._env(),
-        )
-
-        result = run_init(answers, repo_root=self.root, environ=self._env())
-
-        self.assertEqual(result.doctor_status, None)
-        content = config_file.read_text(encoding="utf-8")
-        self.assertIn(f"DOCKER_BASE={self.root / 'docker'}", content)
-        self.assertIn(
-            f"WUD_OUT_FILE={self.root / 'docker' / 'wud' / 'out' / 'images.todo'}",
-            content,
-        )
-        self.assertIn(f"WUD_LOG_DIR={self.root / 'logs'}", content)
-        self.assertIn(f"WUD_DB_PATH={self.root / 'logs' / 'state.sqlite'}", content)
-        self.assertNotIn("WUD_WEB_MUTATIONS_ENABLED", content)
 
     def test_webui_loopback_env_defaults_to_read_only(self) -> None:
         config_file = self.root / "webui.env"
@@ -295,7 +267,8 @@ class InitConfigTests(unittest.TestCase):
         config_file.write_text("existing\n", encoding="utf-8")
         answers = answers_from_namespace(
             self._args(
-                profile="host",
+                profile="helper",
+                no_compose_override=True,
                 config_file=str(config_file),
                 stack_root=str(self.root / "docker"),
                 no_doctor=True,
@@ -313,7 +286,8 @@ class InitConfigTests(unittest.TestCase):
         config_file.write_text("existing\n", encoding="utf-8")
         answers = answers_from_namespace(
             self._args(
-                profile="host",
+                profile="helper",
+                no_compose_override=True,
                 config_file=str(config_file),
                 stack_root=str(self.root / "docker"),
                 backup_existing=True,
@@ -326,7 +300,7 @@ class InitConfigTests(unittest.TestCase):
 
         self.assertEqual(len(result.backups), 1)
         self.assertEqual(result.backups[0].read_text(encoding="utf-8"), "existing\n")
-        self.assertIn("DOCKER_BASE=", config_file.read_text(encoding="utf-8"))
+        self.assertIn("HOST_DOCKER_BASE=", config_file.read_text(encoding="utf-8"))
 
     def test_existing_later_file_refuses_before_writing_any_file(self) -> None:
         config_file = self.root / "helper.env"
@@ -354,7 +328,8 @@ class InitConfigTests(unittest.TestCase):
         config_file.mkdir()
         answers = answers_from_namespace(
             self._args(
-                profile="host",
+                profile="helper",
+                no_compose_override=True,
                 config_file=str(config_file),
                 stack_root=str(self.root / "docker"),
                 backup_existing=True,
@@ -373,7 +348,8 @@ class InitConfigTests(unittest.TestCase):
         config_file = self.root / "env"
         answers = answers_from_namespace(
             self._args(
-                profile="host",
+                profile="helper",
+                no_compose_override=True,
                 config_file=str(config_file),
                 stack_root=str(self.root / "docker"),
                 dry_run=True,
@@ -387,13 +363,17 @@ class InitConfigTests(unittest.TestCase):
         self.assertFalse(config_file.exists())
         self.assertIsNone(result.doctor_status)
 
+    def test_removed_host_profile_is_rejected(self) -> None:
+        with self.assertRaisesRegex(InitConfigError, "profile must be one of"):
+            answers_from_namespace(self._args(profile="host"), environ=self._env())
+
     def test_non_interactive_requires_profile_and_stack_root(self) -> None:
         with self.assertRaisesRegex(InitConfigError, "--profile"):
             answers_from_namespace(self._args(profile=None), environ=self._env())
 
         with self.assertRaisesRegex(InitConfigError, "--stack-root"):
             answers_from_namespace(
-                self._args(profile="host", stack_root=None),
+                self._args(profile="helper", stack_root=None),
                 environ=self._env(),
             )
 
@@ -419,7 +399,7 @@ class InitConfigTests(unittest.TestCase):
             "/logs/wudup.sqlite",
         )
         self.assertIn("${WEBUI_LOG_DIR:-./logs}:/logs", service["volumes"])
-        self.assertIn("wud-scripts:/managed-wud", service["volumes"])
+        self.assertFalse(any("managed-wud" in volume for volume in service["volumes"]))
 
     def test_hardened_compose_override_uses_image_defaults_for_log_and_db(self) -> None:
         override_file = self.root / "override.yml"
@@ -586,28 +566,6 @@ class InitConfigTests(unittest.TestCase):
                     "${WUD_PENDING_SOURCE:-api}",
                 )
 
-    def test_host_doctor_status_becomes_command_status(self) -> None:
-        with mock.patch(
-            "wudup.init_config.run_doctor_from_namespace",
-            return_value=5,
-        ):
-            stdout = StringIO()
-            stderr = StringIO()
-            with redirect_stdout(stdout), redirect_stderr(stderr):
-                status = run_init_from_namespace(
-                    self._args(
-                        profile="host",
-                        config_file=str(self.root / "env"),
-                        stack_root=str(self.root / "docker"),
-                    ),
-                    repo_root=self.root,
-                    environ=self._env(),
-                )
-
-        self.assertEqual(status, 5)
-        self.assertIn("Doctor exit status: 5", stdout.getvalue())
-        self.assertEqual(stderr.getvalue(), "")
-
     def test_container_doctor_runs_only_after_interactive_confirmation(self) -> None:
         args = self._args(
             profile="helper",
@@ -652,7 +610,7 @@ class InitConfigTests(unittest.TestCase):
 
     def _args(self, **overrides: object) -> argparse.Namespace:
         values = {
-            "profile": "host",
+            "profile": "helper",
             "config_file": None,
             "compose_override": None,
             "no_compose_override": False,

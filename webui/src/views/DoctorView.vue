@@ -66,7 +66,6 @@ function categoryRank(category: string): number {
     "paths",
     "compose",
     "webui",
-    "truenas",
     "general",
   ];
   const index = order.indexOf(category);
@@ -79,9 +78,6 @@ function categoryLabel(category: string): string {
   }
   if (category === "wud-api") {
     return "WUD API";
-  }
-  if (category === "truenas") {
-    return "TrueNAS";
   }
   return category
     .split("-")

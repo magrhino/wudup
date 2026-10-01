@@ -58,7 +58,7 @@ in at `http://127.0.0.1:7417`.
 
 The WebUI opens Settings with a first-run checklist after admin setup. Keep the
 checklist visible until Docker access, WUD output sharing, Compose discovery,
-script sync, persistence, browser exposure, and mutation mode match the
+persistence, browser exposure, and mutation mode match the
 deployment you intended, or dismiss it once those checks are understood.
 
 Setup claims, password hashes, browser sessions, update runs, managed tag
@@ -70,8 +70,8 @@ lost.
 
 ## Pending Updates
 
-The WebUI can read pending updates from WUD's API, from the shared callback todo
-file, or from API-first mode with file fallback:
+The WebUI can read pending updates from WUD's API, from a shared todo file, or
+from API-first mode with file fallback:
 
 ```dotenv
 WUD_PENDING_SOURCE=api
@@ -80,10 +80,11 @@ WUD_PENDING_SOURCE=api
 ```
 
 The default `api` mode derives pending lines from WUD's `/api/containers`
-metadata over the private Compose app network. `file` uses the legacy callback
-todo file, and `auto` uses the API when usable before falling back to
-`WUD_OUT_FILE`. The host `updates` and `docker-update-from-wud` commands remain
-legacy file-mode helpers.
+metadata over the private Compose app network. `file` uses the deprecated todo
+file, which needs an external writer because WUDup no longer ships a WUD
+callback, and `auto` uses the API when usable before falling back to
+`WUD_OUT_FILE`. The `docker-update-from-wud` command remains a legacy file-mode
+helper.
 
 Pending shows current WUD health with its last check time and affected-container
 diagnostics. Collapse the summary to keep its unresolved status and last check
@@ -117,10 +118,9 @@ publishing WUD's port to the host. WUD 9 requires API credentials on this privat
 network too; configure them as described below.
 
 After WUD API access is healthy, you can set `WUDUP_LEGACY_SCRIPTS=false`.
-Remove WUD command triggers that call `/wud/append-updates.sh`,
-`/wud/on-update.sh`, or `/wud/tag-manager.sh`, then recreate the stack so stale
-trigger configuration is gone. In that mode, script sync installs no WUD command
-scripts, and WebUI pending behavior is API-first.
+Remove any WUD command triggers that call `/wud/*.sh` scripts, then recreate
+the stack so stale trigger configuration is gone. In that mode, WebUI pending
+behavior is API-first.
 
 ## Tracked Containers
 
@@ -188,22 +188,6 @@ are missing or rejected; `403` can indicate insufficient permissions or a proxy
 access rule. Connection failures instead call for checking the shared network,
 service name, and listening port. Do not trigger a registry rescan just to test
 connectivity.
-
-## WUD Callback Scripts
-
-The WebUI example starts WUD and syncs packaged callback scripts into a shared
-`wud-scripts` volume. For file-mode fallback, configure WUD to call:
-
-```text
-/wud/append-updates.sh
-```
-
-Use `/wud/on-update.sh` only when you intentionally keep the legacy shell
-release-note notification path. WUDup polls WUD's API for WebUI release-note
-notifications by default.
-
-See [Container Script Sync](container-script-sync.md) for managed volume safety
-rules and manual sync commands.
 
 ## Candidate Security Scans
 

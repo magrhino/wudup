@@ -18,7 +18,6 @@ STACK_DIR=""
 COMPOSE_FILE=""
 OUT_VOLUME=""
 LOG_VOLUME=""
-SCRIPTS_DIR=""
 DOCKER_WRAPPER_DIR=""
 
 fail(){
@@ -101,11 +100,6 @@ write_volume_file(){
   local volume="$1" path="$2" content="$3"
   printf '%s\n' "$content" | docker run -i --rm -v "$volume:/mnt" "$IMAGE" \
     bash -lc 'cat > "$1"' _ "/mnt/$path"
-}
-
-truncate_volume_file(){
-  local volume="$1" path="$2"
-  docker run --rm -v "$volume:/mnt" "$IMAGE" bash -lc ': > "$1"' _ "/mnt/$path"
 }
 
 assert_volume_file_equals(){
@@ -603,29 +597,6 @@ run_preflight_failure_e2e(){
     failed:bind-mount-path-invalid
 }
 
-run_wud_callback_smoke(){
-  run docker run --rm \
-    -v "$SCRIPTS_DIR:/managed-wud" \
-    "$IMAGE" \
-    sync-wud-scripts
-
-  truncate_volume_file "$OUT_VOLUME" images.todo
-  run docker run --rm \
-    -v "$SCRIPTS_DIR:/wud:ro" \
-    -v "$OUT_VOLUME:/out" \
-    -e WUD_OUT_FILE=/out/images.todo \
-    -e OUT_UID="$(id -u)" \
-    -e OUT_GID="$(id -g)" \
-    -e update_available=true \
-    -e image_name=repo/callback \
-    -e image_tag_value=1.0.0 \
-    "$IMAGE" \
-    /wud/on-update.sh
-
-  assert_volume_file_equals "$OUT_VOLUME" images.todo "repo/callback:1.0.0"
-  assert_volume_file_owner "$OUT_VOLUME" images.todo "$(id -u):$(id -g)"
-}
-
 main(){
   need_cmd docker
 
@@ -637,8 +608,6 @@ main(){
   COMPOSE_FILE="$STACK_DIR/docker-compose.yml"
   OUT_VOLUME="wudup-e2e-out-${GITHUB_RUN_ID:-local}-$$"
   LOG_VOLUME="wudup-e2e-logs-${GITHUB_RUN_ID:-local}-$$"
-  SCRIPTS_DIR="$TEST_TMP/managed-wud"
-  mkdir -p "$SCRIPTS_DIR"
   write_docker_manifest_insecure_wrapper
 
   if [[ -z "$IMAGE" ]]; then
@@ -655,7 +624,6 @@ main(){
   run_digest_pin_e2e
   run_stack_recreate_label_e2e
   run_preflight_failure_e2e
-  run_wud_callback_smoke
 }
 
 main "$@"

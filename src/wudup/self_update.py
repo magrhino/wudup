@@ -18,7 +18,7 @@ from .banner import (
 )
 from .container_identity import container_identity_candidates
 from .images import image_repo_ref, repo_key, tag_value_valid
-from .naming import IMAGE_REPOSITORY, LEGACY_IMAGE_REPOSITORY, env_value
+from .naming import IMAGE_REPOSITORY, LEGACY_IMAGE_REPOSITORY
 
 DEFAULT_SELF_UPDATE_IMAGE = f"{IMAGE_REPOSITORY}:latest"
 DEFAULT_SELF_UPDATE_REPOSITORY = IMAGE_REPOSITORY
@@ -38,7 +38,6 @@ LEGACY_SELF_UPDATE_REPOS = frozenset(
         LEGACY_IMAGE_REPOSITORY.removeprefix("ghcr.io/"),
     }
 )
-FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 _SEMVER_IMAGE_TAG_RE = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+].*)?$")
 _BARE_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -54,33 +53,8 @@ class SelfUpdateInspectionError(RuntimeError):
     """Raised when the running image variant cannot be determined safely."""
 
 
-def self_update_enabled(
-    environ: Mapping[str, str] | None = None,
-    *,
-    cli_value: bool | None = None,
-) -> bool:
-    if cli_value is not None:
-        return cli_value
-    env = os.environ if environ is None else environ
-    return (
-        _normalized_env_value(
-            env_value(env, "WUDUP_SELF_UPDATE", "WUD_UPDATER_SELF_UPDATE")
-        )
-        not in FALSE_VALUES
-    )
-
-
 def is_self_update_target(value: str) -> bool:
     return repo_key(value).casefold() in SELF_UPDATE_REPOS
-
-
-def self_update_display_numbers(entries: Sequence[object]) -> list[int]:
-    result: list[int] = []
-    for display_no, entry in enumerate(entries, start=1):
-        first = getattr(entry, "first", "")
-        if isinstance(first, str) and is_self_update_target(first):
-            result.append(display_no)
-    return result
 
 
 def github_release_self_update(
@@ -207,12 +181,6 @@ def _inspected_container_image(container: Mapping[str, object]) -> str:
     if isinstance(image, str) and image:
         return image
     return ""
-
-
-def _normalized_env_value(value: str | None) -> str:
-    if value is None or value.strip() == "":
-        return "auto"
-    return value.strip().lower()
 
 
 def _image_reference_tag(image: str) -> str:

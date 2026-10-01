@@ -5,12 +5,9 @@ running process environment, and environment values override code defaults.
 SQLite-backed WebUI preferences are limited to allowlisted non-secret settings
 and do not replace paths, secrets, Docker commands, or updater behavior.
 
-For host commands, start from the tracked template:
-
-```bash
-mkdir -p "$HOME/.config/wudup"
-cp docs/examples/template.env "$HOME/.config/wudup/env"
-```
+For commands run outside the container, copy and edit the tracked template
+[`docs/examples/template.env`](examples/template.env), then export it into the
+process environment. WUDup does not read an env file automatically.
 
 Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 `on`, and `off` are still accepted where boolean parsing is supported.
@@ -91,48 +88,27 @@ for the password-file mount and internal-port setup.
 Browser scan refresh also requires `WUD_WEB_MUTATIONS_ENABLED=true`; read-only
 deployments can only read cached scan metadata.
 
-## Command Runner And Install
+## Command Runner
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WUDUP_UPDATER` | Host: repo-local `bin/docker-update-from-wud`; image: `/app/bin/docker-update-from-wud` | Updater command invoked by `updates`. |
-| `WUDUP_CONFIG` | `$HOME/.config/wudup/env` | Host config file read by `updates`. |
-| `WUDUP_USE_SUDO` | `false` | For the Python `updates` wrapper, set to `true` only when a host install needs sudo file fallbacks and should run `WUDUP_UPDATER` through sudo. |
 | `WUDUP_BANNER` | `auto` | Startup banner mode: `auto` prints on TTY startup, `true` forces it, and `false` disables it. |
 | `WUDUP_RELEASE_CHECK` | `auto` | Latest-release check mode: `auto` or `true` lets startup banner, WebUI self-update banner, and self-update release checks try GitHub briefly, and `false` disables the network check. |
-| `WUDUP_SELF_UPDATE` | enabled | Set to `false`, `0`, `no`, or `off` to disable the default `updates` self-update preflight. |
 | `PYTHON_BIN` | `python3`, with repo `.venv` fallback when unset | Python interpreter used by Python entrypoint wrappers. Set this to bypass automatic `.venv` fallback. |
-| `WUDUP_VENV` | Repo-local `.venv` | Optional installer and wrapper venv path for host runtime dependencies. |
-| `WUD_SYNC_SCRIPTS` | `auto` | Set `auto` or leave unset to sync only when the managed script directory exists and is writable. Set `true` to force startup sync or `false` to opt out. |
-| `WUD_SCRIPTS_DIR` | `/managed-wud` | Optional managed script sync destination override. |
+| `WUDUP_VENV` | Repo-local `.venv` | Optional venv path used by the `docker-update-from-wud` wrapper for runtime dependencies. |
 | `WUD_APP_DIR` | `/app` | Application root inside the helper container. |
-| `BIN_DIR` | `$HOME/bin` | Host installer destination for the `updates` and `docker-update-from-wud` symlinks. |
-| `WUD_SCRIPTS_LINK` | `$DOCKER_BASE/wud/scripts` | Host installer symlink target for the mounted `wud/` scripts. |
-| `WUD_OUT_DIR` | `$DOCKER_BASE/wud/out` | Host installer-created output directory that should be mounted at `/out`. |
 
 ## Release Notes And Notifications
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `WUD_RELEASE_NOTES_ENABLED` | unset | Optional env override for WebUI Discord release-note notifications. Leave unset to manage the setting from Settings; set `true` or `false` only when the deployment should force the value and make the Settings toggle read-only. When enabled, verified Critical/High items are delivered immediately even in `on_demand` mode. |
-| `DISCORD_WEBHOOK` | unset | Discord webhook for WebUI-sent release-note notifications, including immediate verified Critical/High alerts, and shell helpers. When set, it overrides and disables the WebUI-managed webhook field. |
-| `ADMIN_WEBHOOK` | selected release webhook | Optional webhook for missing LinuxServer.io upstream mapping alerts. |
-| `GITHUB_TOKEN` | unset | Optional GitHub API token for higher release-note and public advisory lookup rate limits in WUD notifications and WebUI metadata refreshes. |
-| `MAX_COMMITS` | `3` | Maximum representative commits or pull requests included in Discord release embeds. |
-| `COLOR_HEX` | `0x57F287` | Discord embed color used by `/wud/release-notes-to-discord.sh`. |
-| `UPSTREAM_MAP` | `/wud/upstreams.txt` | LinuxServer.io image to upstream repository map used by explicit LSIO release-note mode and legacy `/wud/tag-manager.sh`. |
-| `RELEASE_EMBED` | `/wud/github-release-embed.sh` | Compatibility hook used when legacy `/wud/tag-manager.sh` is configured. |
-| `LOG_DIR` | `/out` | Compatibility log directory used when legacy `/wud/tag-manager.sh` is configured. |
+| `DISCORD_WEBHOOK` | unset | Discord webhook for WebUI-sent release-note notifications, including immediate verified Critical/High alerts. When set, it overrides and disables the WebUI-managed webhook field. |
+| `GITHUB_TOKEN` | unset | Optional GitHub API token for higher release-note and public advisory lookup rate limits in WebUI notifications and metadata refreshes. |
+| `UPSTREAM_MAP` | `/app/wud/upstreams.txt` | LinuxServer.io image to upstream repository map used for WebUI release-note lookups. `WUD_WEB_UPSTREAM_MAP` takes precedence when set. |
 
-WUD supplies callback fields such as `update_available`, `image_name`,
-`image_tag_value`, `image_os`, `image_architecture`, optional `image_variant`,
-`name`, `update_kind_kind`, `update_kind_remote_value`, and `result_tag`. These
-are runtime inputs to mounted scripts, not deployment settings you normally set
-yourself.
-
-Provide GitHub tokens through the WUDup/WebUI runtime environment, through the
-WUD container environment when using the legacy shell callback path, or through
-another host-local secret store. Discord release webhooks can also be saved from
+Provide GitHub tokens through the WUDup/WebUI runtime environment or another
+host-local secret store. Discord release webhooks can also be saved from
 WebUI Settings; the raw URL is stored in SQLite, so protect `WUD_DB_PATH` as a
 secret-bearing file.
 
@@ -175,17 +151,8 @@ should adopt `WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST=true` from the current Compose
 examples so WUD can detect same-tag digest changes. No additional WUDup setting
 is required for security prioritization.
 
-## TrueNAS Status Helper
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `TRUENAS_STATUS_CHECK` | unset | For the Python/container `updates` wrapper, set to `true` to run the short-lived local `midclt` status helper. |
-| `TRUENAS_STATUS_TIMEOUT` | `5` | Seconds to wait for each helper `midclt` call before skipping it. The parent wrapper derives a longer Docker helper timeout from this value. |
-| `TRUENAS_API_CLIENT_REF` | TrueNAS example: `TS-26.0.0-BETA.1`; Dockerfile default: unset | Build arg used by the TrueNAS Compose example to install a compatible TrueNAS API client. |
-
 ## Legacy Aliases
 
-Legacy `WUD_UPDATER`, `WUD_UPDATER_CONFIG`, `WUD_UPDATER_USE_SUDO`,
-`WUD_UPDATER_BANNER`, `WUD_UPDATER_RELEASE_CHECK`, `WUD_UPDATER_SELF_UPDATE`,
-and `WUD_UPDATER_VENV` variables remain accepted as fallbacks. Prefer the
+Legacy `WUD_UPDATER_BANNER`, `WUD_UPDATER_RELEASE_CHECK`, and
+`WUD_UPDATER_VENV` variables remain accepted as fallbacks. Prefer the
 `WUDUP_*` names for new configuration.

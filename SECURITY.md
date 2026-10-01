@@ -22,12 +22,12 @@ vulnerabilities until a fix or disclosure plan is agreed.
 Include enough detail to reproduce and triage the issue:
 
 - The WUDup version, image tag, or commit.
-- The deployment method: host install, Docker Compose image, local build, or
-  source checkout.
+- The deployment method: Docker Compose image, local build, or source
+  checkout.
 - Relevant configuration, Compose snippets, command output, logs, and minimal
   reproduction steps.
 - Whether the issue requires Docker socket access, WebUI exposure, WUD callback
-  inputs, release-note webhooks, or TrueNAS status checks.
+  inputs, or release-note webhooks.
 
 Redact secrets and machine-specific details. Do not include real Discord
 webhook URLs, GitHub tokens, browser session cookies, setup or reset claims,
@@ -51,9 +51,8 @@ the documented trust boundaries, including:
 - Command injection, path traversal, unsafe deserialization, unsafe log access,
   or unsafe file writes from WUD callback fields, image names, Compose metadata,
   environment variables, or WebUI inputs.
-- Unsafe managed WUD script sync behavior, Compose tag rewrites, tag exclusion
-  writes, or update-file locking that can write outside the intended mounted
-  directories.
+- Unsafe Compose tag rewrites, tag exclusion writes, or update-file locking
+  that can write outside the intended mounted directories.
 - GitHub Actions, release, dependency, or container-publishing weaknesses that
   could let untrusted code publish artifacts or exfiltrate repository secrets.
 
@@ -66,12 +65,8 @@ by themselves:
   the host Docker daemon. Only run trusted images with that socket.
 - The hardened socket-proxy example reduces direct socket exposure, but Docker
   Compose pull, stop, and recreate operations still require proxy `POST=1`.
-- The TrueNAS status helper does not use a TrueNAS API key, but enabling
-  `TRUENAS_STATUS_CHECK=true` gives a short-lived helper trusted-host access to
-  the local TrueNAS middleware socket for read status methods.
-- `updates --yes`, `docker-update-from-wud --yes`, and
-  `WUD_WEB_MUTATIONS_ENABLED=true` intentionally allow update mutations within
-  the documented controls.
+- `docker-update-from-wud --yes` and `WUD_WEB_MUTATIONS_ENABLED=true`
+  intentionally allow update mutations within the documented controls.
 - Optional GitHub and Discord release-note integrations use tokens and webhooks
   supplied through environment variables or host-local secret stores.
 
@@ -96,8 +91,7 @@ proxy addresses, and secure-cookie behavior intentionally.
 
 Secrets such as Discord webhooks and GitHub tokens must come from environment
 variables, Compose secrets, or host-local configuration. Do not commit secrets
-to this repository. The callback scripts redact webhook values in helper logs
-where those commands are printed.
+to this repository. WUDup redacts webhook values in logs and API responses.
 
 ## Automated Checks
 
@@ -274,9 +268,8 @@ compensating controls, a remediation issue, and an expiry within 90 days, and
 must be reconsidered before renewal. They cannot waive a blocking condition.
 Do not suppress a whole rule or package to silence one alert. Keep sensitive
 evidence private and publish only a sanitized rationale when disclosure is safe.
-The two MEDIUM optional TrueNAS build findings and their review deadline are
-tracked in [SonarQube triage](docs/SONAR_TRIAGE.md#exception-limits). These are
-scoped source-build decisions, not dependency CVE dismissals or VEX claims.
+No accepted SonarQube exceptions remain; see
+[SonarQube triage](docs/SONAR_TRIAGE.md#exception-limits).
 
 ## VEX For Non-Exploitable Dependency Findings
 

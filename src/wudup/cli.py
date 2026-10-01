@@ -9,10 +9,6 @@ from pathlib import Path
 
 from .banner import print_startup_banner
 from .doctor import run_doctor_from_namespace
-from .truenas import run_truenas_status_export_from_namespace
-from .updates import (
-    run_updates_from_namespace,
-)
 
 
 class WudArgumentParser(argparse.ArgumentParser):
@@ -50,43 +46,10 @@ def _add_update_from_wud_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--recreate-excluded-services", action="store_true")
 
 
-def _add_updates_options(parser: argparse.ArgumentParser) -> None:
-    _add_common_options(parser)
-    parser.add_argument("--config-file", metavar="PATH")
-    parser.add_argument("--log-dir", metavar="PATH")
-    parser.add_argument("--no-color", action="store_true")
-    parser.add_argument(
-        "--auto-run",
-        dest="yes",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-    self_update = parser.add_mutually_exclusive_group()
-    self_update.add_argument(
-        "--self-update",
-        dest="self_update",
-        action="store_true",
-        default=None,
-        help="run WUDup's own update before other pending entries",
-    )
-    self_update.add_argument(
-        "--no-self-update",
-        dest="self_update",
-        action="store_false",
-        help="disable the WUDup self-update preflight",
-    )
-    parser.add_argument(
-        "--no-updater-sudo",
-        action="store_true",
-        help="direct updater execution is the default; override WUDUP_USE_SUDO=true",
-    )
-
-
 def _add_doctor_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base", metavar="PATH")
     parser.add_argument("--file", metavar="PATH")
     parser.add_argument("--log-dir", metavar="PATH")
-    parser.add_argument("--scripts-dir", metavar="PATH")
     parser.add_argument("--no-color", action="store_true")
 
 
@@ -103,7 +66,7 @@ def _add_web_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_init_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--profile", choices=("host", "webui", "helper", "hardened"))
+    parser.add_argument("--profile", choices=("webui", "helper", "hardened"))
     parser.add_argument("--config-file", metavar="PATH")
     parser.add_argument("--compose-override", metavar="PATH")
     parser.add_argument("--no-compose-override", action="store_true")
@@ -143,18 +106,6 @@ def _run_update_from_wud(args: argparse.Namespace) -> int:
     return run_update_from_wud(options)
 
 
-def _run_updates(args: argparse.Namespace) -> int:
-    return run_updates_from_namespace(
-        args,
-        repo_root=Path(__file__).resolve().parents[2],
-        show_banner=True,
-    )
-
-
-def _run_truenas_status_export(args: argparse.Namespace) -> int:
-    return run_truenas_status_export_from_namespace(args)
-
-
 def _run_doctor(args: argparse.Namespace) -> int:
     return run_doctor_from_namespace(
         args,
@@ -192,18 +143,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_update_from_wud_options(update_from_wud)
     update_from_wud.set_defaults(handler=_run_update_from_wud)
 
-    updates = subcommands.add_parser(
-        "updates",
-        help="admin convenience for showing WUD updates and optionally running the updater",
-        description=(
-            "Admin convenience for host or helper-container operators. "
-            "The WebUI/API is the primary supported workflow; CLI/WebUI "
-            "feature parity is not a project goal."
-        ),
-    )
-    _add_updates_options(updates)
-    updates.set_defaults(handler=_run_updates)
-
     doctor = subcommands.add_parser(
         "doctor",
         help="check WUDup container setup and Docker access",
@@ -224,12 +163,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_init_options(init)
     init.set_defaults(handler=_run_init)
-
-    truenas_status_export = subcommands.add_parser(
-        "truenas-status-export",
-        help=argparse.SUPPRESS,
-    )
-    truenas_status_export.set_defaults(handler=_run_truenas_status_export)
 
     return parser
 

@@ -15,8 +15,6 @@ from wudup.self_update import (
     is_self_update_target,
     main,
     release_self_update_target,
-    self_update_display_numbers,
-    self_update_enabled,
 )
 
 
@@ -391,41 +389,6 @@ class IsReleaseImageTagTests(unittest.TestCase):
         self.assertFalse(_is_release_image_tag("v1.2"))
 
 
-class SelfUpdateEnabledTests(unittest.TestCase):
-    def test_returns_true_by_default(self) -> None:
-        self.assertTrue(self_update_enabled({}))
-
-    def test_cli_false_overrides_default(self) -> None:
-        self.assertFalse(self_update_enabled({}, cli_value=False))
-
-    def test_cli_true_overrides_env_false(self) -> None:
-        self.assertTrue(
-            self_update_enabled({"WUDUP_SELF_UPDATE": "false"}, cli_value=True)
-        )
-
-    def test_env_false_disables(self) -> None:
-        self.assertFalse(
-            self_update_enabled({"WUDUP_SELF_UPDATE": "false"})
-        )
-
-    def test_legacy_env_false_disables(self) -> None:
-        self.assertFalse(
-            self_update_enabled({"WUD_UPDATER_SELF_UPDATE": "false"})
-        )
-
-    def test_env_zero_disables(self) -> None:
-        self.assertFalse(self_update_enabled({"WUDUP_SELF_UPDATE": "0"}))
-
-    def test_env_no_disables(self) -> None:
-        self.assertFalse(self_update_enabled({"WUDUP_SELF_UPDATE": "no"}))
-
-    def test_env_off_disables(self) -> None:
-        self.assertFalse(self_update_enabled({"WUDUP_SELF_UPDATE": "off"}))
-
-    def test_env_true_enables(self) -> None:
-        self.assertTrue(self_update_enabled({"WUDUP_SELF_UPDATE": "true"}))
-
-
 class IsAndDisplaySelfUpdateTests(unittest.TestCase):
     def test_is_self_update_target_matches_known_repos(self) -> None:
         self.assertTrue(is_self_update_target("ghcr.io/magrhino/wudup:latest"))
@@ -436,27 +399,6 @@ class IsAndDisplaySelfUpdateTests(unittest.TestCase):
 
     def test_is_self_update_target_rejects_other_repos(self) -> None:
         self.assertFalse(is_self_update_target("ghcr.io/someone/other-app:latest"))
-
-    def test_self_update_display_numbers_finds_positions(self) -> None:
-        entry_a = mock.Mock()
-        entry_a.first = "ghcr.io/magrhino/wudup:latest"
-        entry_b = mock.Mock()
-        entry_b.first = "other/app:latest"
-        entry_c = mock.Mock()
-        entry_c.first = "ghcr.io/magrhino/wudup:v1.0.0"
-
-        result = self_update_display_numbers([entry_a, entry_b, entry_c])
-
-        self.assertEqual(result, [1, 3])
-
-    def test_self_update_display_numbers_empty_list(self) -> None:
-        self.assertEqual(self_update_display_numbers([]), [])
-
-    def test_self_update_display_numbers_no_matches(self) -> None:
-        entry = mock.Mock()
-        entry.first = "other/app:latest"
-        self.assertEqual(self_update_display_numbers([entry]), [])
-
 
 class MainTests(unittest.TestCase):
     def test_main_returns_2_for_wrong_args(self) -> None:

@@ -34,8 +34,6 @@ RUN npm run build
 
 FROM python:3.14.7-alpine3.24@sha256:9e9fde4d32eedce0b661d9ab91e826b62dddf28e928c230ec55f1866cac66b01 AS wudup-runtime
 
-# Optional version-specific source build; reviewed exceptions: docs/SONAR_TRIAGE.md.
-ARG TRUENAS_API_CLIENT_REF=""
 # Keep the release workflow's cache-busting build arg name for compatibility.
 ARG APT_REFRESH="local"
 
@@ -43,7 +41,6 @@ ENV DOCKER_BASE=/host/docker \
     WUD_OUT_FILE=/out/images.todo \
     WUD_LOG_DIR=/logs \
     WUD_WEB_HOST=0.0.0.0 \
-    WUDUP_UPDATER=/app/bin/docker-update-from-wud \
     PATH=/app/bin:$PATH
 
 RUN set -eux; \
@@ -62,12 +59,7 @@ RUN set -eux; \
       sudo \
       tini \
       tzdata \
-      util-linux-misc; \
-    if [ -n "$TRUENAS_API_CLIENT_REF" ]; then \
-      apk add --no-cache --virtual .wudup-build-deps git; \
-      python -m pip install --no-cache-dir "git+https://github.com/truenas/api_client.git@${TRUENAS_API_CLIENT_REF}"; \
-      apk del .wudup-build-deps; \
-    fi
+      util-linux-misc
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
@@ -90,7 +82,7 @@ COPY bin/ /app/bin/
 COPY wud/ /app/wud/
 COPY entrypoint.sh /app/entrypoint.sh
 
-RUN chmod +x /app/entrypoint.sh /app/bin/updates /app/bin/docker-update-from-wud /app/wud/*.sh \
+RUN chmod +x /app/entrypoint.sh /app/bin/docker-update-from-wud \
     && mkdir -p /host/docker /out /logs
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \

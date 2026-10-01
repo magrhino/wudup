@@ -15,8 +15,8 @@ hotspots are outside this change.
 | `AZ-Ew1_08PcgpjNh6X1F` | `githubactions:S8544`, setup-python-env | Fix: install generated, hashed `requirements-dev.txt` and `requirements-build.txt` before the editable project. Dev resolution is constrained by the runtime and build locks. Cache keys include the locks. |
 | `AaCqshP5CYJ15EFuBTqg` | `githubactions:S8541`, setup-python-env | Fix third-party installs with `--only-binary=:all:`. Building the checked-out project is intentional; its separate install uses `--no-deps --no-build-isolation`, so it cannot fetch additional dependencies. The Docker source install uses the same boundary. |
 | `AaB8AqP4OrpnBdyVTZ7r` | `githubactions:S8264`, CI permissions | Fix: move `pull-requests: read` to `changes`, where paths-filter needs it. Other CI jobs retain only the workflow's `contents: read` default. |
-| `AZ-Ew2B58PcgpjNh6X1H` | `docker:S8544`, optional TrueNAS client | Accept the residual dependency-locking risk for this opt-in compatibility build. Operators select a client release compatible with their appliance; there is no single dependency lock for every supported ref. The default published image leaves the ref empty. See the limits below. |
-| `AaCqshWCCYJ15EFuBTqh` | `docker:S8541`, optional TrueNAS client | Accept required source execution. This explicitly installs the official `truenas/api_client` Git source and invokes its setuptools backend. Adding a binary-only flag would neither authenticate that source nor remove the VCS build. |
+| `AZ-Ew2B58PcgpjNh6X1H` | `docker:S8544`, optional TrueNAS client | Resolved by removal: the optional TrueNAS client build and its `TRUENAS_API_CLIENT_REF` build argument were removed from the Dockerfile (last present at the `legacy-file-mode` tag). Originally accepted as residual dependency-locking risk. |
+| `AaCqshWCCYJ15EFuBTqh` | `docker:S8541`, optional TrueNAS client | Resolved by removal: the image no longer installs the `truenas/api_client` Git source. Originally accepted as required source execution. |
 
 The previously resolved `text:S8565` finding on `pyproject.toml`
 (`AZ6uKgdNlZga0k7Gje__`) remains a justified scanner-format exception:
@@ -28,30 +28,16 @@ comments are used.
 
 ## Exception limits
 
-Both accepted exception records above have Sonar security impact `MEDIUM`, not
-`HIGH` or `CRITICAL`. Owner: repository maintainer `@magrhino`. The existing
-Sonar issue IDs track the residual risk and any follow-up remediation; maintainer
-review of the consolidated PR is the approval record. Assessed on 2026-09-17;
-re-review or expire by 2026-12-16 (90 days), or earlier on the changes below.
-They cannot waive any higher-severity release blocker in
+No accepted exceptions remain. The two MEDIUM TrueNAS records above were
+resolved by removing the optional TrueNAS client build; any new exception needs
+an owner, compensating controls, and a review date within 90 days, and cannot
+waive a higher-severity release blocker in
 [`SECURITY.md`](../SECURITY.md#dismissals-and-exceptions).
-
-The TrueNAS ref is trusted build input, not an API parameter. Preserve compatible
-tags, but prefer a reviewed full commit SHA when preparing a deployment.
-Tags can move; a SHA pins the client source but does **not** lock its dependencies.
-The example `TS-26.0.0-BETA.1` metadata requests `websocket-client` plus
-setuptools/wheel build tooling without exact versions. These downloads and
-source execution are a conscious residual risk, not a reproducible or
-script-free installation. Build this optional variant without credentials and
-review the upstream ref before using it. Revisit both exceptions if the client
-enters the default image, the upstream repository changes, or the project
-chooses one supported client version that can have its own complete lock.
 
 Local WUDup source builds likewise execute reviewed repository code. Locking
 the backend and disabling build isolation/dependency resolution prevents those
 builds from silently fetching new tools; it does not sandbox project code.
-The host installer and ad hoc developer installs are outside the CI/image
-locking guarantee.
+Ad hoc developer installs are outside the CI/image locking guarantee.
 
 ## License evidence
 
@@ -102,8 +88,8 @@ state. It does not use administrator bypass to override a red or pending gate.
 See [the common auto-merge policy](../SECURITY.md#routine-dependency-auto-merge).
 
 Keep genuine-fix issues open until the changed code is analyzed remotely.
-Only the two TrueNAS exceptions should be accepted during this triage; a green
-local build is not evidence that the remote analysis has seen a patch.
+No exceptions remain accepted from this triage; a green local build is not
+evidence that the remote analysis has seen a patch.
 Every PR analysis must confirm both the issue decisions and the required
 check. Repository settings are remote state and cannot be enforced by
 `sonar-project.properties` alone.
@@ -136,8 +122,7 @@ Validate with the exact setup-python-env install commands, `python -m pip check`
 `tests/run-all.sh`, `tests/container-build.sh`, `actionlint`, ShellCheck on
 `scripts/lock.sh` and `tests/run-all.sh`, and `git diff --check`. Container checks
 exercise Linux wheel availability, the local source build, WebUI startup, and
-the optional Trivy target. Compose validation of the TrueNAS example is not
-proof that every operator-selected upstream ref builds.
+the optional Trivy target.
 
 Validation recorded on 2026-09-17:
 
@@ -169,5 +154,4 @@ Validation recorded on 2026-09-17:
   above. Main-branch issue closure still requires analysis after merge.
 
 References: [pip secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/),
-[npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/), and
-[TrueNAS client build metadata](https://github.com/truenas/api_client/blob/TS-26.0.0-BETA.1/pyproject.toml).
+and [npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/).

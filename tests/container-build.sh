@@ -24,7 +24,6 @@ COMPOSE_EXAMPLE="docs/examples/docker-compose.example.yml"
 COMPOSE_WEBUI="docs/examples/docker-compose.webui.yml"
 COMPOSE_HARDENED="docs/examples/docker-compose.hardened.yml"
 COMPOSE_BUILD="docs/examples/docker-compose.build.yml"
-COMPOSE_TRUENAS="docs/examples/docker-compose.truenas.yml"
 cleanup_image=0
 RUN_ID_COMPONENT="$(docker_name_component "${GITHUB_RUN_ID:-local}")"
 if [[ -n "${WUDUP_TEST_IMAGE:-}" ]]; then
@@ -156,7 +155,6 @@ run_quiet docker compose -f "$COMPOSE_EXAMPLE" config
 run_quiet docker compose -f "$COMPOSE_WEBUI" config
 run_quiet docker compose -f "$COMPOSE_HARDENED" config
 run_quiet docker compose -f "$COMPOSE_BUILD" config
-run_quiet docker compose -f "$COMPOSE_TRUENAS" config
 run docker build -t "$IMAGE" .
 run assert_image_metadata "$IMAGE"
 run bash tests/smoke-container-image.sh "$IMAGE"

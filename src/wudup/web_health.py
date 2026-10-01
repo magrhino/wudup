@@ -219,7 +219,6 @@ def _web_doctor_options_and_env(
         base=str(settings.config.docker_base),
         file=str(settings.config.wud_out_file),
         log_dir=str(settings.config.log_dir),
-        scripts_dir=env.get("WUD_SCRIPTS_DIR", ""),
         no_color=True,
     )
     return (

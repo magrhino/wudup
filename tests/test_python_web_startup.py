@@ -61,7 +61,6 @@ def test_web_startup_prints_first_run_summary(
         tmp_path,
         {
             "GITHUB_TOKEN": secret,
-            "WUD_SCRIPT_SYNC_STATUS": "auto-detected",
             "WUD_WEB_HOST": "0.0.0.0",
         },
     ).items():
@@ -93,7 +92,7 @@ def test_web_startup_prints_first_run_summary(
     assert "Setup link: http://127.0.0.1:12735/#/setup?claim=" in stderr
     assert f"Docker base: {tmp_path / 'docker'}" in stderr
     assert f"WUD output: {tmp_path / 'state' / 'images.todo'}" in stderr
-    assert "Script sync: auto-detected writable /managed-wud" in stderr
+    assert "Script sync" not in stderr
     assert "Doctor: docker compose exec wudup doctor" in stderr
     assert secret not in stderr
 
@@ -124,7 +123,6 @@ def test_web_startup_summary_uses_public_origin_when_setup_not_required(
         {
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_WEB_PUBLIC_ORIGIN": "https://wud.example.test",
-            "WUD_SCRIPT_SYNC_STATUS": "auto-not-detected",
         },
     ).items():
         monkeypatch.setenv(key, value)
@@ -146,26 +144,6 @@ def test_web_startup_summary_uses_public_origin_when_setup_not_required(
     assert status == 0
     assert "Web URL: https://wud.example.test/" in stderr
     assert "Setup link:" not in stderr
-    assert "Script sync: auto mode did not detect writable /managed-wud" in stderr
-
-
-def test_script_sync_summary_treats_explicit_auto_as_auto(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    scripts_dir = tmp_path / "managed-wud"
-    scripts_dir.mkdir()
-    monkeypatch.setattr(web_startup, "DEFAULT_CONTAINER_SCRIPTS_DIR", str(scripts_dir))
-
-    summary = web_startup._script_sync_summary({"WUD_SYNC_SCRIPTS": "auto"})
-
-    assert summary.startswith(f"auto fallback sees writable {scripts_dir}")
-
-
-def test_script_sync_summary_reports_legacy_disabled() -> None:
-    summary = web_startup._script_sync_summary({"WUDUP_LEGACY_SCRIPTS": "FALSE"})
-
-    assert summary == "disabled by WUDUP_LEGACY_SCRIPTS"
 
 
 def test_static_spa_mount_serves_index_when_configured(tmp_path: Path) -> None:

@@ -18,12 +18,7 @@ services:
       - wudup-egress
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - wud-scripts:/wud:ro
-      - wud-out:/out
       - wud-store:/store
-    # Legacy file-mode fallback: configure your WUD command trigger to call:
-    #   /wud/append-updates.sh
-    # Use /wud/on-update.sh only for legacy shell release-note notifications.
     # WebUI release-note notifications poll WUD's API directly.
 
   wudup:
@@ -76,7 +71,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_DOCKER_BASE:-/srv/docker}:${HOST_DOCKER_BASE:-/srv/docker}
       - ${WEBUI_LOG_DIR:-./logs}:/logs
-      - wud-scripts:/managed-wud
       - wud-out:/out
       # For basic API auth, mount a password-only file (example host path):
       # - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
@@ -87,6 +81,5 @@ networks:
   wudup-egress:
 
 volumes:
-  wud-scripts:
   wud-out:
   wud-store:

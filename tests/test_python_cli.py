@@ -62,24 +62,6 @@ class CliTests(unittest.TestCase):
             status = main(argv)
         return status, stdout.getvalue(), stderr.getvalue()
 
-    def test_updates_help_describes_no_sudo_default(self) -> None:
-        stdout = StringIO()
-        stderr = StringIO()
-
-        with (
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as raised,
-        ):
-            main(["updates", "--help"])
-
-        help_text = stdout.getvalue()
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn("--no-updater-sudo", help_text)
-        self.assertIn("direct updater execution is the default", help_text)
-        self.assertIn("WUDUP_USE_SUDO=true", help_text)
-        self.assertEqual(stderr.getvalue(), "")
-
     def test_update_from_wud_dry_run_accepts_shell_flags(self) -> None:
         with tempfile.TemporaryDirectory(prefix="wud-python-cli.") as tmpdir:
             root = Path(tmpdir)
@@ -241,92 +223,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("Nothing to do; list is empty.", stdout)
         self.assertEqual(stderr, "")
 
-    def test_updates_dry_run_exits_successfully_without_mutation(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wud-python-cli.") as tmpdir:
-            env = {
-                "HOME": tmpdir,
-                "WUDUP_CONFIG": str(Path(tmpdir) / "missing-env"),
-                "WUDUP_RELEASE_CHECK": "0",
-                "PATH": os.environ.get("PATH", ""),
-            }
-            with mock.patch.dict(os.environ, env, clear=True):
-                status, stdout, stderr = self._run_main(
-                    [
-                        "updates",
-                        "--dry-run",
-                        "--mode",
-                        "pause",
-                        "--file",
-                        str(Path(tmpdir) / "missing.todo"),
-                    ]
-                )
-
-        self.assertEqual(status, 0)
-        self.assertIn("=== 📦 Docker Updates ===", stdout)
-        self.assertIn("✅ No pending Docker updates!", stdout)
-        self.assertEqual(stderr, "")
-
-    def test_updates_no_color_option_is_accepted(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wud-python-cli.") as tmpdir:
-            env = {
-                "HOME": tmpdir,
-                "WUDUP_CONFIG": str(Path(tmpdir) / "missing-env"),
-                "WUDUP_RELEASE_CHECK": "0",
-                "PATH": os.environ.get("PATH", ""),
-            }
-            with mock.patch.dict(os.environ, env, clear=True):
-                status, stdout, stderr = self._run_main(
-                    [
-                        "updates",
-                        "--dry-run",
-                        "--no-color",
-                        "--file",
-                        str(Path(tmpdir) / "missing.todo"),
-                    ]
-                )
-
-        self.assertEqual(status, 0)
-        self.assertIn("✅ No pending Docker updates!", stdout)
-        self.assertEqual(stderr, "")
-
-    def test_updates_prints_forced_startup_banner(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wud-python-cli.") as tmpdir:
-            env = {
-                "HOME": tmpdir,
-                "WUDUP_CONFIG": str(Path(tmpdir) / "missing-env"),
-                "WUDUP_BANNER": "true",
-                "WUDUP_RELEASE_CHECK": "false",
-                "PATH": os.environ.get("PATH", ""),
-            }
-            with mock.patch.dict(os.environ, env, clear=True):
-                status, stdout, stderr = self._run_main(
-                    [
-                        "updates",
-                        "--dry-run",
-                        "--file",
-                        str(Path(tmpdir) / "missing.todo"),
-                    ]
-                )
-
-        self.assertEqual(status, 0)
-        self.assertIn(f"WUDup {current_tag()}", stdout)
-        self.assertIn("✅ No pending Docker updates!", stdout)
-        self.assertEqual(stderr, "")
-
-    def test_truenas_status_export_skips_forced_startup_banner(self) -> None:
-        env = {
-            "WUDUP_BANNER": "true",
-            "WUDUP_RELEASE_CHECK": "false",
-            "PATH": os.environ.get("PATH", ""),
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
-            status, stdout, stderr = self._run_main(["truenas-status-export"])
-
-        self.assertEqual(status, 0)
-        self.assertNotIn("WUDup", stdout)
-        self.assertTrue(stdout.strip().startswith("{"))
-        self.assertEqual(stderr, "")
-
     def test_doctor_subcommand_accepts_container_path_options(self) -> None:
         with mock.patch(
             "wudup.cli.run_doctor_from_namespace",
@@ -341,8 +237,6 @@ class CliTests(unittest.TestCase):
                     "/out/images.todo",
                     "--log-dir",
                     "/logs",
-                    "--scripts-dir",
-                    "/managed-wud",
                     "--no-color",
                 ]
             )
@@ -354,7 +248,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(args.base, "/srv/docker")
         self.assertEqual(args.file, "/out/images.todo")
         self.assertEqual(args.log_dir, "/logs")
-        self.assertEqual(args.scripts_dir, "/managed-wud")
         self.assertTrue(args.no_color)
 
     def test_web_subcommand_accepts_server_and_state_options(self) -> None:
@@ -545,34 +438,26 @@ class CliTests(unittest.TestCase):
         self.assertIn("database file does not exist", stderr)
         self.assertNotIn("/#/reset-admin", stderr)
 
-    def test_updates_yes_without_pending_entries_exits_successfully(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wud-python-cli.") as tmpdir:
-            env = {
-                "HOME": tmpdir,
-                "WUDUP_CONFIG": str(Path(tmpdir) / "missing-env"),
-                "WUDUP_RELEASE_CHECK": "0",
-                "PATH": os.environ.get("PATH", ""),
-            }
-            with mock.patch.dict(os.environ, env, clear=True):
-                status, stdout, stderr = self._run_main(
-                    ["updates", "--yes", "--file", str(Path(tmpdir) / "empty.todo")]
-                )
-
-        self.assertEqual(status, 0)
-        self.assertIn("✅ No pending Docker updates!", stdout)
-        self.assertEqual(stderr, "")
-
     def test_keyboard_interrupt_returns_130_without_traceback(self) -> None:
         with mock.patch(
-            "wudup.cli._run_updates",
+            "wudup.cli._run_doctor",
             side_effect=KeyboardInterrupt,
         ):
-            status, stdout, stderr = self._run_main(["updates", "--dry-run"])
+            status, stdout, stderr = self._run_main(["doctor"])
 
         self.assertEqual(status, 130)
         self.assertEqual(stdout, "")
         self.assertIn("Interrupted.", stderr)
         self.assertNotIn("Traceback", stderr)
+
+    def test_removed_host_subcommands_are_rejected_by_parser(self) -> None:
+        for command in ("updates", "truenas-status-export"):
+            stderr = StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main([command])
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("invalid choice", stderr.getvalue())
 
     def test_missing_subcommand_is_rejected_by_parser(self) -> None:
         stderr = StringIO()

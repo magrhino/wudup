@@ -38,21 +38,16 @@ matching CI's split validation jobs.
 
 ```bash
 ruff check .
-shellcheck install.sh bin/updates bin/docker-update-from-wud wud/*.sh
-bash -n install.sh bin/updates bin/docker-update-from-wud wud/http.sh wud/release-notes-to-discord.sh wud/github-release-embed.sh wud/tag-manager.sh
-sh -n wud/on-update.sh wud/append-updates.sh
+shellcheck entrypoint.sh bin/docker-update-from-wud
+bash -n entrypoint.sh bin/docker-update-from-wud
 python3 -m compileall -q src tests webui/scripts
 python -m pytest tests/test_python_*.py
 tests/run-all.sh --python
 tests/run-all.sh --shell
 tests/run-all.sh --webui
 tests/test-docker-update-from-wud.sh
-tests/test-github-release-embed.sh
-tests/test-wud-append-updates.sh
-tests/test-updates-wrapper.sh
 tests/test-entrypoint.sh
-tests/test-release-notes-to-discord.sh
-tests/test-tag-manager.sh
+tests/test-upstreams-map.sh
 ```
 
 Container checks require Docker:
@@ -61,7 +56,6 @@ Container checks require Docker:
 docker compose -f docs/examples/docker-compose.example.yml config
 docker compose --env-file docs/examples/webui.env.example -f docs/examples/docker-compose.webui.yml config
 docker compose -f docs/examples/docker-compose.hardened.yml config
-docker compose -f docs/examples/docker-compose.truenas.yml config
 docker compose -f docs/examples/docker-compose.build.yml config
 tests/container-build.sh
 ```

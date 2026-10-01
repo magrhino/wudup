@@ -604,7 +604,6 @@ def run_web_from_namespace(args: object) -> int:
         host=host,
         port=port,
         setup_claim=setup_claim,
-        environ=env,
     )
     try:
         web_startup.run_web_server(app, host=host, port=port)

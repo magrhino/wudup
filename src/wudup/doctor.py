@@ -7,7 +7,6 @@ import errno
 import os
 import re
 import secrets
-import shutil
 import socket
 import stat
 import sys
@@ -18,55 +17,21 @@ from pathlib import Path
 from .command import CommandResult, CommandRunner
 from .compose import ComposeCli, compose_discovery_message, compose_files_under
 from .config import COMPOSE_IGNORE_PATHS_ENV, ConfigError, parse_compose_ignore_paths
-from .container_identity import container_identity_candidates
-from .naming import env_value
-from .truenas import (
-    DEFAULT_TRUENAS_STATUS_TIMEOUT,
-    TRUENAS_MIDDLEWARE_MOUNT,
-)
-from .updates import (
-    load_configured_environ,
-)
 
 DEFAULT_CONTAINER_APP_DIR = Path("/app")
 DEFAULT_CONTAINER_DOCKER_BASE = "/host/docker"
 DEFAULT_CONTAINER_OUT_FILE = "/out/images.todo"
 DEFAULT_CONTAINER_LOG_DIR = "/logs"
-DEFAULT_CONTAINER_SCRIPTS_DIR = "/managed-wud"
 HELPER_ONLY_MOUNT_PREFIXES = (Path("/host"), Path("/docker-host"), Path("/container-host"))
-MANAGED_SCRIPTS_MARKER = ".wudup-managed"
-LEGACY_MANAGED_SCRIPTS_MARKER = ".wud-updater-managed"
 DOCTOR_PROBE_NAME = ".wudup-doctor-probe"
-UPDATER_EXECUTABLE_CHECK = "updater executable"
-WUD_SCRIPT_SYNC_CHECK = "WUD script sync"
-REQUIRED_WUD_SCRIPTS = (
-    "on-update.sh",
-    "append-updates.sh",
-    "release-parser.sh",
-    "release-notes-to-discord.sh",
-    "github-release-embed.sh",
-    "tag-manager.sh",
-)
-
-
 @dataclass(frozen=True)
 class DoctorOptions:
     docker_base: Path
     wud_file: Path
     log_dir: Path
-    scripts_dir: Path
-    packaged_scripts_dir: Path
     app_dir: Path
-    updater: str
     host_docker_base: Path | None = None
     docker_host: str = ""
-    sync_scripts: str = "auto"
-    legacy_scripts_enabled: bool = True
-    updater_use_sudo: bool = False
-    updater_use_sudo_source: str = ""
-    updater_use_sudo_value: str = ""
-    truenas_status_check: bool = False
-    truenas_status_timeout: str = DEFAULT_TRUENAS_STATUS_TIMEOUT
     compose_ignore_paths: tuple[Path, ...] = ()
     no_color: bool = False
 
@@ -135,7 +100,6 @@ class Doctor:
         self._check_docker_access()
         self._check_paths()
         self._check_compose()
-        self._check_truenas()
         return DoctorResult(checks=tuple(self.checks))
 
     def run_readiness_result(self) -> DoctorResult:
@@ -160,8 +124,6 @@ class Doctor:
         self._check_python_import("ruamel.yaml")
         self._check_command("docker cli", ["docker", "--version"])
         self._check_command("docker compose plugin", ["docker", "compose", "version"])
-        self._check_updater()
-        self._check_sudo()
 
     def _check_docker_access(self) -> None:
         socket_path = _docker_unix_socket_path(self.options.docker_host)
@@ -202,8 +164,6 @@ class Doctor:
 
         self._check_wud_file()
         self._check_log_dir()
-        self._check_packaged_scripts()
-        self._check_script_sync()
 
     def _check_compose(self) -> None:
         compose_files = compose_files_under(
@@ -259,63 +219,6 @@ class Doctor:
                 "no discovered compose stacks rendered successfully",
             )
 
-    def _check_truenas(self) -> None:
-        if not self.options.truenas_status_check:
-            self._record(
-                "WARN",
-                "TrueNAS status helper",
-                "TRUENAS_STATUS_CHECK is disabled",
-            )
-            return
-
-        if not _seconds_valid(self.options.truenas_status_timeout):
-            self._record(
-                "FAIL",
-                "TrueNAS status timeout",
-                "TRUENAS_STATUS_TIMEOUT must be an integer number of seconds",
-            )
-        else:
-            self._record(
-                "PASS",
-                "TrueNAS status timeout",
-                f"{self.options.truenas_status_timeout}s",
-            )
-
-        candidates = container_identity_candidates(self.environ)
-        if not candidates:
-            self._record(
-                "FAIL",
-                "TrueNAS helper container inspect",
-                "HOSTNAME is not set",
-            )
-            return
-
-        failed_result: CommandResult | None = None
-        for candidate in candidates:
-            result = self.runner.capture(
-                ["docker", "container", "inspect", candidate],
-                check=False,
-            )
-            if result.ok:
-                self._record(
-                    "PASS",
-                    "TrueNAS helper container inspect",
-                    "current container is inspectable",
-                )
-                self._record(
-                    "WARN",
-                    "TrueNAS middleware socket",
-                    f"{TRUENAS_MIDDLEWARE_MOUNT} is validated by docker run at status-check time",
-                )
-                return
-            failed_result = result
-
-        self._record(
-            "FAIL",
-            "TrueNAS helper container inspect",
-            _failure_detail(failed_result) if failed_result is not None else "",
-        )
-
     def _check_command(self, name: str, command: Sequence[str]) -> CommandResult:
         result = self.runner.capture(command, check=False)
         if result.ok:
@@ -332,59 +235,6 @@ class Doctor:
             self._record("FAIL", f"python import {module}", str(exc))
         else:
             self._record("PASS", f"python import {module}")
-
-    def _check_updater(self) -> None:
-        updater = self.options.updater
-        if not updater:
-            self._record("FAIL", UPDATER_EXECUTABLE_CHECK, "WUDUP_UPDATER is empty")
-            return
-
-        path = Path(updater)
-        if path.is_absolute() or "/" in updater:
-            if path.is_file() and os.access(path, os.X_OK):
-                self._record("PASS", UPDATER_EXECUTABLE_CHECK, str(path))
-            elif path.exists():
-                self._record(
-                    "FAIL",
-                    UPDATER_EXECUTABLE_CHECK,
-                    f"{path} is not executable",
-                )
-            else:
-                self._record(
-                    "FAIL", UPDATER_EXECUTABLE_CHECK, f"{path} does not exist"
-                )
-            return
-
-        resolved = shutil.which(updater, path=self.environ.get("PATH"))
-        if resolved:
-            self._record("PASS", UPDATER_EXECUTABLE_CHECK, resolved)
-        else:
-            self._record(
-                "FAIL",
-                UPDATER_EXECUTABLE_CHECK,
-                f"{updater} not found on PATH",
-            )
-
-    def _check_sudo(self) -> None:
-        if not self.options.updater_use_sudo:
-            detail = (
-                f"disabled by {self.options.updater_use_sudo_source}="
-                f"{self.options.updater_use_sudo_value}"
-                if self.options.updater_use_sudo_source
-                else "disabled by default"
-            )
-            self._record("PASS", "sudo", detail)
-            return
-
-        if shutil.which("sudo", path=self.environ.get("PATH")) is None:
-            self._record("FAIL", "sudo", "required but not found on PATH")
-            return
-
-        result = self.runner.capture(["sudo", "-n", "true"], check=False)
-        if result.ok:
-            self._record("PASS", "sudo", "non-interactive sudo works")
-        else:
-            self._record("FAIL", "sudo", _failure_detail(result))
 
     def _check_unix_socket(self, socket_path: Path) -> None:
         try:
@@ -511,103 +361,6 @@ class Doctor:
         else:
             self._record("PASS", "WUD_LOG_DIR", f"{log_dir} can be created")
 
-    def _check_packaged_scripts(self) -> None:
-        scripts = self.options.packaged_scripts_dir
-        if not scripts.is_dir():
-            self._record("FAIL", "packaged WUD scripts", f"{scripts} does not exist")
-            return
-
-        failures: list[str] = []
-        for name in REQUIRED_WUD_SCRIPTS:
-            path = scripts / name
-            if not path.is_file():
-                failures.append(f"{name} missing")
-            elif not os.access(path, os.X_OK):
-                failures.append(f"{name} not executable")
-        if failures:
-            self._record("FAIL", "packaged WUD scripts", "; ".join(failures))
-        else:
-            self._record("PASS", "packaged WUD scripts", str(scripts))
-
-    def _check_script_sync(self) -> None:
-        if not self.options.legacy_scripts_enabled:
-            self._record(
-                "WARN",
-                WUD_SCRIPT_SYNC_CHECK,
-                "legacy WUD callbacks are disabled",
-            )
-            return
-        if self.options.sync_scripts == "disabled":
-            self._record("WARN", WUD_SCRIPT_SYNC_CHECK, "WUD_SYNC_SCRIPTS is disabled")
-            return
-        if self.options.sync_scripts == "auto" and not (
-            self.options.scripts_dir.is_dir()
-            and os.access(self.options.scripts_dir, os.W_OK | os.X_OK)
-        ):
-            self._record(
-                "WARN",
-                WUD_SCRIPT_SYNC_CHECK,
-                "auto-sync inactive; "
-                f"{self.options.scripts_dir} is not a writable directory",
-            )
-            return
-
-        issue = self._script_sync_issue()
-        if issue:
-            self._record("FAIL", WUD_SCRIPT_SYNC_CHECK, issue)
-        else:
-            suffix = " (auto)" if self.options.sync_scripts == "auto" else ""
-            self._record(
-                "PASS",
-                WUD_SCRIPT_SYNC_CHECK,
-                f"{self.options.scripts_dir}{suffix}",
-            )
-
-    def _script_sync_issue(self) -> str:
-        dst = self.options.scripts_dir
-        if str(dst) == "":
-            return "WUD_SCRIPTS_DIR is empty"
-
-        resolved_dst = _canonical_dir_target(dst)
-        if resolved_dst is None:
-            return f"unable to resolve WUD_SCRIPTS_DIR {dst}"
-        resolved_app = _canonical_dir_target(self.options.app_dir)
-        resolved_base = _canonical_dir_target(self.options.docker_base)
-        resolved_out = _canonical_dir_target(self.options.wud_file.parent)
-        if resolved_app is None:
-            return f"unable to resolve WUD_APP_DIR {self.options.app_dir}"
-        if resolved_base is None:
-            return f"unable to resolve DOCKER_BASE {self.options.docker_base}"
-        if resolved_out is None:
-            return f"unable to resolve WUD_OUT_FILE directory {self.options.wud_file.parent}"
-
-        if (
-            resolved_dst == Path("/")
-            or resolved_dst.is_relative_to(resolved_app)
-            or resolved_dst.is_relative_to(resolved_base)
-            or resolved_dst.is_relative_to(resolved_out)
-        ):
-            return f"unsafe WUD_SCRIPTS_DIR {dst}"
-
-        if dst.exists():
-            if not dst.is_dir():
-                return f"{dst} is not a directory"
-            if not os.access(dst, os.W_OK | os.X_OK):
-                return f"{dst} is not writable/searchable"
-            marker = dst / MANAGED_SCRIPTS_MARKER
-            legacy_marker = dst / LEGACY_MANAGED_SCRIPTS_MARKER
-            if not marker.exists() and not legacy_marker.exists() and any(dst.iterdir()):
-                return f"{dst} is non-empty and not marked as managed"
-            probe = _write_probe(dst)
-            return probe
-
-        parent = _nearest_existing_parent(dst)
-        if parent is None:
-            return f"{dst} has no existing parent"
-        if not os.access(parent, os.W_OK | os.X_OK):
-            return f"{parent} cannot create {dst.name}"
-        return ""
-
     def _mapped_project_directory(self, compose_file: Path) -> Path | None:
         host_base = self.options.host_docker_base
         if host_base is None:
@@ -714,7 +467,7 @@ def doctor_result_from_namespace(
     repo_root: str | Path,
     environ: Mapping[str, str] | None = None,
 ) -> DoctorResult:
-    env = load_configured_environ(environ)
+    env = dict(os.environ if environ is None else environ)
     try:
         options = options_from_namespace(args, repo_root=repo_root, environ=env)
     except DoctorConfigError as exc:
@@ -762,19 +515,14 @@ def _check_code(name: str) -> str:
 
 
 def _check_category(name: str) -> str:
-    if name.startswith("python ") or name in {"sudo", UPDATER_EXECUTABLE_CHECK}:
+    if name.startswith("python "):
         return "runtime"
     if name.startswith("docker "):
         return "docker"
     if name.startswith(("compose ", "bind mount path safety")):
         return "compose"
-    if (
-        name.startswith(("WUD_", "DOCKER_BASE", "HOST_DOCKER_BASE"))
-        or name == "packaged WUD scripts"
-    ):
+    if name.startswith(("WUD_", "DOCKER_BASE", "HOST_DOCKER_BASE")):
         return "paths"
-    if name.startswith("TrueNAS"):
-        return "truenas"
     if name == "configuration":
         return "configuration"
     return "general"
@@ -852,17 +600,6 @@ def _suggestions_for(status: str, name: str) -> tuple[DoctorSuggestion, ...]:
                 snippet="WUD_LOG_DIR=/logs",
             ),
         )
-    if name in {"packaged WUD scripts", WUD_SCRIPT_SYNC_CHECK}:
-        return (
-            DoctorSuggestion(
-                label="Check script sync",
-                description=(
-                    "Verify the packaged WUD scripts are executable and "
-                    "the managed script volume is mounted at /managed-wud."
-                ),
-                snippet="wud-scripts:/managed-wud",
-            ),
-        )
     if name.startswith("compose "):
         return (
             DoctorSuggestion(
@@ -882,28 +619,6 @@ def _suggestions_for(status: str, name: str) -> tuple[DoctorSuggestion, ...]:
                     "Replace helper-only bind paths with paths visible to the "
                     "host Docker daemon."
                 ),
-            ),
-        )
-    if name.startswith("TrueNAS status helper"):
-        return (
-            DoctorSuggestion(
-                label="Enable optional TrueNAS check",
-                description=(
-                    "Enable this only when TrueNAS update status should be "
-                    "included."
-                ),
-                snippet="TRUENAS_STATUS_CHECK=true",
-            ),
-        )
-    if name == "sudo":
-        return (
-            DoctorSuggestion(
-                label="Disable sudo if not needed",
-                description=(
-                    "Unset WUDUP_USE_SUDO or set it to false when the updater "
-                    "can run directly."
-                ),
-                snippet="WUDUP_USE_SUDO=false",
             ),
         )
     return ()
@@ -933,21 +648,7 @@ def options_from_namespace(
         or environ.get("WUD_LOG_DIR")
         or _default_log_dir()
     )
-    scripts_dir = Path(
-        str(getattr(args, "scripts_dir", "") or "")
-        or environ.get("WUD_SCRIPTS_DIR")
-        or DEFAULT_CONTAINER_SCRIPTS_DIR
-    )
-    packaged_scripts_dir = _default_packaged_scripts_dir(app_dir, repo_path)
     host_docker_base = environ.get("HOST_DOCKER_BASE") or ""
-    updater = env_value(environ, "WUDUP_UPDATER", "WUD_UPDATER") or _default_updater(
-        repo_path
-    )
-    updater_sudo_source, updater_sudo_value = _env_value_with_source(
-        environ,
-        "WUDUP_USE_SUDO",
-        "WUD_UPDATER_USE_SUDO",
-    )
     try:
         compose_ignore_paths = parse_compose_ignore_paths(
             environ.get(COMPOSE_IGNORE_PATHS_ENV)
@@ -959,52 +660,12 @@ def options_from_namespace(
         docker_base=docker_base,
         wud_file=wud_file,
         log_dir=log_dir,
-        scripts_dir=scripts_dir,
-        packaged_scripts_dir=packaged_scripts_dir,
         app_dir=app_dir,
-        updater=updater,
         host_docker_base=Path(host_docker_base) if host_docker_base else None,
         docker_host=environ.get("DOCKER_HOST") or "",
-        sync_scripts=_resolve_script_sync_mode(
-            environ.get("WUD_SYNC_SCRIPTS"),
-        ),
-        legacy_scripts_enabled=_resolve_bool_env(
-            environ.get("WUDUP_LEGACY_SCRIPTS"),
-            "WUDUP_LEGACY_SCRIPTS",
-            default=True,
-        ),
-        updater_use_sudo=_resolve_bool_env(
-            updater_sudo_value,
-            updater_sudo_source or "WUDUP_USE_SUDO",
-            default=False,
-        ),
-        updater_use_sudo_source=updater_sudo_source,
-        updater_use_sudo_value=updater_sudo_value.strip() if updater_sudo_value else "",
-        truenas_status_check=_resolve_bool_env(
-            environ.get("TRUENAS_STATUS_CHECK"),
-            "TRUENAS_STATUS_CHECK",
-            default=False,
-        ),
-        truenas_status_timeout=(
-            environ.get("TRUENAS_STATUS_TIMEOUT") or DEFAULT_TRUENAS_STATUS_TIMEOUT
-        ),
         compose_ignore_paths=compose_ignore_paths,
         no_color=bool(getattr(args, "no_color", False)),
     )
-
-
-def _env_value_with_source(
-    env: Mapping[str, str],
-    canonical: str,
-    legacy: str,
-) -> tuple[str, str | None]:
-    value = env.get(canonical)
-    if value:
-        return canonical, value
-    value = env.get(legacy)
-    if value:
-        return legacy, value
-    return "", None
 
 
 def _default_app_dir(repo_root: Path) -> str:
@@ -1028,58 +689,12 @@ def _default_log_dir() -> str:
     return "./logs"
 
 
-def _default_packaged_scripts_dir(app_dir: Path, repo_root: Path) -> Path:
-    app_scripts = app_dir / "wud"
-    if app_scripts.is_dir():
-        return app_scripts
-    return repo_root / "wud"
-
-
-def _default_updater(repo_root: Path) -> str:
-    repo_updater = repo_root / "bin" / "docker-update-from-wud"
-    if repo_updater.exists():
-        return str(repo_updater)
-    return "/app/bin/docker-update-from-wud"
-
-
 def _docker_unix_socket_path(docker_host: str) -> Path | None:
     if docker_host == "":
         return Path("/var/run/docker.sock")
     if docker_host.startswith("unix://"):
         return Path(docker_host.removeprefix("unix://"))
     return None
-
-
-def _resolve_bool_env(value: str | None, label: str, *, default: bool) -> bool:
-    if value is None or value == "":
-        return default
-
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise DoctorConfigError(
-        f"{label} must be one of true, false, 1, 0, yes, no, on, or off"
-    )
-
-
-def _resolve_script_sync_mode(value: str | None) -> str:
-    if value is None:
-        return "auto"
-    if value == "":
-        return "disabled"
-
-    normalized = value.strip().lower()
-    if normalized == "auto":
-        return "auto"
-    if normalized in {"1", "true", "yes", "on"}:
-        return "enabled"
-    if normalized in {"0", "false", "no", "off"}:
-        return "disabled"
-    raise DoctorConfigError(
-        "WUD_SYNC_SCRIPTS must be one of auto, true, false, 1, 0, yes, no, on, or off"
-    )
 
 
 def _write_probe(directory: Path) -> str:
@@ -1113,30 +728,6 @@ def _nearest_existing_parent(path: Path) -> Path | None:
     return parent
 
 
-def _canonical_dir_target(path: Path) -> Path | None:
-    if str(path) == "":
-        return None
-    if not path.is_absolute():
-        path = Path.cwd() / path
-
-    suffix: list[str] = []
-    probe = path
-    while not probe.exists():
-        if probe == probe.parent:
-            return None
-        suffix.insert(0, probe.name)
-        probe = probe.parent
-    if not probe.is_dir():
-        return None
-    try:
-        resolved = probe.resolve(strict=True)
-    except OSError:
-        return None
-    for part in suffix:
-        resolved = resolved / part
-    return resolved
-
-
 def _failure_detail(result: CommandResult) -> str:
     detail = _first_line(result.stderr) or _first_line(result.stdout)
     if detail:
@@ -1155,7 +746,3 @@ def _format_os_error(exc: OSError) -> str:
     if exc.errno:
         return f"{exc.strerror or errno.errorcode.get(exc.errno, 'OS error')} (errno {exc.errno})"
     return str(exc)
-
-
-def _seconds_valid(value: str) -> bool:
-    return value.isdigit()

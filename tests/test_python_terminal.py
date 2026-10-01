@@ -25,18 +25,6 @@ class FakeText:
 
 
 class TerminalRendererTests(unittest.TestCase):
-    def test_plain_docker_updates_output_matches_legacy_shape(self) -> None:
-        output = StringIO()
-        renderer = TerminalRenderer(stream=output)
-
-        renderer.docker_updates([(1, "repo/app:latest")])
-
-        text = output.getvalue()
-        self.assertIn("=== 📦 Docker Updates ===", text)
-        self.assertIn("1\trepo/app:latest", text)
-        self.assertNotIn("\x1b[", text)
-        self.assertNotIn("╭", text)
-
     def test_no_color_disables_forced_rich_output(self) -> None:
         output = StringIO()
         renderer = TerminalRenderer(
@@ -46,27 +34,11 @@ class TerminalRendererTests(unittest.TestCase):
             width=80,
         )
 
-        renderer.docker_updates([(1, "repo/app:latest")])
+        renderer.log_line(timestamp="12:41:08", level="WARN", message="plain output")
 
         text = output.getvalue()
-        self.assertIn("=== 📦 Docker Updates ===", text)
+        self.assertEqual(text, "[12:41:08] plain output\n")
         self.assertNotIn("\x1b[", text)
-        self.assertNotIn("╭", text)
-
-    @unittest.skipUnless(RICH_AVAILABLE, "Rich is not installed")
-    def test_forced_rich_docker_updates_output_uses_panel_table_and_color(self) -> None:
-        output = StringIO()
-        renderer = TerminalRenderer(stream=output, force_rich=True, width=80)
-
-        renderer.docker_updates([(1, "repo/app:latest")])
-
-        text = output.getvalue()
-        self.assertIn("Docker Updates", text)
-        self.assertIn("Image / container target", text)
-        self.assertIn("repo/app:latest", text)
-        self.assertIn("pending", text)
-        self.assertIn("╭", text)
-        self.assertIn("\x1b[", text)
 
     @unittest.skipUnless(RICH_AVAILABLE, "Rich is not installed")
     def test_forced_rich_log_line_styles_level(self) -> None:
@@ -84,25 +56,6 @@ class TerminalRendererTests(unittest.TestCase):
         self.assertIn("WARN", text)
         self.assertIn("[app] stopping affected service", text)
         self.assertIn("\x1b[", text)
-
-    @unittest.skipUnless(RICH_AVAILABLE, "Rich is not installed")
-    def test_forced_rich_prompt_choice_uses_supplied_choices(self) -> None:
-        output = StringIO()
-        renderer = TerminalRenderer(stream=output, force_rich=True, width=80)
-
-        with mock.patch("builtins.input", return_value="c") as input_mock:
-            choice = renderer.prompt_choice(
-                "Apply selected tag update entries?",
-                "[y] yes   [n] no   [c] change",
-            )
-
-        self.assertEqual(choice, "c")
-        input_mock.assert_called_once_with("Choice: ")
-        text = output.getvalue()
-        self.assertIn("Apply selected tag update entries?", text)
-        self.assertIn("[y] yes", text)
-        self.assertIn("[c] change", text)
-        self.assertNotIn("[a] all", text)
 
     def test_panel_omits_rich_style_when_body_style_is_absent(self) -> None:
         output = StringIO()

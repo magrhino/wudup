@@ -67,64 +67,30 @@ EOF
 
   run bash -n \
     entrypoint.sh \
-    install.sh \
-    bin/updates \
     bin/docker-update-from-wud \
-    wud/http.sh \
-    wud/release-parser.sh \
-    wud/release-notes-to-discord.sh \
-    wud/github-release-embed.sh \
-    wud/tag-manager.sh \
     tests/run-all.sh \
     tests/test-docker-update-from-wud.sh \
     tests/container-build.sh \
     tests/smoke-container-image.sh \
     tests/e2e-docker-compose.sh \
     tests/test-entrypoint.sh \
-    tests/test-github-release-embed.sh \
-    tests/test-release-parser.sh \
-    tests/test-release-notes-to-discord.sh \
-    tests/test-tag-manager.sh \
     tests/test-upstreams-map.sh \
-    tests/test-wud-append-updates.sh \
-    tests/test-install.sh \
     tests/test-publish-release-image.sh \
     .github/scripts/publish-release-image.sh \
-    tests/test-updates-wrapper.sh \
     tests/fakes/docker
-
-  run sh -n \
-    wud/on-update.sh \
-    wud/append-updates.sh
 
   run shellcheck \
     entrypoint.sh \
-    install.sh \
-    bin/updates \
     bin/docker-update-from-wud \
-    wud/on-update.sh \
-    wud/append-updates.sh \
-    wud/http.sh \
-    wud/release-parser.sh \
-    wud/release-notes-to-discord.sh \
-    wud/github-release-embed.sh \
-    wud/tag-manager.sh \
     tests/run-all.sh \
     tests/test-docker-update-from-wud.sh \
     tests/container-build.sh \
     tests/smoke-container-image.sh \
     tests/e2e-docker-compose.sh \
     tests/test-entrypoint.sh \
-    tests/test-github-release-embed.sh \
-    tests/test-release-parser.sh \
-    tests/test-release-notes-to-discord.sh \
-    tests/test-tag-manager.sh \
     tests/test-upstreams-map.sh \
-    tests/test-wud-append-updates.sh \
-    tests/test-install.sh \
     tests/test-publish-release-image.sh \
     .github/scripts/publish-release-image.sh \
-    tests/test-updates-wrapper.sh \
     tests/fakes/docker
 
   for test_script in tests/test-*.sh; do
