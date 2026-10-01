@@ -31,6 +31,7 @@ from .plans import (
     resolve_pending_groups,
 )
 from .web_database import immediate_transaction as _immediate_transaction
+from .web_job_registry import plan_can_apply
 from .web_metadata import json_object as _json_object
 from .web_metadata import json_object_or_empty
 from .web_models import (
@@ -40,7 +41,6 @@ from .web_models import (
     AutoUpdateSelection,
     WebSettings,
 )
-from .web_plans import plan_can_apply
 
 AUTO_UPDATE_POLL_SECONDS = 60.0
 AUTO_UPDATE_GRACE_SECONDS = 300
