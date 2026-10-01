@@ -423,10 +423,6 @@ def _midclt_command(method: str) -> list[str]:
     return ["midclt", "call", method]
 
 
-def _print_truenas_unreachable(check: str, reason: str = "") -> None:
-    print(_truenas_unreachable_message(check, reason))
-
-
 def _truenas_unreachable_message(check: str, reason: str = "") -> str:
     suffix = f" ({reason})" if reason else ""
     return f"ℹ️  TrueNAS not reachable; skipping {check}.{suffix}"

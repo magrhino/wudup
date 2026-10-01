@@ -213,7 +213,7 @@ class CommandRunner:
             except OSError as exc:
                 result = _result_from_os_error(argv, cwd_path, exc)
                 if check and not result.ok:
-                    raise CommandError(result)
+                    raise CommandError(result) from exc
                 return result
             finally:
                 os.close(slave_fd)
@@ -282,7 +282,7 @@ class CommandRunner:
         except OSError as exc:
             result = _result_from_os_error(argv, cwd_path, exc)
             if check and not result.ok:
-                raise CommandError(result)
+                raise CommandError(result) from exc
             return result
 
         threads = [

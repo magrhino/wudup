@@ -19,7 +19,6 @@ from wudup.db import (
     active_dependency_snooze_rows,
     active_snooze,
     active_tag_exclusion_rules,
-    blocking_dependency_snooze_rows,
     connect_db,
     init_db,
     insert_dependency_snooze,
@@ -953,13 +952,13 @@ class DatabaseTests(unittest.TestCase):
             )
 
             active_rows = active_dependency_snooze_rows(conn)
-            blocking_rows = blocking_dependency_snooze_rows(
+            blocking_rows = active_dependency_snooze_rows(
                 conn,
-                pending_service_keys=("stack/app", "stack/worker"),
+                service_keys=("stack/app", "stack/worker"),
             )
-            dependency_pending_rows = blocking_dependency_snooze_rows(
+            dependency_pending_rows = active_dependency_snooze_rows(
                 conn,
-                pending_service_keys=("stack/app", "stack/db"),
+                service_keys=("stack/app", "stack/db"),
             )
             insert_update_event(
                 conn,
@@ -970,9 +969,9 @@ class DatabaseTests(unittest.TestCase):
                 status="success",
                 created_at="2026-05-18T13:00:00+00:00",
             )
-            satisfied_rows = blocking_dependency_snooze_rows(
+            satisfied_rows = active_dependency_snooze_rows(
                 conn,
-                pending_service_keys=("stack/app", "stack/db"),
+                service_keys=("stack/app", "stack/db"),
             )
 
         self.assertEqual([row["service_key"] for row in active_rows], ["stack/app"])

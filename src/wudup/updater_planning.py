@@ -8,7 +8,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from .compose import ComposeBindMount, ComposeStack
-from .images import image_has_tag, image_with_tag
+from .images import image_with_tag
 from .updater_digest_pin import (
     _digest_pin_candidates as _digest_pin_candidates,
 )
@@ -116,18 +116,6 @@ def _container_bind_mount_path_issue(
                 "the Docker daemon must be able to see bind sources at the same path"
             )
     return ""
-
-
-def _digest_check_image(match: Match) -> str:
-    if match.target.desired_tag:
-        return image_with_tag(match.compose_image, match.target.desired_tag)
-    return match.resolved
-
-
-def _digest_check_allow_repo(match: Match) -> bool:
-    if match.target.desired_tag:
-        return False
-    return match.resolved != match.target.first or not image_has_tag(match.resolved)
 
 
 def _tag_updates(matches: Sequence[Match]) -> tuple[TagUpdate, ...]:

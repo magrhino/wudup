@@ -85,10 +85,6 @@ class DockerCli:
     def image_digest(self, image: str) -> str:
         return _first_nonblank(self.image_repo_digests(image))
 
-    def image_label(self, image: str, label: str) -> str:
-        value, _error = self.try_image_label(image, label)
-        return value
-
     def try_image_label(self, image: str, label: str) -> tuple[str, CommandError | None]:
         fmt = f'{{{{ index .Config.Labels "{label}" }}}}'
         try:
@@ -98,12 +94,6 @@ class DockerCli:
         if value == "<no value>":
             return "", None
         return value, None
-
-    def image_has_digest(self, image: str, expected: str) -> bool:
-        for digest in self.image_repo_digests(image):
-            if digest.rsplit("@", 1)[-1] == expected:
-                return True
-        return False
 
     def manifest_inspect(self, image: str) -> CommandResult:
         return self.runner.capture(

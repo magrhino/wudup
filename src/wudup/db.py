@@ -341,19 +341,6 @@ def active_dependency_snooze_rows(
     )
 
 
-def blocking_dependency_snooze_rows(
-    conn: sqlite3.Connection,
-    *,
-    pending_service_keys: Iterable[str],
-) -> tuple[sqlite3.Row, ...]:
-    """Return active dependency snoozes for pending target services."""
-
-    pending = set(pending_service_keys)
-    if not pending:
-        return ()
-    return active_dependency_snooze_rows(conn, service_keys=pending)
-
-
 def insert_pending_update(
     conn: sqlite3.Connection,
     *,

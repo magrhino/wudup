@@ -470,21 +470,6 @@ class ComposeCli:
             project_directory=project_directory,
         )
 
-    def down(
-        self,
-        directory: str | Path,
-        file: str,
-        *,
-        project_directory: str | Path | None = None,
-    ) -> CommandResult:
-        return self.run_with_services(
-            directory,
-            file,
-            (),
-            "down",
-            project_directory=project_directory,
-        )
-
     def pause(
         self,
         directory: str | Path,
@@ -619,92 +604,6 @@ class ComposeCli:
             bool(_WAIT_FLAG_RE.search(result.stdout))
             and "--wait-timeout" in result.stdout
         )
-
-    def pull_and_recreate(
-        self,
-        directory: str | Path,
-        file: str,
-        *,
-        mode: str = "stop",
-        services: Sequence[str] | None = None,
-        max_wait: int = 180,
-        use_native_wait: bool | None = None,
-        project_directory: str | Path | None = None,
-    ) -> None:
-        """Run the shell updater's pull/stop/up command sequence."""
-
-        if mode not in {"pause", "stop", "live"}:
-            raise ValueError("mode must be pause, stop, or live")
-
-        service_args = tuple(_service_args(services))
-        force_recreate = not service_args
-        self.pull(
-            directory,
-            file,
-            service_args,
-            project_directory=project_directory,
-        )
-
-        pre_up_error: CommandError | None = None
-        if mode == "pause":
-            try:
-                self.pause(
-                    directory,
-                    file,
-                    service_args,
-                    project_directory=project_directory,
-                )
-            except CommandError:
-                pass
-        elif mode == "stop":
-            try:
-                stop_services = service_args or tuple(
-                    reversed(
-                        self.config_services(
-                            directory,
-                            file,
-                            project_directory=project_directory,
-                        )
-                    )
-                )
-                self.stop(
-                    directory,
-                    file,
-                    stop_services,
-                    project_directory=project_directory,
-                )
-            except CommandError as exc:
-                pre_up_error = exc
-
-        if mode == "pause":
-            wait = False
-        elif use_native_wait is None:
-            wait = self.up_wait_supported(
-                directory,
-                file,
-                project_directory=project_directory,
-            )
-        else:
-            wait = use_native_wait
-        self.up(
-            directory,
-            file,
-            service_args,
-            wait=wait,
-            wait_timeout=max_wait if wait else None,
-            force_recreate=force_recreate,
-            project_directory=project_directory,
-        )
-
-        if mode == "pause":
-            self.unpause(
-                directory,
-                file,
-                service_args,
-                project_directory=project_directory,
-            )
-        if pre_up_error is not None:
-            raise pre_up_error
 
     def run_with_services(
         self,

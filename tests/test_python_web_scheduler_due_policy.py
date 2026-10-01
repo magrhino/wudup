@@ -35,7 +35,7 @@ def test_auto_update_plan_requires_fresh_selected_metadata() -> None:
             selected_metadata_statuses=lambda value=metadata_status: (value,),
         )
 
-        assert web_scheduler._plan_can_auto_apply(plan, settings) is False
+        assert web_scheduler.plan_can_apply(plan, settings) is False
 
     fresh_plan = SimpleNamespace(
         status="ready",
@@ -43,7 +43,7 @@ def test_auto_update_plan_requires_fresh_selected_metadata() -> None:
         issues=(),
         selected_metadata_statuses=lambda: ("fresh",),
     )
-    assert web_scheduler._plan_can_auto_apply(fresh_plan, settings) is True
+    assert web_scheduler.plan_can_apply(fresh_plan, settings) is True
 
 
 def test_auto_update_scheduler_applies_due_policy_at_configured_local_time(

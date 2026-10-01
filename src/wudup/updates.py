@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .banner import print_startup_banner
+from .command import _os_error_returncode
 from .config import COMPOSE_IGNORE_PATHS_ENV, DIGEST_PIN_UPDATES_ENV
 from .images import image_with_tag, tag_value_valid
 from .line_specs import LineSpecError, parse_line_spec
@@ -1323,11 +1324,3 @@ def _arg_or_default(value: object, default: str) -> str:
     if value is None:
         return default
     return str(value)
-
-
-def _os_error_returncode(exc: OSError) -> int:
-    if isinstance(exc, FileNotFoundError):
-        return 127
-    if isinstance(exc, PermissionError):
-        return 126
-    return exc.errno or 1

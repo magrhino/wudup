@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from collections.abc import Mapping
@@ -12,7 +11,7 @@ from .digest_verifier import ResolvedImageSubject
 from .platforms import platform_value
 from .security_scanner import SecurityScanResult
 from .security_severity import SECURITY_SEVERITIES, normalize_security_severity
-from .security_subjects import PendingSecurityRequest, subject_id
+from .security_subjects import PendingSecurityRequest, _hash_key, subject_id
 from .web_models import (
     SecurityScanFinding,
     SecurityScanInfo,
@@ -127,7 +126,7 @@ def upsert_scan_result(
     *,
     timestamp: str,
 ) -> None:
-    cache_key = _cache_key(
+    cache_key = _hash_key(
         request.request_key,
         subject_id(subject),
         result.scanner,
@@ -351,14 +350,6 @@ def _safe_int(value: object) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _cache_key(*parts: str) -> str:
-    digest = hashlib.sha256()
-    for part in parts:
-        digest.update(part.encode("utf-8"))
-        digest.update(b"\0")
-    return digest.hexdigest()
 
 
 def _prune_cache_rows(

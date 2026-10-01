@@ -379,11 +379,6 @@ def _effective_release_notes_enabled_state(settings: WebSettings) -> tuple[bool,
     return _stored_release_notes_enabled_state(settings)
 
 
-def _stored_release_notes_enabled(settings: WebSettings) -> bool:
-    enabled, _configured = _stored_release_notes_enabled_state(settings)
-    return enabled
-
-
 def _stored_release_notes_enabled_state(settings: WebSettings) -> tuple[bool, bool]:
     try:
         with closing(_connect_readonly_db(settings)) as conn:

@@ -68,10 +68,6 @@ class _StackUpdateState:
         return " ".join(self.services or ())
 
     @property
-    def stop_services_label(self) -> str:
-        return " ".join(self.stop_services or ())
-
-    @property
     def running_stop_services(self) -> tuple[str, ...]:
         running = set(self.running_services)
         return tuple(

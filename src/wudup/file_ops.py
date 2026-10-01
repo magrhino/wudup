@@ -111,21 +111,6 @@ def apply_configured_owner(path: str | Path, owner: OwnerConfig | None = None) -
         os.chown(target, owner.uid, owner.gid)
 
 
-def preserve_file_metadata(
-    src: str | Path,
-    dst: str | Path,
-    *,
-    owner: OwnerConfig | None = None,
-) -> None:
-    metadata = read_metadata(src)
-    owner = owner or OwnerConfig()
-    if owner.configured:
-        if owner.uid is None or owner.gid is None:
-            raise OwnerConfigError(_OWNER_PAIR_ERROR)
-        metadata = FileMetadata(mode=metadata.mode, uid=owner.uid, gid=owner.gid)
-    apply_metadata(dst, metadata)
-
-
 def apply_metadata(path: str | Path, metadata: FileMetadata) -> None:
     target = Path(path)
     st = target.stat()

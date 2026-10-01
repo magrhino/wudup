@@ -10,7 +10,7 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-from wudup.command import CommandError, CommandRunner, display_command
+from wudup.command import CommandRunner, display_command
 from wudup.compose import (
     ComposeBindMount,
     ComposeCli,
@@ -227,9 +227,6 @@ class DockerCliTests(FakeDockerCase):
         self.assertEqual(
             self.docker.image_digest("repo/web:latest"),
             "repo/web:latest@sha256:digest",
-        )
-        self.assertTrue(
-            self.docker.image_has_digest("repo/web:latest", "sha256:digest")
         )
         self.assertEqual(
             self.docker.try_inspect("cid-web", "{{.Name}}|{{.State.Status}}"),
@@ -683,140 +680,6 @@ class ComposeCliTests(FakeDockerCase):
         self.assertEqual(
             self.compose.ps_quiet(stack, "docker-compose.yml"),
             ["cid-app", "cid-db"],
-        )
-
-    def test_pull_and_recreate_service_scoped_order_matches_shell(self) -> None:
-        stack = self.make_stack(
-            "stack",
-            [
-                ("app", "repo/app:latest", "cid-app"),
-                ("db", "repo/db:latest", "cid-db"),
-            ],
-        )
-        self.set_image_after_pull("repo/app:latest", "new-app", "sha256:new-app")
-
-        self.compose.pull_and_recreate(
-            stack,
-            "docker-compose.yml",
-            mode="stop",
-            services=["app"],
-            use_native_wait=False,
-        )
-
-        self.assertEqual(
-            self.call_commands(),
-            [
-                "compose -f docker-compose.yml pull app",
-                "compose -f docker-compose.yml stop app",
-                "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
-            ],
-        )
-
-    def test_pull_and_recreate_stack_level_stops_before_force_recreate(self) -> None:
-        stack = self.make_stack("stack", [("app", "repo/app:latest", "cid-app")])
-        self.set_image_after_pull("repo/app:latest", "new-app", "sha256:new-app")
-
-        self.compose.pull_and_recreate(
-            stack,
-            "docker-compose.yml",
-            mode="stop",
-            use_native_wait=False,
-        )
-
-        self.assertEqual(
-            self.call_commands(),
-            [
-                "compose -f docker-compose.yml pull ",
-                "compose -f docker-compose.yml config --services",
-                "compose -f docker-compose.yml stop app",
-                "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate",
-            ],
-        )
-
-    def test_pull_and_recreate_rejects_invalid_mode_before_pull(self) -> None:
-        stack = self.make_stack("stack", [("app", "repo/app:latest", "cid-app")])
-
-        with self.assertRaisesRegex(ValueError, "mode must be pause, stop, or live"):
-            self.compose.pull_and_recreate(
-                stack,
-                "docker-compose.yml",
-                mode="invalid",
-            )
-
-        self.assertEqual(self.call_commands(), [])
-
-    def test_pull_and_recreate_attempts_up_after_stack_stop_failure(self) -> None:
-        stack = self.make_stack("stack", [("app", "repo/app:latest", "cid-app")])
-        self.set_image_after_pull("repo/app:latest", "new-app", "sha256:new-app")
-        (self.fake_root / "stacks" / "stack" / "stop_fail").write_text(
-            "1",
-            encoding="utf-8",
-        )
-
-        with self.assertRaises(CommandError):
-            self.compose.pull_and_recreate(
-                stack,
-                "docker-compose.yml",
-                mode="stop",
-                use_native_wait=False,
-            )
-
-        self.assertEqual(
-            self.call_commands(),
-            [
-                "compose -f docker-compose.yml pull ",
-                "compose -f docker-compose.yml config --services",
-                "compose -f docker-compose.yml stop app",
-                "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate",
-            ],
-        )
-
-    def test_pull_and_recreate_pause_mode_does_not_use_native_wait(self) -> None:
-        stack = self.make_stack("stack", [("app", "repo/app:latest", "cid-app")])
-        self.set_image_after_pull("repo/app:latest", "new-app", "sha256:new-app")
-
-        self.compose.pull_and_recreate(
-            stack,
-            "docker-compose.yml",
-            mode="pause",
-            services=["app"],
-            use_native_wait=True,
-        )
-
-        self.assertEqual(
-            self.call_commands(),
-            [
-                "compose -f docker-compose.yml pull app",
-                "compose -f docker-compose.yml pause app",
-                "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
-                "compose -f docker-compose.yml unpause app",
-            ],
-        )
-
-    def test_pull_and_recreate_pause_failure_continues_like_shell(self) -> None:
-        stack = self.make_stack("stack", [("app", "repo/app:latest", "cid-app")])
-        self.set_image_after_pull("repo/app:latest", "new-app", "sha256:new-app")
-        (self.fake_root / "stacks" / "stack" / "pause_fail").write_text(
-            "1",
-            encoding="utf-8",
-        )
-
-        self.compose.pull_and_recreate(
-            stack,
-            "docker-compose.yml",
-            mode="pause",
-            services=["app"],
-            use_native_wait=True,
-        )
-
-        self.assertEqual(
-            self.call_commands(),
-            [
-                "compose -f docker-compose.yml pull app",
-                "compose -f docker-compose.yml pause app",
-                "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
-                "compose -f docker-compose.yml unpause app",
-            ],
         )
 
     def test_up_wait_detection_and_wait_args_match_shell_order(self) -> None:

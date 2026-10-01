@@ -7,7 +7,6 @@ import ipaddress
 import secrets
 import socket
 import sqlite3
-import sys
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
@@ -1259,28 +1258,6 @@ def _validate_bind_host_allowed(settings: WebSettings, host: str) -> None:
         "the WebUI to that host. Set WUD_WEB_PUBLIC_ORIGIN to the "
         "browser-visible origin, or add extra aliases to WUD_WEB_ALLOWED_HOSTS."
     )
-
-
-def _print_setup_claim(
-    settings: WebSettings,
-    *,
-    host: str,
-    port: int,
-    claim: str,
-) -> None:
-    setup_url = _setup_url(settings, host=host, port=port, claim=claim)
-    print("WUDup WebUI is not configured.", file=sys.stderr)
-    print(file=sys.stderr)
-    print("Open this one-time setup link to create the first admin account:", file=sys.stderr)
-    print(file=sys.stderr)
-    print(setup_url, file=sys.stderr)
-    if host in {"0.0.0.0", "::"} and not settings.public_origin:
-        print(file=sys.stderr)
-        print(
-            "Set WUD_WEB_PUBLIC_ORIGIN when exposing the WebUI through a "
-            "LAN address or reverse proxy.",
-            file=sys.stderr,
-        )
 
 
 def _setup_url(settings: WebSettings, *, host: str, port: int, claim: str) -> str:

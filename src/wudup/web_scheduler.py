@@ -40,6 +40,7 @@ from .web_models import (
     AutoUpdateSelection,
     WebSettings,
 )
+from .web_plans import plan_can_apply
 
 AUTO_UPDATE_POLL_SECONDS = 60.0
 AUTO_UPDATE_GRACE_SECONDS = 300
@@ -317,7 +318,7 @@ def _auto_update_candidate(
         known_digest_provenance_by_service=known_digest_provenance_by_service,
         pending_source=pending_source,
     )
-    if not _plan_can_auto_apply(plan, settings):
+    if not plan_can_apply(plan, settings):
         return None
     return selection, plan, pending_source
 
@@ -348,16 +349,6 @@ def _build_auto_update_plan(
         host_docker_base=settings.host_docker_base,
         environ=settings.command_env,
         known_digest_provenance_by_service=known_digest_provenance_by_service,
-    )
-
-
-def _plan_can_auto_apply(plan: DryRunPlan, settings: WebSettings) -> bool:
-    return (
-        settings.mutations_enabled
-        and plan.status == "ready"
-        and all(status == "fresh" for status in plan.selected_metadata_statuses())
-        and not plan.skipped
-        and not any(issue.severity == "error" for issue in plan.issues)
     )
 
 
