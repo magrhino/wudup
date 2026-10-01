@@ -148,7 +148,7 @@ class FileOpsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "images.todo"
             path.write_text("old\n", encoding="utf-8")
-            os.chmod(path, 0o640)
+            os.chmod(path, 0o700)
             before = path.stat()
             owner = OwnerConfig.from_values(
                 str(os.getuid()),
