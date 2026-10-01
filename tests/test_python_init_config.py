@@ -43,7 +43,7 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        run_init(answers, repo_root=self.root, environ=self._env())
+        run_init(answers)
 
         content = config_file.read_text(encoding="utf-8")
         self.assertIn(f"HOST_DOCKER_BASE={self.root / 'docker'}", content)
@@ -277,7 +277,7 @@ class InitConfigTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(InitConfigError, "Refusing to overwrite"):
-            run_init(answers, repo_root=self.root, environ=self._env())
+            run_init(answers)
 
         self.assertEqual(config_file.read_text(encoding="utf-8"), "existing\n")
 
@@ -296,7 +296,7 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        result = run_init(answers, repo_root=self.root, environ=self._env())
+        result = run_init(answers)
 
         self.assertEqual(len(result.backups), 1)
         self.assertEqual(result.backups[0].read_text(encoding="utf-8"), "existing\n")
@@ -318,7 +318,7 @@ class InitConfigTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(InitConfigError, "Refusing to overwrite"):
-            run_init(answers, repo_root=self.root, environ=self._env())
+            run_init(answers)
 
         self.assertFalse(config_file.exists())
         self.assertEqual(override_file.read_text(encoding="utf-8"), "existing\n")
@@ -339,7 +339,7 @@ class InitConfigTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(InitConfigError, "non-regular"):
-            run_init(answers, repo_root=self.root, environ=self._env())
+            run_init(answers)
 
         self.assertTrue(config_file.is_dir())
         self.assertEqual(list(config_file.iterdir()), [])
@@ -357,15 +357,18 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        result = run_init(answers, repo_root=self.root, environ=self._env())
+        result = run_init(answers)
 
         self.assertEqual(result.backups, ())
         self.assertFalse(config_file.exists())
         self.assertIsNone(result.doctor_status)
 
     def test_removed_host_profile_is_rejected(self) -> None:
+        args = self._args(profile="host")
+        env = self._env()
+
         with self.assertRaisesRegex(InitConfigError, "profile must be one of"):
-            answers_from_namespace(self._args(profile="host"), environ=self._env())
+            answers_from_namespace(args, environ=env)
 
     def test_non_interactive_requires_profile_and_stack_root(self) -> None:
         with self.assertRaisesRegex(InitConfigError, "--profile"):
@@ -389,7 +392,7 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        run_init(answers, repo_root=self.root, environ=self._env())
+        run_init(answers)
 
         parsed = YAML(typ="safe").load(override_file.read_text(encoding="utf-8"))
         service = parsed["services"]["wudup"]
@@ -413,7 +416,7 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        run_init(answers, repo_root=self.root, environ=self._env())
+        run_init(answers)
 
         parsed = YAML(typ="safe").load(override_file.read_text(encoding="utf-8"))
         environment = parsed["services"]["wudup"]["environment"]
@@ -504,7 +507,7 @@ class InitConfigTests(unittest.TestCase):
             environ=self._env(),
         )
 
-        run_init(answers, repo_root=self.root, environ=self._env())
+        run_init(answers)
 
         parsed = YAML(typ="safe").load(override_file.read_text(encoding="utf-8"))
         service = parsed["services"]["wudup"]
@@ -586,7 +589,7 @@ class InitConfigTests(unittest.TestCase):
             as run,
             redirect_stdout(StringIO()),
         ):
-            result = run_init(answers, repo_root=self.root, environ=self._env())
+            result = run_init(answers)
 
         self.assertEqual(result.doctor_status, 0)
         self.assertEqual(
@@ -628,7 +631,7 @@ class InitConfigTests(unittest.TestCase):
                     mock.patch("wudup.init_config.subprocess.run") as run,
                     redirect_stdout(stdout),
                 ):
-                    result = run_init(answers, repo_root=self.root, environ=self._env())
+                    result = run_init(answers)
 
                 self.assertIsNone(result.doctor_status)
                 run.assert_not_called()

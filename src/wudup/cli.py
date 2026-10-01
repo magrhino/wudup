@@ -122,7 +122,7 @@ def _run_web(args: argparse.Namespace) -> int:
 def _run_init(args: argparse.Namespace) -> int:
     from .init_config import run_init_from_namespace
 
-    return run_init_from_namespace(args, repo_root=Path(__file__).resolve().parents[2])
+    return run_init_from_namespace(args)
 
 
 def build_parser() -> argparse.ArgumentParser:

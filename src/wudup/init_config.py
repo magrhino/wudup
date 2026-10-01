@@ -23,6 +23,8 @@ from .naming import CONFIG_DIR_NAME, DB_FILENAME, DISPLAY_NAME, TECHNICAL_NAME
 PROFILES = ("webui", "helper", "hardened")
 WEB_EXPOSURES = ("loopback", "lan", "reverse-proxy")
 DEFAULT_WEB_PORT = "7417"
+DEFAULT_STACK_ROOT = "/srv/docker"
+DEFAULT_LOG_DIR = "./logs"
 DEFAULT_UID_GID = "1000"
 
 
@@ -121,7 +123,6 @@ class InitPrompter:
 def run_init_from_namespace(
     args: argparse.Namespace,
     *,
-    repo_root: str | Path,
     environ: Mapping[str, str] | None = None,
     input_func: Callable[[str], str] | None = None,
 ) -> int:
@@ -129,7 +130,7 @@ def run_init_from_namespace(
     prompter = InitPrompter(input_func=input_func)
     try:
         answers = answers_from_namespace(args, environ=env, prompter=prompter)
-        result = run_init(answers, repo_root=repo_root, environ=env)
+        result = run_init(answers)
     except InitConfigError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -148,13 +149,7 @@ def answers_from_namespace(
     home = Path(environ.get("HOME") or str(Path.home()))
 
     profile = _resolve_profile(args, non_interactive, prompt)
-    stack_root = _resolve_stack_root(
-        args,
-        home,
-        profile,
-        non_interactive,
-        prompt,
-    )
+    stack_root = _resolve_stack_root(args, non_interactive, prompt)
     output_paths = _resolve_output_paths(
         args,
         home,
@@ -230,8 +225,6 @@ def _resolve_profile(
 
 def _resolve_stack_root(
     args: argparse.Namespace,
-    home: Path,
-    profile: str,
     non_interactive: bool,
     prompter: InitPrompter,
 ) -> Path:
@@ -241,7 +234,7 @@ def _resolve_stack_root(
             raise InitConfigError("--stack-root is required with --non-interactive")
         raw_stack_root = prompter.text(
             "Compose stack root",
-            _default_stack_root(home, profile),
+            DEFAULT_STACK_ROOT,
         )
     return _absolute_path(raw_stack_root, "stack root")
 
@@ -275,9 +268,9 @@ def _resolve_output_paths(
     if not raw_log_dir and not non_interactive:
         raw_log_dir = prompter.text(
             "Log/state directory",
-            _default_log_dir(profile),
+            DEFAULT_LOG_DIR,
         )
-    log_dir = Path(raw_log_dir or _default_log_dir(profile))
+    log_dir = Path(raw_log_dir or DEFAULT_LOG_DIR)
 
     raw_db_path = str(getattr(args, "db_path", "") or "")
     db_path = Path(raw_db_path or str(log_dir / DB_FILENAME))
@@ -308,15 +301,10 @@ def _resolve_init_uid_gid(
     return uid, gid
 
 
-def run_init(
-    answers: InitAnswers,
-    *,
-    repo_root: str | Path,
-    environ: Mapping[str, str],
-) -> InitResult:
+def run_init(answers: InitAnswers) -> InitResult:
     files = generate_files(answers)
     backups = _write_generated_files(files, answers)
-    doctor_status = _run_doctor_if_requested(answers, repo_root=repo_root, environ=environ)
+    doctor_status = _run_doctor_if_requested(answers)
     return InitResult(
         answers=answers,
         generated_files=files,
@@ -392,7 +380,7 @@ def _compose_override_content(answers: InitAnswers) -> str:
     service["environment"] = _compose_environment(answers)
     if answers.profile in {"webui", "hardened"}:
         _add_wud_health_dependency(service)
-    service["volumes"] = _compose_volumes(answers)
+    service["volumes"] = _compose_volumes()
     if answers.profile == "webui":
         service["ports"] = [
             "${WEBUI_HTTP_BIND:-127.0.0.1}:${WUD_WEB_PORT:-7417}:${WUD_WEB_PORT:-7417}"
@@ -466,7 +454,7 @@ def _compose_environment(answers: InitAnswers) -> dict[str, str]:
     return environment
 
 
-def _compose_volumes(answers: InitAnswers) -> list[str]:
+def _compose_volumes() -> list[str]:
     volumes = [
         "${HOST_DOCKER_BASE:-/srv/docker}:${HOST_DOCKER_BASE:-/srv/docker}",
         "${WEBUI_LOG_DIR:-./logs}:/logs",
@@ -518,12 +506,7 @@ def _preflight_generated_files(
             )
 
 
-def _run_doctor_if_requested(
-    answers: InitAnswers,
-    *,
-    repo_root: str | Path,
-    environ: Mapping[str, str],
-) -> int | None:
+def _run_doctor_if_requested(answers: InitAnswers) -> int | None:
     if answers.no_doctor or answers.dry_run:
         return None
     if not answers.non_interactive:
@@ -708,14 +691,6 @@ def _validate_uid_gid(uid: str, gid: str) -> None:
     for label, value in (("--uid", uid), ("--gid", gid)):
         if value and (not value.isdigit() or int(value) < 0):
             raise InitConfigError(f"{label} must be a numeric id")
-
-
-def _default_stack_root(home: Path, profile: str) -> str:
-    return "/srv/docker"
-
-
-def _default_log_dir(profile: str) -> str:
-    return "./logs"
 
 
 def _dotenv_content(title: str, values: Sequence[tuple[str, str]]) -> str:
