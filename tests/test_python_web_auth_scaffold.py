@@ -539,6 +539,67 @@ def test_trusted_forwarded_headers_use_last_proxy_hop(tmp_path: Path) -> None:
     )
 
 
+def test_trusted_x_forwarded_headers_win_over_client_forwarded(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {
+                "WUD_WEB_ALLOWED_HOSTS": "internal.test,wud.example.test",
+                "WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32",
+            },
+        )
+    )
+    settings = app.state.web_settings
+    request = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={
+            "forwarded": (
+                f"for={_DOC_FORWARDED_CLIENT_ALT_V4};proto=http;host=evil.test"
+            ),
+            "x-forwarded-for": _DOC_FORWARDED_CLIENT_V4,
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "wud.example.test",
+        },
+    )
+
+    assert (
+        web_auth_module._trusted_forwarded_origin(request, settings)
+        == "https://wud.example.test"
+    )
+    assert (
+        web_auth_module._request_client_address(request, settings)
+        == _DOC_FORWARDED_CLIENT_V4
+    )
+
+
+def test_trusted_forwarded_for_must_be_an_ip_address(tmp_path: Path) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+
+    for value in ("_hidden", "not-an-ip", '"[not-an-ip]:80"'):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={"forwarded": f"for={value}"},
+        )
+        assert web_auth_module._request_client_address(request, settings) == (
+            _DOC_PROXY_V4
+        ), value
+    bracketed = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": 'for="[2001:db8::7]:4711"'},
+    )
+    assert web_auth_module._request_client_address(bracketed, settings) == (
+        "2001:db8::7"
+    )
+
+
 def test_secure_cookie_auto_follows_effective_origin(tmp_path: Path) -> None:
     http_client = _client(tmp_path)
     https_client = _client(

@@ -30,11 +30,8 @@ def effective_origin(request: Request, settings: WebSettings) -> str:
 def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     if not client_is_trusted_proxy(request, settings):
         return ""
-    forwarded_origin = origin_from_forwarded_header(
-        request.headers.get("forwarded", "")
-    )
-    if forwarded_origin:
-        return forwarded_origin
+    # Proxies that only set X-Forwarded-* pass a client's own Forwarded header
+    # through unchanged, so the X-Forwarded-* values win when present.
     proto = last_forwarded_header_value(
         request.headers.get("x-forwarded-proto", "")
     )
@@ -43,7 +40,7 @@ def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     )
     if proto and host:
         return normalize_origin(f"{proto}://{host}")
-    return ""
+    return origin_from_forwarded_header(request.headers.get("forwarded", ""))
 
 
 def request_client_address(request: Request, settings: WebSettings) -> str:
@@ -61,15 +58,15 @@ def trusted_forwarded_client_address(
 ) -> str:
     if not client_is_trusted_proxy(request, settings):
         return ""
-    forwarded = client_address_from_forwarded_header(
+    # See trusted_forwarded_origin: X-Forwarded-For wins over Forwarded.
+    forwarded_for = normalize_forwarded_client_address(
+        last_forwarded_header_value(request.headers.get("x-forwarded-for", ""))
+    )
+    if forwarded_for:
+        return forwarded_for
+    return client_address_from_forwarded_header(
         request.headers.get("forwarded", "")
     )
-    if forwarded:
-        return forwarded
-    forwarded_for = last_forwarded_header_value(
-        request.headers.get("x-forwarded-for", "")
-    )
-    return normalize_forwarded_client_address(forwarded_for)
 
 
 def last_forwarded_header_value(value: str) -> str:
@@ -87,7 +84,12 @@ def client_address_from_forwarded_header(value: str) -> str:
     for segment in hop.split(";"):
         key, separator, raw = segment.strip().partition("=")
         if separator and key.lower() == "for":
-            return normalize_forwarded_client_address(raw)
+            address = normalize_forwarded_client_address(raw)
+            try:
+                ipaddress.ip_address(address)
+            except ValueError:
+                return ""
+            return address
     return ""
 
 
@@ -132,6 +134,13 @@ def client_is_trusted_proxy(request: Request, settings: WebSettings) -> bool:
     except ValueError:
         return False
     return any(address in network for network in settings.trusted_proxies)
+
+
+def request_has_forwarding_headers(request: Request) -> bool:
+    return any(
+        name == "forwarded" or name == "x-real-ip" or name.startswith("x-forwarded-")
+        for name in request.headers
+    )
 
 
 def raw_client_is_loopback(request: Request) -> bool:

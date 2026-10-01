@@ -396,6 +396,39 @@ def test_login_throttle_uses_trusted_forwarded_client_address(
     assert different_forwarded_address.status_code == 200
 
 
+def test_login_throttle_prefers_proxy_x_forwarded_for_over_client_forwarded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(web_auth_module.time, "monotonic", lambda: 1_000.0)
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": "10.0.0.1/32"},
+        )
+    )
+    setup_client = TestClient(app, client=("10.0.0.1", 50000))
+    _setup_admin(setup_client)
+    proxy_client = TestClient(app, client=("10.0.0.1", 50000))
+    headers = {**_csrf_headers(proxy_client), "X-Forwarded-For": "198.51.100.10"}
+
+    for index in range(web_auth_module.LOGIN_THROTTLE_MAX_FAILURES):
+        _assert_generic_auth_failed(
+            proxy_client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": "wrong"},
+                headers={**headers, "Forwarded": f"for=203.0.113.{index}"},
+            )
+        )
+    locked_response = proxy_client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "correct horse battery staple"},
+        headers={**headers, "Forwarded": "for=203.0.113.99"},
+    )
+
+    _assert_generic_auth_failed(locked_response)
+
+
 def test_login_throttle_ignores_untrusted_forwarded_client_address(
     tmp_path: Path,
     monkeypatch,
