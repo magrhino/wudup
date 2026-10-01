@@ -88,6 +88,7 @@ class CommandRunner:
 
         argv = normalize_args(args)
         cwd_path = Path(cwd) if cwd is not None else None
+        os_error: OSError | None = None
         try:
             # Security audit: argv stays a tuple and shell=False is the subprocess default.
             completed = subprocess.run(  # nosemgrep
@@ -116,9 +117,10 @@ class CommandRunner:
                 stderr=_decode_timeout_output(exc.stderr) or "command timed out",
             )
         except OSError as exc:
+            os_error = exc
             result = _result_from_os_error(argv, cwd_path, exc)
         if check and not result.ok:
-            raise CommandError(result)
+            raise CommandError(result) from os_error
         return result
 
     def capture_lines(
@@ -152,6 +154,7 @@ class CommandRunner:
 
         argv = normalize_args(args)
         cwd_path = Path(cwd) if cwd is not None else None
+        os_error: OSError | None = None
         try:
             completed = subprocess.run(
                 argv,
@@ -166,9 +169,10 @@ class CommandRunner:
                 returncode=completed.returncode,
             )
         except OSError as exc:
+            os_error = exc
             result = _result_from_os_error(argv, cwd_path, exc)
         if check and not result.ok:
-            raise CommandError(result)
+            raise CommandError(result) from os_error
         return result
 
     def run_in_pty(
