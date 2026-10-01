@@ -47,8 +47,9 @@ candidate security scans.
 
 ## Capabilities and Constraints
 
-- The WebUI/API is the primary supported workflow. Host and helper-container
-  CLI paths are legacy conveniences; API and CLI feature parity is not a goal.
+- The WebUI/API is the primary supported workflow. The helper-container
+  `docker-update-from-wud` path is a legacy convenience; API and CLI feature
+  parity is not a goal.
 - The WebUI starts read-only. Browser mutations must be enabled intentionally,
   and update operations require an explicit plan and confirmation. Dry-run
   paths must remain non-mutating.
