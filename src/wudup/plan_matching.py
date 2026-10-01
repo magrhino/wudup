@@ -19,7 +19,7 @@ from .plan_models import (
     UnmatchedDiagnostic,
 )
 from .updater_matching import _services_for_target_match
-from .updater_models import CompletedUpdateSelection, Match, UpdateSelection
+from .updater_models import Match, UpdateSelection
 from .wud_file import ParsedWudFile, WudTarget
 
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
@@ -27,7 +27,6 @@ COMPOSE_WORKING_DIR_LABEL = "com.docker.compose.project.working_dir"
 COMPOSE_CONFIG_FILES_LABEL = "com.docker.compose.project.config_files"
 COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
 SELECTION_ID_PREFIX = "sel-v1-"
-COMPLETION_ID_PREFIX = "done-v1-"
 UNMATCHED_HINT = (
     "Preflight found a matching running container, but its Docker Compose "
     "labels do not point to an active supported Compose file. Restore or "
@@ -172,71 +171,6 @@ def selection_id_for_matches(matches: Sequence[Match]) -> str:
     )
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return f"{SELECTION_ID_PREFIX}{digest}"
-
-
-def completed_update_selection_for_matches(
-    matches: Sequence[Match],
-) -> CompletedUpdateSelection:
-    payload = _selection_identity_payload(matches)
-    payload.pop("line_no")
-    payload.pop("compose_images")
-    canonical = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return CompletedUpdateSelection(
-        target_key=pending_target_key(matches[0].target.raw),
-        completion_id=f"{COMPLETION_ID_PREFIX}{digest}",
-    )
-
-
-def completed_update_selections_for_matches(
-    matches: Sequence[Match],
-) -> tuple[CompletedUpdateSelection, ...]:
-    grouped_matches: dict[tuple[int, int], list[Match]] = {}
-    for match in matches:
-        grouped_matches.setdefault(
-            (match.stack.index, match.target.line_no),
-            [],
-        ).append(match)
-    return tuple(
-        completed_update_selection_for_matches(group)
-        for _key, group in sorted(grouped_matches.items())
-    )
-
-
-def filter_matches_for_completed_update_selections(
-    matches: Sequence[Match],
-    completed: Sequence[CompletedUpdateSelection],
-) -> list[Match]:
-    completed_keys = {
-        (item.target_key, item.completion_id) for item in completed
-    }
-    if not completed_keys:
-        return list(matches)
-    grouped_matches: dict[tuple[int, int], list[Match]] = {}
-    for match in matches:
-        grouped_matches.setdefault(
-            (match.stack.index, match.target.line_no),
-            [],
-        ).append(match)
-    excluded = {
-        (stack_index, line_no)
-        for (stack_index, line_no), group in grouped_matches.items()
-        if (
-            (completed_item := completed_update_selection_for_matches(group)).target_key,
-            completed_item.completion_id,
-        )
-        in completed_keys
-    }
-    return [
-        match
-        for match in matches
-        if (match.stack.index, match.target.line_no) not in excluded
-    ]
 
 
 def pending_target_key(raw: str) -> str:

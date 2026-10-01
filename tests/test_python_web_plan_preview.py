@@ -20,7 +20,6 @@ from wudup import web_plans as plans_module
 from wudup.compose import ComposeStack, ServiceImage
 from wudup.config import ConfigError
 from wudup.plan_matching import (
-    completed_update_selection_for_matches,
     selection_id_for_matches,
 )
 from wudup.plan_models import DryRunPlanSource
@@ -280,7 +279,7 @@ def test_plan_endpoint_scopes_shared_line_by_selection_id(
     }
 
 
-def test_completion_identity_survives_expected_compose_image_rewrites(
+def test_selection_identity_changes_when_compose_image_is_rewritten(
     tmp_path: Path,
 ) -> None:
     target = parse_wud_text("repo/shared:1.0 tag=2.0\n").targets[0]
@@ -311,12 +310,9 @@ def test_completion_identity_survives_expected_compose_image_rewrites(
     assert selection_id_for_matches((original,)) != selection_id_for_matches(
         (tag_rewrite,)
     )
-    assert completed_update_selection_for_matches(
-        (original,)
-    ) == completed_update_selection_for_matches((tag_rewrite,))
-    assert completed_update_selection_for_matches(
-        (original,)
-    ) == completed_update_selection_for_matches((digest_rewrite,))
+    assert selection_id_for_matches((original,)) != selection_id_for_matches(
+        (digest_rewrite,)
+    )
 
 
 def test_plan_endpoint_rejects_invalid_scoped_selections(

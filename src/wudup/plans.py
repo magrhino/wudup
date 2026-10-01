@@ -36,7 +36,6 @@ from .plan_matching import (
     _cleanup_for_skipped,
     _match_targets,
     _unmatched_diagnostics,
-    filter_matches_for_completed_update_selections,
     filter_matches_for_selections,
     normalize_update_selections,
     selection_id_for_matches,
@@ -78,7 +77,6 @@ from .updater_matching import (
     _stacks_to_update,
 )
 from .updater_models import (
-    CompletedUpdateSelection,
     DigestPinLabelRewrite,
     DigestPinLabelRewriteApproval,
     DigestPinUpdate,
@@ -132,7 +130,6 @@ _DigestUnpinUpdatesByStack = Mapping[int, Sequence[DigestUnpinUpdate]]
 @dataclass(frozen=True)
 class _PlanSelectionScope:
     update_selections: Sequence[UpdateSelection] = ()
-    completed_update_selections: Sequence[CompletedUpdateSelection] = ()
 
 
 @dataclass(frozen=True)
@@ -147,7 +144,6 @@ class _PlanBuilder(_UpdateScopeMixin):
     config: UpdaterConfig
     line_numbers: Sequence[int]
     update_selections: Sequence[UpdateSelection] = ()
-    completed_update_selections: Sequence[CompletedUpdateSelection] = ()
     allow_tag_updates: bool = False
     tag_overrides: Sequence[TagOverride] = ()
     tag_stream_decisions: Sequence[TagStreamDecision] = ()
@@ -261,10 +257,6 @@ class _PlanBuilder(_UpdateScopeMixin):
             )
         else:
             matches, skipped, digest_unpin_issues = self._build_matches(parsed, stacks)
-            matches = filter_matches_for_completed_update_selections(
-                matches,
-                self.completed_update_selections,
-            )
             matches, normalized_selections = filter_matches_for_selections(
                 matches,
                 normalized_selections,
@@ -380,7 +372,6 @@ class _PlanBuilder(_UpdateScopeMixin):
             selected_line_numbers=selected,
             summary=summary,
             selected_selections=normalized_selections,
-            completed_update_selections=tuple(self.completed_update_selections),
             source=plan_source,
             targets=targets,
             stacks=plan_stacks,
@@ -797,7 +788,6 @@ def build_dry_run_plan(
     *,
     line_numbers: Sequence[int],
     update_selections: Sequence[UpdateSelection] = (),
-    completed_update_selections: Sequence[CompletedUpdateSelection] = (),
     allow_tag_updates: bool = False,
     tag_overrides: Sequence[TagOverride] = (),
     tag_stream_decisions: Sequence[TagStreamDecision] = (),
@@ -816,7 +806,6 @@ def build_dry_run_plan(
         config=config,
         line_numbers=line_numbers,
         update_selections=update_selections,
-        completed_update_selections=completed_update_selections,
         allow_tag_updates=allow_tag_updates,
         tag_overrides=tag_overrides,
         tag_stream_decisions=tag_stream_decisions,
@@ -896,7 +885,6 @@ def _build_dry_run_plan_from_pending_source(
         config=config,
         line_numbers=line_numbers,
         update_selections=selections.update_selections,
-        completed_update_selections=selections.completed_update_selections,
         allow_tag_updates=allow_tag_updates,
         tag_overrides=stream_inputs.tag_overrides,
         tag_stream_decisions=stream_inputs.decisions,
@@ -919,7 +907,6 @@ def resolve_pending_groups(
     host_docker_base: Path | None = None,
     environ: Mapping[str, str] | None = None,
     known_digest_provenance_by_service: _DigestProvenanceByService | None = None,
-    completed_update_selections: Sequence[CompletedUpdateSelection] = (),
 ) -> PendingGroupingResult:
     runner = CommandRunner(env=environ) if environ is not None else CommandRunner()
     docker = DockerCli(runner=runner)
@@ -954,10 +941,6 @@ def resolve_pending_groups(
         known_digest_provenance_by_service=known_digest_provenance_by_service or {},
     )
     matches, skipped, _digest_unpin_issues = scope_builder._build_matches(parsed, stacks)
-    matches = filter_matches_for_completed_update_selections(
-        matches,
-        completed_update_selections,
-    )
     scope_builder._filter_digest_unpin_updates(matches)
     diagnostics = _unmatched_diagnostics(
         config,

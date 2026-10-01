@@ -528,12 +528,7 @@ def test_apply_job_refreshes_only_api_pending_source(
         def __init__(self, *_args, **_kwargs) -> None:
             self.audit_run_id = 7
             self.log_file = tmp_path / "apply.log"
-            self.options = SimpleNamespace(
-                update_selections=(),
-                completed_update_selections=(),
-            )
-            self.successful_completed_update_selections = ()
-            self.discovered_completed_update_selections = ()
+            self.options = SimpleNamespace(update_selections=())
 
         def run(self) -> int:
             return 0

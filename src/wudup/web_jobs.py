@@ -33,7 +33,6 @@ from .updater import UpdateFromWudRunner
 from .updater_digest_pin import digest_pin_update_from_values
 from .updater_digest_unpin import digest_unpin_update_from_values
 from .updater_models import (
-    CompletedUpdateSelection,
     DigestPinLabelRewriteApproval,
     DigestPinUpdate,
     DigestUnpinUpdate,
@@ -102,7 +101,6 @@ class ApplyJobRunContext:
 class _ApplySelectionScope:
     line_numbers: tuple[int, ...]
     update_selections: tuple[UpdateSelection, ...] = ()
-    completed_update_selections: tuple[CompletedUpdateSelection, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -174,7 +172,6 @@ def _submit_apply_job_state(
                 auto_update_schedule_run_updater,
                 active_run_context,
                 tuple(plan.selected_selections),
-                tuple(plan.completed_update_selections),
                 tag_stream_updates,
             )
         except Exception:
@@ -346,7 +343,6 @@ def _run_apply_job(
     auto_update_schedule_run_updater: AutoUpdateScheduleRunUpdater,
     run_context: ApplyJobRunContext,
     update_selections: tuple[UpdateSelection, ...] = (),
-    completed_update_selections: tuple[CompletedUpdateSelection, ...] = (),
     tag_stream_updates: tuple[TagStreamUpdate, ...] = (),
 ) -> None:
     if run_context.start_event is not None:
@@ -376,7 +372,6 @@ def _run_apply_job(
             selection_scope=_ApplySelectionScope(
                 line_numbers=line_numbers,
                 update_selections=update_selections,
-                completed_update_selections=completed_update_selections,
             ),
             plan_inputs=_ApplyPlanInputs(
                 allow_tag_updates=allow_tag_updates,
@@ -646,7 +641,6 @@ def _apply_options(
         log_dir_label=str(config.log_dir),
         metadata_json=metadata_json,
         update_selections=selection_scope.update_selections,
-        completed_update_selections=selection_scope.completed_update_selections,
         protected_container=settings.restart_container,
     )
 

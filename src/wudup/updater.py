@@ -23,7 +23,6 @@ from .updater_matching import (
     _unique_matches,
 )
 from .updater_models import (
-    CompletedUpdateSelection,
     DigestRequirementOutcomes,
     StackStatus,
     UpdaterError,
@@ -86,12 +85,6 @@ class UpdateFromWudRunner(
         self.preflight_skipped_pending_line_numbers: set[int] = set()
         self.expected_digest_outcomes = DigestRequirementOutcomes()
         self.partially_selected_line_numbers: tuple[int, ...] = ()
-        self.successful_completed_update_selections: tuple[
-            CompletedUpdateSelection, ...
-        ] = ()
-        self.discovered_completed_update_selections: tuple[
-            CompletedUpdateSelection, ...
-        ] = ()
         self.matched_tag_stream_updates: set[TagStreamUpdate] = set()
         self.audit_conn: sqlite3.Connection | None = None
         self.audit_run_id: int | None = None
@@ -480,10 +473,7 @@ class UpdateFromWudRunner(
             stack_matches = [
                 match for match in matches if match.stack.index == stack.index
             ]
-            stack_status = self._update_stack(stack, stack_matches)
-            stack_statuses[stack.index] = stack_status
-            if stack_status.status == "success":
-                self._record_successful_completed_update_selections(stack_matches)
+            stack_statuses[stack.index] = self._update_stack(stack, stack_matches)
         return stack_statuses
 
     def _preflight_matching_stack_digests(

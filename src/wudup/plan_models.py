@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .digest_provenance import DigestTagProvenance
-from .updater_models import CompletedUpdateSelection, UpdateSelection
+from .updater_models import UpdateSelection
 
 if TYPE_CHECKING:
     from .web_models import (
@@ -236,7 +236,6 @@ class DryRunPlan:
     selected_line_numbers: tuple[int, ...]
     summary: DryRunPlanSummary
     selected_selections: tuple[UpdateSelection, ...] = ()
-    completed_update_selections: tuple[CompletedUpdateSelection, ...] = ()
     source: DryRunPlanSource = field(default_factory=DryRunPlanSource)
     targets: tuple[DryRunPlanTarget, ...] = ()
     stacks: tuple[DryRunPlanStack, ...] = ()
