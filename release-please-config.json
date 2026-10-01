@@ -8,6 +8,7 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "initial-version": "1.0.0",
+      "bump-minor-pre-major": true,
       "draft": true,
       "force-tag-creation": true,
       "changelog-sections": [
