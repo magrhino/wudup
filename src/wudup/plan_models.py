@@ -128,6 +128,8 @@ class DryRunPlanDigestUnpinUpdate:
     label_value: str
     services: tuple[str, ...]
     digest_provenance: DigestTagProvenance | None = None
+    transform_label_value: str = ""
+    transform_services: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

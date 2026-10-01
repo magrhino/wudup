@@ -1025,6 +1025,50 @@ class UpdateFromWudDigestPinTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(plan.stacks[0].digest_unpin_updates[0].tag_image, "repo/app:latest")
 
 
+    def test_digest_unpin_plan_reports_blank_transform_label(self) -> None:
+        self.wud_file.write_text(
+            "repo/app:4.0.19.2979-ls321@sha256:child\n",
+            encoding="utf-8",
+        )
+        stack_dir = self.make_stack("app", [("app", "repo/app@sha256:old", "cid-app")])
+        (stack_dir / "docker-compose.yml").write_text(
+            "\n".join(
+                [
+                    "services:",
+                    "  app:",
+                    "    # wudup.resolved-tag=4.0.19.2979-ls321",
+                    "    image: repo/app@sha256:old",
+                    "    labels:",
+                    "      - wud.tag.include=^4\\.0\\.19\\.2979-ls321$$",
+                    "      - wud.tag.transform=",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(
+            {
+                "DOCKER_BASE": str(self.base),
+                "WUD_OUT_FILE": str(self.wud_file),
+                "WUD_LOG_DIR": str(self.log_dir),
+                "WUD_DIGEST_PIN_UPDATES": "false",
+            },
+            home=str(self.root),
+        )
+
+        plan = build_dry_run_plan(
+            config,
+            line_numbers=(1,),
+            allow_tag_updates=False,
+            environ=self.env,
+        )
+
+        self.assertEqual(plan.status, "blocked")
+        self.assertIn(
+            "compose-digest-unpin-unsupported",
+            [issue.code for issue in plan.issues],
+        )
+
 
 class DigestPinNoTagRequiredTests(FakeDockerTestCase):
     """Tests for _validate_digest_pin_plan rejecting lines without resolved tags."""

@@ -502,6 +502,9 @@ def validate_digest_unpin_plan(runner: Any, matches: Sequence[Match]) -> bool:
                 stack.directory / stack.file,
                 stack_updates,
                 stack_name=stack.name,
+                config_transforms=compose_rewrite.compose_config_wud_tag_transforms(
+                    stack.service_images
+                ),
             )
     except (ComposeTagRewriteError, UpdaterError) as exc:
         ok = False

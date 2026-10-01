@@ -922,6 +922,8 @@ export interface PlanDigestUnpinUpdate {
   label_value: string;
   services: string[];
   digest_provenance?: DigestTagProvenance | null;
+  transform_label_value?: string;
+  transform_services?: string[];
 }
 
 export interface PlanAction {

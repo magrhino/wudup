@@ -1629,10 +1629,40 @@ describe("pending helper modules", () => {
     );
 
     expect(wrapper.text()).toContain("Digest unpin migration");
+    expect(wrapper.text()).toContain("wud.tag.include=^latest$");
+    expect(wrapper.text()).not.toContain("wud.tag.transform");
     expect(wrapper.text()).toContain("1 digest unpin migration");
     expect(wrapper.text()).toContain("repo/app@sha256:old");
     expect(wrapper.text()).toContain("repo/app:latest");
     expect(wrapper.text()).toContain("Digest unpin");
+  });
+
+  it("shows the release-line filter and transform a digest unpin writes", () => {
+    const plan = planResponse();
+    const update = {
+      source_image: "repo/app@sha256:old",
+      resolved_tag: "4.0.19.2979-ls321",
+      tag_image: "repo/app:4.0.19.2979-ls321",
+      current_digest: "sha256:old",
+      target_digest: "sha256:new",
+      watch_tag: "4.0.19.2979-ls321",
+      marker: "wudup.resolved-tag=4.0.19.2979-ls321",
+      label_key: "wud.tag.include",
+      label_value: String.raw`^\d+\.\d+\.\d+\.\d+-ls\d+$$`,
+      services: ["app", "worker"],
+      transform_label_value: String.raw`^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5`,
+      transform_services: ["app"],
+    };
+    const wrapper = mountPendingModal(
+      PendingPlanReviewModal,
+      pendingPlanReviewModalProps({ plan, planDigestUnpinUpdates: [{ stack: "media", update }] }),
+    );
+
+    expect(wrapper.text()).toContain(String.raw`wud.tag.include=^\d+\.\d+\.\d+\.\d+-ls\d+$`);
+    expect(wrapper.text()).toContain(
+      String.raw`wud.tag.transform=^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5`,
+    );
+    expect(wrapper.text()).toContain("(app)");
   });
 
   it("renders both update-stream decisions and emits the keyboard-safe choice", async () => {

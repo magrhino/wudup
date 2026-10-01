@@ -30,6 +30,71 @@ from wudup.locks import DirectoryLock, WudLockError, lock_dir_for
     "fetch",
     side_effect=ManifestLookupError("registry unavailable in offline test"),
 )
+def test_apply_endpoint_unpin_tracks_release_line_with_transform(
+    _registry_fetch: mock.Mock,
+    tmp_path: Path,
+) -> None:
+    tag = "4.0.19.2979-ls321"
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **fake_env,
+        },
+    )
+    _seed_known_digest_provenance(tmp_path, tag=tag)
+    wud_file = tmp_path / "state" / "images.todo"
+    wud_file.write_text(f"repo/app:{tag}@sha256:new\n", encoding="utf-8")
+    compose_dir = _make_fake_stack(
+        tmp_path,
+        fake_root,
+        "stack",
+        [("app", "repo/app@sha256:old", "cid-app")],
+    )
+    compose_file = compose_dir / "docker-compose.yml"
+    compose_file.write_text(
+        "services:\n"
+        "  app:\n"
+        f"    # wudup.resolved-tag={tag}\n"
+        "    image: repo/app@sha256:old\n"
+        "    labels:\n"
+        "      - wud.tag.include=^4\\.0\\.19\\.2979-ls321$$\n",
+        encoding="utf-8",
+    )
+    _write_fake_image_after_pull(fake_root, f"repo/app:{tag}", "sha256:new-id", "sha256:new")
+    headers = _csrf_headers(client)
+    plan = client.post("/api/v1/plans", json={"line_numbers": [1]}, headers=headers).json()
+
+    apply_response = client.post(
+        "/api/v1/jobs",
+        json={"plan_id": plan["plan_id"], "line_numbers": [1], "confirmation": "apply"},
+        headers=headers,
+    )
+    job = _wait_apply_job(client, apply_response.json()["job_id"])
+
+    assert plan["status"] == "ready", plan["issues"]
+    unpin = plan["stacks"][0]["digest_unpin_updates"][0]
+    assert unpin["label_value"] == r"^\d+\.\d+\.\d+\.\d+-ls\d+$$"
+    assert unpin["transform_label_value"] == r"^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$ => $1.$2.$3-$4.$5"
+    assert unpin["transform_services"] == ["app"]
+    assert job["status"] == "success"
+    rendered = compose_file.read_text(encoding="utf-8")
+    assert f"image: repo/app:{tag}" in rendered
+    assert "wudup.resolved-tag" not in rendered
+    assert r"wud.tag.include=^\d+\.\d+\.\d+\.\d+-ls\d+$$" in rendered
+    assert (
+        r"wud.tag.transform=^(\d+)\.(\d+)\.(\d+)\.(\d+)-ls(\d+)$$ => $$1.$$2.$$3-$$4.$$5"
+        in rendered
+    )
+
+
+@mock.patch.object(
+    RegistryHttpManifestResolver,
+    "fetch",
+    side_effect=ManifestLookupError("registry unavailable in offline test"),
+)
 def test_apply_endpoint_applies_digest_unpin_plan_and_records_provenance(
     registry_fetch: mock.Mock,
     tmp_path: Path,
