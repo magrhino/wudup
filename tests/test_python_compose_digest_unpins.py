@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from unittest import mock
 
-from ruamel.yaml import YAML
-
 from compose_rewrite_helpers import ComposeRewriteTestCase
-from wudup import compose_rewrite
 from wudup.compose_rewrite import (
     apply_compose_digest_unpins,
     render_compose_digest_unpins,
 )
 from wudup.updater_digest_unpin import digest_unpin_update_from_values
-from wudup.updater_models import ComposeTagRewriteError
+from wudup.updater_models import ComposeTagRewriteError, ResolvedTagMarkerConflictError
 
 
 class ComposeDigestUnpinTests(ComposeRewriteTestCase):
@@ -153,26 +150,67 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
         self.assertIn("image: repo/app:latest", rendered)
         self.assertNotIn("wudup.resolved-tag", rendered)
 
-    def test_remove_resolved_tag_marker_rejects_partial_cleanup(self) -> None:
-        parsed = YAML(typ="rt").load(
+    def test_render_rejects_conflicting_resolved_tag_markers(self) -> None:
+        compose_file = self.write_compose(
             "services:\n"
             "  app:\n"
             "    # wudup.resolved-tag=latest\n"
             "    # wudup.resolved-tag=other\n"
             "    image: repo/app@sha256:old\n"
         )
-        services = parsed["services"]
-        service_config = services["app"]
+
+        with self.assertRaises(ResolvedTagMarkerConflictError):
+            render_compose_digest_unpins(
+                compose_file,
+                (self.digest_unpin_update(),),
+                stack_name="stack",
+            )
+
+    def test_render_removes_marker_and_keeps_adjacent_operator_comments(self) -> None:
+        for comments in (
+            "    # wudup.resolved-tag=latest\n    # keep pinned until X\n",
+            "    # keep pinned until X\n    #\n    # wudup.resolved-tag=latest\n",
+        ):
+            with self.subTest(comments=comments):
+                compose_file = self.write_compose(
+                    "services:\n"
+                    "  app:\n"
+                    "    restart: always\n"
+                    f"{comments}"
+                    "    image: repo/app@sha256:old\n"
+                )
+
+                rendered, applied = render_compose_digest_unpins(
+                    compose_file,
+                    (self.digest_unpin_update(),),
+                    stack_name="stack",
+                )
+
+                self.assertEqual(applied[0].replacements, 1)
+                self.assertIn("image: repo/app:latest", rendered)
+                self.assertIn("# keep pinned until X", rendered)
+                self.assertNotIn("wudup.resolved-tag", rendered)
+
+    def test_render_rejects_duplicate_include_labels(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    # wudup.resolved-tag=latest\n"
+            "    image: repo/app@sha256:old\n"
+            "    labels:\n"
+            "    - wud.tag.include=^latest$$\n"
+            "    - wud.watch=true\n"
+            "    - wud.tag.include=^latest$$\n"
+        )
 
         with self.assertRaisesRegex(
             ComposeTagRewriteError,
-            "resolved-tag marker is attached ambiguously",
+            "Service app lists the wud.tag.include label more than once",
         ):
-            compose_rewrite._remove_service_resolved_tag_marker(
-                services,
-                "app",
-                service_config,
-                "wudup.resolved-tag=latest",
+            render_compose_digest_unpins(
+                compose_file,
+                (self.digest_unpin_update(),),
+                stack_name="stack",
             )
 
     def test_apply_rejects_empty_digest_unpin_render_without_write(self) -> None:

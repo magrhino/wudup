@@ -14,30 +14,57 @@ from wudup.compose_rewrite import (
     _is_simple_exact_tag_include,
     exact_tags_regex,
 )
-from wudup.compose_source import _get_service_label_value, _yaml_scalar_boundary_matches
+from wudup.compose_source import (
+    _get_service_label_value,
+    _set_service_label_value,
+    _yaml_scalar_boundary_matches,
+)
 from wudup.updater_models import ComposeTagRewriteError
 
 
 class ComposeSourceLookupTests(unittest.TestCase):
-    def test_sequence_label_lookup_preserves_first_match_and_value(self) -> None:
+    def test_sequence_label_lookup_returns_single_match_value(self) -> None:
         for labels, expected in (
             ([], ""),
             (["other=value", "target"], ""),
-            (["target", "target=value=tail"], "value=tail"),
-            (["target=", "target=later"], ""),
-            (["other=value", "target=first", "target=later"], "first"),
+            (["target=value=tail", "other=value"], "value=tail"),
+            (["target=", "other=value"], ""),
             (["target=first", 123], "first"),
         ):
             with self.subTest(labels=labels):
                 service = CommentedMap(labels=CommentedSeq(labels))
-                self.assertEqual(_get_service_label_value(service, "target"), expected)
+                self.assertEqual(
+                    _get_service_label_value(service, "target", service="app"), expected
+                )
+
+    def test_sequence_label_lookup_and_set_reject_duplicate_keys(self) -> None:
+        # Compose keeps the last duplicate, so neither entry is safe to read or edit.
+        for labels in (
+            ["target", "target=value=tail"],
+            ["target=", "target=later"],
+            ["other=value", "target=first", "target=later"],
+        ):
+            with self.subTest(labels=labels):
+                service = CommentedMap(labels=CommentedSeq(labels))
+                expected = (
+                    "Service app lists the target label more than once; Docker Compose "
+                    "uses only the last one, so WUDup will not change it. Remove the "
+                    "duplicate target entries from the service labels, then try again."
+                )
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    _get_service_label_value(service, "target", service="app")
+                self.assertEqual(str(caught.exception), expected)
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    _set_service_label_value(service, "target", "new", service="app")
+                self.assertEqual(str(caught.exception), expected)
+                self.assertEqual(list(service["labels"]), labels)
 
     def test_sequence_label_lookup_rejects_non_strings_before_match(self) -> None:
         for labels in ([123, "target=value"], ["other=value", None], ["target", 123]):
             with self.subTest(labels=labels):
                 service = CommentedMap(labels=CommentedSeq(labels))
                 with self.assertRaises(ComposeTagRewriteError) as caught:
-                    _get_service_label_value(service, "target")
+                    _get_service_label_value(service, "target", service="app")
                 self.assertEqual(
                     str(caught.exception),
                     "Service labels use unsupported non-string list entries.",

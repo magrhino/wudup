@@ -267,6 +267,24 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
                 compose_file, (self.tag_exclusion_update(),), existing_exact_tags={}
             )
 
+    def test_render_rejects_duplicate_exclude_labels(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=^beta\n"
+            "    - wud.tag.exclude=^rc\n"
+        )
+
+        with self.assertRaisesRegex(
+            ComposeTagRewriteError,
+            "Service app lists the wud.tag.exclude label more than once",
+        ):
+            render_compose_tag_exclusions(
+                compose_file, (self.tag_exclusion_update(),), existing_exact_tags={}
+            )
+
     def test_get_service_label_value_none(self) -> None:
         compose_file = self.write_compose(
             "services:\n  app:\n    image: repo/app:1.0\n    labels:\n      wud.tag.exclude: \n"
