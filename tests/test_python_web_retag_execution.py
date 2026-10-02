@@ -315,6 +315,7 @@ class _RollbackCompose:
         stop_fails: bool = False,
     ) -> None:
         self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.remove_orphans: list[bool] = []
         self.stopped_up_fails = stopped_up_fails
         self.running_up_fails = running_up_fails
         self.ps_result = ps_result
@@ -327,6 +328,7 @@ class _RollbackCompose:
     def up(self, directory: Path, file: str, services: Any, **kwargs: Any) -> None:
         no_start = bool(kwargs.get("no_start"))
         self.calls.append(("up-no-start" if no_start else "up", tuple(services)))
+        self.remove_orphans.append(kwargs.get("remove_orphans", True))
         if no_start and self.stopped_up_fails:
             raise self._error("up-no-start")
         if not no_start and self.running_up_fails:
@@ -349,7 +351,12 @@ class _RollbackCompose:
             raise self._error("stop")
 
 
-def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
+def _restore_mixed_stack(
+    tmp_path: Path,
+    compose: _RollbackCompose,
+    *,
+    remove_orphans: bool = True,
+) -> str:
     """Roll back a stack where db was stopped and web was running before apply."""
     stack = ComposeStack(
         index=1,
@@ -374,6 +381,7 @@ def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
         "job",
         original_error="health failed",
         expected_source_hash="hash",
+        remove_orphans=remove_orphans,
     )
 
 
@@ -400,6 +408,23 @@ def test_retag_rollback_restores_mixed_stopped_and_running_services(
     assert "recreated and started web on the previous image" in summary
     assert "recreated db on the previous image without starting it" in summary
     assert not (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_keeps_orphans_when_project_name_is_shared(
+    tmp_path: Path,
+) -> None:
+    compose = _RollbackCompose()
+
+    _restore_mixed_stack(tmp_path, compose, remove_orphans=False)
+
+    # Both the stopped and the running service group must avoid --remove-orphans,
+    # or Compose would delete the other file set's containers.
+    assert [call[0] for call in compose.calls if call[0].startswith("up")] == [
+        "up-no-start",
+        "up",
+    ]
+    assert compose.remove_orphans == [False, False]
 
 
 @pytest.mark.usefixtures("_no_compose_restore")
@@ -504,11 +529,12 @@ def test_retag_rollback_reports_backup_cleanup_failure_after_services_restored(
 
 def test_retag_runtime_revalidation_without_updates_reports_no_stopped_services() -> None:
     # No approved updates means no Compose or runtime lookups are needed.
-    assert web_retag_apply._revalidate_retag_runtime_before_apply(
+    stopped, _remove_orphans = web_retag_apply._revalidate_retag_runtime_before_apply(
         None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         (),
-    ) == ()
+    )
+    assert stopped == ()
 
 
 def test_retag_restores_compose_when_directory_sync_fails_after_rewrite(

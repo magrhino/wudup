@@ -8,8 +8,15 @@ from typing import Any
 from . import compose_rewrite, updater_audit
 from .command import CommandError
 from .compose import (
+    COMPOSE_RUNTIME_FORMAT,
     COMPOSE_RUNTIME_STATE_FORMAT,
+    ComposeRuntimeServiceKey,
     ComposeStack,
+    compose_override_files_message,
+    compose_project_file_sets,
+    compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
+    compose_runtime_service_keys,
     compose_runtime_service_states,
 )
 from .images import (
@@ -327,46 +334,70 @@ def apply_tag_exclusions(
         return statuses
 
     successful_updates: list[TagExclusionUpdate] = []
+    recreate = runner.options.recreate_excluded_services
+    runtime_keys = _compose_runtime_keys(runner) if recreate else None
     for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
-        existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
-        try:
-            applied = compose_rewrite.apply_compose_tag_exclusions(
-                stack.directory / stack.file,
-                stack_updates,
-                existing_exact_tags=existing_exact_tags,
-            )
-        except ComposeTagRewriteError as exc:
-            runner.log.error(
-                f"[{stack.name}] Could not safely write wud.tag.exclude: {exc}"
-            )
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    "tag-exclusion-label-failed",
-                )
+        # Refuse before writing labels so a stack that cannot be recreated is
+        # not left with a wud.tag.exclude label its containers do not carry.
+        refusal_reason = (
+            _compose_file_refusal_reason(runner, stack, runtime_keys)
+            if recreate else ""
+        )
+        if refusal_reason:
+            _fail_stack_updates(statuses, stack_updates, refusal_reason)
             continue
-        except OSError as exc:
-            runner.log.error(f"[{stack.name}] Could not write wud.tag.exclude: {exc}")
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    "tag-exclusion-label-failed",
-                )
-            continue
-
-        for item in applied:
-            runner.log.info(
-                f"[{stack.name}] Updated wud.tag.exclude for service "
-                f"{item.service}: {', '.join(item.tags)}"
-            )
-        runner._record_tag_exclusion_rules(stack_updates)
         successful_updates.extend(
-            _applied_tag_exclusion_updates(stack_updates, applied)
+            _write_stack_tag_exclusions(runner, stack, stack_updates, statuses)
         )
 
-    if runner.options.recreate_excluded_services:
+    if recreate:
         runner._recreate_tag_exclusion_services(successful_updates, statuses)
     return statuses
+
+
+def _fail_stack_updates(
+    statuses: dict[tuple[int, int], StackStatus],
+    stack_updates: Sequence[TagExclusionUpdate],
+    reason: str,
+) -> None:
+    for update in stack_updates:
+        statuses[(update.stack.index, update.source_line)] = StackStatus(
+            "failure",
+            reason,
+        )
+
+
+def _write_stack_tag_exclusions(
+    runner: Any,
+    stack: ComposeStack,
+    stack_updates: Sequence[TagExclusionUpdate],
+    statuses: dict[tuple[int, int], StackStatus],
+) -> list[TagExclusionUpdate]:
+    existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
+    try:
+        applied = compose_rewrite.apply_compose_tag_exclusions(
+            stack.directory / stack.file,
+            stack_updates,
+            existing_exact_tags=existing_exact_tags,
+        )
+    except ComposeTagRewriteError as exc:
+        runner.log.error(
+            f"[{stack.name}] Could not safely write wud.tag.exclude: {exc}"
+        )
+        _fail_stack_updates(statuses, stack_updates, "tag-exclusion-label-failed")
+        return []
+    except OSError as exc:
+        runner.log.error(f"[{stack.name}] Could not write wud.tag.exclude: {exc}")
+        _fail_stack_updates(statuses, stack_updates, "tag-exclusion-label-failed")
+        return []
+
+    for item in applied:
+        runner.log.info(
+            f"[{stack.name}] Updated wud.tag.exclude for service "
+            f"{item.service}: {', '.join(item.tags)}"
+        )
+    runner._record_tag_exclusion_rules(stack_updates)
+    return _applied_tag_exclusion_updates(stack_updates, applied)
 
 
 def _applied_tag_exclusion_updates(
@@ -424,6 +455,56 @@ def recreate_tag_exclusion_services(
                 "failure",
                 "tag-exclusion-recreate-failed",
             )
+
+
+def _compose_runtime_keys(runner: Any) -> set[ComposeRuntimeServiceKey] | None:
+    try:
+        return compose_runtime_service_keys(
+            runner.docker.ps_format(COMPOSE_RUNTIME_FORMAT, all_containers=True)
+        )
+    except CommandError as exc:
+        runner.log.error(
+            "Could not check how Compose projects were started, so "
+            "wud.tag.exclude labels were not written and services were not "
+            f"recreated. Check that Docker is reachable and retry. ({exc})"
+        )
+        return None
+
+
+def _compose_file_refusal_reason(
+    runner: Any,
+    stack: ComposeStack,
+    runtime_keys: set[ComposeRuntimeServiceKey] | None,
+) -> str:
+    """Return a failure reason when the stack must not be recreated, else ``""``.
+
+    Also records stacks that share their project name with another Compose
+    file set, so they are recreated without ``--remove-orphans``.
+    """
+    if runtime_keys is None:
+        return "tag-exclusion-recreate-failed"
+    extra_files = compose_runtime_extra_config_files(
+        stack.project_directory or stack.directory,
+        stack.file,
+        stack.project_name,
+        runtime_keys,
+        compose_project_file_sets(runner.discovered_stacks, stack.project_name),
+    )
+    if not extra_files:
+        if compose_runtime_project_shared(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            runtime_keys,
+        ):
+            runner.stacks_keeping_orphans.add(stack.index)
+        return ""
+    runner.log.error(
+        f"[{stack.name}] {compose_override_files_message(stack.file, extra_files)} "
+        "The wud.tag.exclude label was not written and services were not "
+        "recreated."
+    )
+    return "compose-override-files"
 
 
 def _recreate_preserving_runtime_state(

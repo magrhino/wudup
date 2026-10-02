@@ -58,30 +58,6 @@ class UpdateFromWudTagExclusionRecreateTests(UpdateFromWudRunnerTestCase):
         )
         self.assertNotRegex(calls, r"up -d [^\n]*(?<!--no-start) worker\n")
 
-    def test_exclude_tag_line_recreate_fails_closed_without_runtime_state(self) -> None:
-        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
-        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
-        (self.fake_root / "ps_fail").write_text("", encoding="utf-8")
-
-        status, stdout, stderr = self.run_direct(
-            exclude_tag_lines="1",
-            recreate_excluded_services=True,
-        )
-
-        self.assertEqual(status, 1, stderr + stdout)
-        self.assertIn(
-            "wud.tag.exclude=^2\\.0$$",
-            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
-        )
-        self.assertNotRegex(self.calls(), r"compose -f docker-compose.yml up -d")
-        self.assertIn(
-            "Could not check the running state of service(s) app",
-            stdout + stderr,
-        )
-        pending = self.db_rows("SELECT * FROM pending_updates")
-        self.assertEqual(pending[0]["status"], "failed")
-        self.assertEqual(pending[0]["status_reason"], "tag-exclusion-recreate-failed")
-
     def _write_exclusion_runtime_rows(self, stack_dir: Path, *states: str) -> None:
         runtime_prefix = (
             f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\t"

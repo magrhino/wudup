@@ -16,10 +16,16 @@ from wudup.compose import (
     ComposeCli,
     ComposeDiscoveryError,
     ComposeRuntimePortIssue,
+    ComposeStack,
     ServiceImage,
     _project_directory_for_stack,
     _service_bind_mounts_from_config_json,
     _service_runtime_port_issues_from_config_json,
+    compose_override_files_message,
+    compose_project_file_sets,
+    compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
+    compose_runtime_service_keys,
 )
 from wudup.docker_cli import ContainerImage, DockerCli
 from wudup.platforms import ImagePlatform
@@ -744,6 +750,166 @@ class ComposeCliTests(FakeDockerCase):
             self.compose.ps_quiet_checked(stack, "docker-compose.yml", ["app"]),
             [],
         )
+
+class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
+    def test_reports_files_loaded_beyond_discovered_compose_file(self) -> None:
+        keys = compose_runtime_service_keys([
+            (
+                "/srv/app\t/srv/app/docker-compose.yml,docker-compose.override.yml"
+                "\tapp\tapp\tFalse"
+            ),
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tworker\tFalse",
+            (
+                "/srv/other\t/srv/other/docker-compose.yml,/srv/other/extra.yml"
+                "\tother\tapp\tFalse"
+            ),
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (Path("/srv/app/docker-compose.override.yml"),),
+        )
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/other", "docker-compose.yml", "unrelated", keys
+            ),
+            (),
+        )
+
+    def test_ignores_projects_started_from_discovered_file_only(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            "/srv/app\tdocker-compose.yml\tapp\tworker\tFalse",
+            "/elsewhere\t/elsewhere/compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (),
+        )
+
+    def test_keeps_same_named_stacks_started_from_their_own_files(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            (
+                "/elsewhere\t/elsewhere/compose.yml,/elsewhere/extra.yml"
+                "\tapp\tworker\tFalse"
+            ),
+        ])
+
+        other_stack = ComposeStack(
+            index=1,
+            directory=Path("/elsewhere"),
+            file="compose.yml",
+            name="elsewhere",
+            images=(),
+            service_images=(),
+            project_name="app",
+        )
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app",
+                "docker-compose.yml",
+                "app",
+                keys,
+                compose_project_file_sets([other_stack], "app"),
+            ),
+            (),
+        )
+        # --remove-orphans from /srv/app would delete the other stack's worker.
+        self.assertTrue(
+            compose_runtime_project_shared(
+                "/srv/app", "docker-compose.yml", "app", keys
+            )
+        )
+
+    def test_reports_same_named_file_set_no_discovered_stack_uses(self) -> None:
+        # A leftover container from another file still shares the project, but
+        # no discovered stack owns it, so it is not a known shared project.
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            "/srv/app\t/srv/app/compose.old.yml\tapp\tworker\tFalse",
+        ])
+        this_stack = ComposeStack(
+            index=0,
+            directory=Path("/srv/app"),
+            file="docker-compose.yml",
+            name="app",
+            images=(),
+            service_images=(),
+            project_name="app",
+        )
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app",
+                "docker-compose.yml",
+                "app",
+                keys,
+                compose_project_file_sets([this_stack], "app"),
+            ),
+            (Path("/srv/app/compose.old.yml"),),
+        )
+
+    def test_project_not_shared_by_override_or_other_projects(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            (
+                "/srv/app\t/srv/app/docker-compose.yml,override.yml"
+                "\tapp\tworker\tFalse"
+            ),
+            "/elsewhere\t/elsewhere/compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertFalse(
+            compose_runtime_project_shared(
+                "/srv/app", "docker-compose.yml", "app", keys
+            )
+        )
+
+    def test_message_explains_same_file_name_at_another_path(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/mnt/pool/app\t/mnt/pool/app/docker-compose.yml\tapp\tapp\tFalse",
+        ])
+        extra_files = compose_runtime_extra_config_files(
+            "/srv/app", "docker-compose.yml", "app", keys
+        )
+
+        message = compose_override_files_message("docker-compose.yml", extra_files)
+
+        self.assertEqual(extra_files, (Path("/mnt/pool/app/docker-compose.yml"),))
+        self.assertIn("HOST_DOCKER_BASE", message)
+        self.assertIn("same Compose project name", message)
+        self.assertNotIn("merge their settings", message)
+
+    def test_message_asks_to_merge_override_files(self) -> None:
+        message = compose_override_files_message(
+            "docker-compose.yml",
+            (Path("/srv/app/docker-compose.override.yml"),),
+        )
+
+        self.assertIn("merge their settings into docker-compose.yml", message)
+        self.assertNotIn("HOST_DOCKER_BASE", message)
+
+    def test_reports_project_started_only_from_different_files(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/compose.prod.yml\tapp\tapp\tFalse",
+            "/srv/app\t/srv/app/compose.prod.yml\tapp\tworker\tFalse",
+            "/srv/other\t/srv/other/docker-compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (Path("/srv/app/compose.prod.yml"),),
+        )
+
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value)

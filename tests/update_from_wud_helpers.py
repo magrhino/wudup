@@ -173,6 +173,16 @@ class FakeDockerTestCase(unittest.TestCase):
         )
         return directory
 
+    def make_project_sharing_stack(self, stack_id: str, project_name: str) -> Path:
+        """Create a discovered stack that sets Compose project ``project_name``."""
+        directory = self.make_stack(stack_id, [("db", "repo/db:latest", None)])
+        compose_file = directory / "docker-compose.yml"
+        compose_file.write_text(
+            f"name: {project_name}\n" + compose_file.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return directory
+
     def _set_manifest_stdout(self, image: str, payload: object) -> None:
         safe = safe_name(image)
         (self.fake_root / "manifests" / f"{safe}.stdout").write_text(
