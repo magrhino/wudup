@@ -288,48 +288,11 @@ class StackLifecycleExecutor(
                     all_containers=True,
                 )
             )
-            extra_files = compose_runtime_extra_config_files(
-                stack.project_directory or stack.directory,
-                stack.file,
-                stack.project_name,
-                (key for key, _state in runtime_states),
+            status = self._compose_file_set_refusal(
+                stack, matches, services, runtime_states
             )
-            if extra_files:
-                message = compose_override_files_message(stack.file, extra_files)
-                self.log.error(
-                    f"[{stack.name}] {message} The update was not applied."
-                )
-                self._record_failure(
-                    stack,
-                    matches,
-                    phase="preflight",
-                    reason="compose-override-files",
-                    services=services,
-                    note=message,
-                )
-                self._progress(
-                    "preflight",
-                    "failure",
-                    f"[{stack.name}] Stack runs with Compose files that "
-                    "WUDup does not load; the update was not applied.",
-                    stack=stack.name,
-                    services=services,
-                    matches=matches,
-                )
-                return StackStatus("failure", "compose-override-files")
-            if compose_runtime_project_shared(
-                stack.project_directory or stack.directory,
-                stack.file,
-                stack.project_name,
-                (key for key, _state in runtime_states),
-            ):
-                self.runner.stacks_keeping_orphans.add(stack.index)
-                self.log.warning(
-                    f"[{stack.name}] Another Compose stack uses the same project "
-                    f"name ({stack.project_name}); recreating without "
-                    "--remove-orphans so its containers are kept. Give each "
-                    "stack a unique project name to avoid this."
-                )
+            if status is not None:
+                return status
             for service in services:
                 service_states = self._compose_service_runtime_states(
                     stack,
@@ -402,6 +365,62 @@ class StackLifecycleExecutor(
                 f"stopped: {' '.join(stopped)}"
             )
         return runtime_state
+
+    def _compose_file_set_refusal(
+        self,
+        stack: ComposeStack,
+        matches: Sequence[Match],
+        services: tuple[str, ...],
+        runtime_states: Sequence[ComposeRuntimeServiceState],
+    ) -> StackStatus | None:
+        """Refuse stacks started with Compose files WUDup does not load.
+
+        Also records stacks sharing their project name with another Compose
+        file set, so they are recreated without ``--remove-orphans``.
+        """
+        extra_files = compose_runtime_extra_config_files(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            (key for key, _state in runtime_states),
+        )
+        if extra_files:
+            message = compose_override_files_message(stack.file, extra_files)
+            self.log.error(
+                f"[{stack.name}] {message} The update was not applied."
+            )
+            self._record_failure(
+                stack,
+                matches,
+                phase="preflight",
+                reason="compose-override-files",
+                services=services,
+                note=message,
+            )
+            self._progress(
+                "preflight",
+                "failure",
+                f"[{stack.name}] Stack runs with Compose files that "
+                "WUDup does not load; the update was not applied.",
+                stack=stack.name,
+                services=services,
+                matches=matches,
+            )
+            return StackStatus("failure", "compose-override-files")
+        if compose_runtime_project_shared(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            (key for key, _state in runtime_states),
+        ):
+            self.runner.stacks_keeping_orphans.add(stack.index)
+            self.log.warning(
+                f"[{stack.name}] Another Compose stack uses the same project "
+                f"name ({stack.project_name}); recreating without "
+                "--remove-orphans so its containers are kept. Give each "
+                "stack a unique project name to avoid this."
+            )
+        return None
 
     @staticmethod
     def _compose_service_runtime_states(

@@ -94,14 +94,12 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status, 0, stderr + stdout)
         self.assertRegex(
             self.calls(),
             r"compose -f docker-compose.yml up -d --pull never --no-build --no-deps app",
@@ -119,14 +117,12 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             encoding="utf-8",
         )
 
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
         )
 
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(status, 1, stderr + stdout)
         self.assertNotIn(
             "wud.tag.exclude",
             (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
@@ -134,7 +130,7 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.assertNotRegex(self.calls(), r"compose -f .* up -d")
         self.assertIn(
             "docker-compose.override.yml",
-            result.stdout + result.stderr,
+            stdout + stderr,
         )
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(
@@ -142,6 +138,54 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             ("failed", "compose-override-files"),
         )
 
+    def test_exclude_tag_line_does_not_write_label_when_runtime_unreadable(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        (self.fake_root / "ps_fail").write_text("", encoding="utf-8")
+
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
+        )
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        self.assertNotIn(
+            "wud.tag.exclude",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertNotRegex(self.calls(), r"compose -f .* up -d")
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "tag-exclusion-recreate-failed"),
+        )
+    def test_exclude_tag_line_reports_label_write_os_error(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+
+        with mock.patch(
+            "wudup.compose_rewrite.apply_compose_tag_exclusions",
+            side_effect=OSError("disk full"),
+        ):
+            status, stdout, stderr = self.run_direct(exclude_tag_lines="1")
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertIn("Could not write wud.tag.exclude: disk full", stdout + stderr)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "tag-exclusion-label-failed"),
+        )
     def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"

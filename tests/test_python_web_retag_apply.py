@@ -533,6 +533,55 @@ def test_retag_apply_worker_rechecks_runtime_before_mutation(
     assert "compose -f docker-compose.yml pull app" not in calls
 
 
+def test_retag_apply_worker_fails_closed_when_compose_files_unreadable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+    compose_file = fixture.compose_dir / "docker-compose.yml"
+    before = compose_file.read_text(encoding="utf-8")
+    original_apply = web_retag_apply._apply_retag_updates
+
+    def apply_after_docker_ps_fails(
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[RetagPlanUpdate, ...]:
+        (fixture.fake_root / "ps_fail").touch()
+        return original_apply(*args, **kwargs)
+
+    monkeypatch.setattr(
+        web_retag_apply,
+        "_apply_retag_updates",
+        apply_after_docker_ps_fails,
+    )
+    response = _apply_retag_plan(fixture.client, headers, plan)
+
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    assert "could not be revalidated" in job["error"]
+    assert compose_file.read_text(encoding="utf-8") == before
+    calls = _fake_docker_calls(fixture.fake_root)
+    assert "compose -f docker-compose.yml pull app" not in calls
+
+
+def test_retag_runtime_revalidation_without_updates_keeps_remove_orphans() -> None:
+    assert web_retag_apply._revalidate_retag_runtime_before_apply(
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        (),
+    ) is True
+
+
 def test_retag_apply_worker_rechecks_effective_project_before_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

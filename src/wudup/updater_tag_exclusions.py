@@ -295,10 +295,9 @@ def apply_tag_exclusions(
         return statuses
 
     successful_updates: list[TagExclusionUpdate] = []
-    updates_by_stack = _tag_exclusion_updates_by_stack(updates)
     recreate = runner.options.recreate_excluded_services
     runtime_keys = _compose_runtime_keys(runner) if recreate else None
-    for stack, stack_updates in updates_by_stack.items():
+    for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
         # Refuse before writing labels so a stack that cannot be recreated is
         # not left with a wud.tag.exclude label its containers do not carry.
         refusal_reason = (
@@ -306,51 +305,60 @@ def apply_tag_exclusions(
             if recreate else ""
         )
         if refusal_reason:
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    refusal_reason,
-                )
+            _fail_stack_updates(statuses, stack_updates, refusal_reason)
             continue
-        existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
-        try:
-            applied = compose_rewrite.apply_compose_tag_exclusions(
-                stack.directory / stack.file,
-                stack_updates,
-                existing_exact_tags=existing_exact_tags,
-            )
-        except ComposeTagRewriteError as exc:
-            runner.log.error(
-                f"[{stack.name}] Could not safely write wud.tag.exclude: {exc}"
-            )
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    "tag-exclusion-label-failed",
-                )
-            continue
-        except OSError as exc:
-            runner.log.error(f"[{stack.name}] Could not write wud.tag.exclude: {exc}")
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    "tag-exclusion-label-failed",
-                )
-            continue
-
-        for item in applied:
-            runner.log.info(
-                f"[{stack.name}] Updated wud.tag.exclude for service "
-                f"{item.service}: {', '.join(item.tags)}"
-            )
-        runner._record_tag_exclusion_rules(stack_updates)
         successful_updates.extend(
-            _applied_tag_exclusion_updates(stack_updates, applied)
+            _write_stack_tag_exclusions(runner, stack, stack_updates, statuses)
         )
 
     if recreate:
         runner._recreate_tag_exclusion_services(successful_updates, statuses)
     return statuses
+
+
+def _fail_stack_updates(
+    statuses: dict[tuple[int, int], StackStatus],
+    stack_updates: Sequence[TagExclusionUpdate],
+    reason: str,
+) -> None:
+    for update in stack_updates:
+        statuses[(update.stack.index, update.source_line)] = StackStatus(
+            "failure",
+            reason,
+        )
+
+
+def _write_stack_tag_exclusions(
+    runner: Any,
+    stack: ComposeStack,
+    stack_updates: Sequence[TagExclusionUpdate],
+    statuses: dict[tuple[int, int], StackStatus],
+) -> list[TagExclusionUpdate]:
+    existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
+    try:
+        applied = compose_rewrite.apply_compose_tag_exclusions(
+            stack.directory / stack.file,
+            stack_updates,
+            existing_exact_tags=existing_exact_tags,
+        )
+    except ComposeTagRewriteError as exc:
+        runner.log.error(
+            f"[{stack.name}] Could not safely write wud.tag.exclude: {exc}"
+        )
+        _fail_stack_updates(statuses, stack_updates, "tag-exclusion-label-failed")
+        return []
+    except OSError as exc:
+        runner.log.error(f"[{stack.name}] Could not write wud.tag.exclude: {exc}")
+        _fail_stack_updates(statuses, stack_updates, "tag-exclusion-label-failed")
+        return []
+
+    for item in applied:
+        runner.log.info(
+            f"[{stack.name}] Updated wud.tag.exclude for service "
+            f"{item.service}: {', '.join(item.tags)}"
+        )
+    runner._record_tag_exclusion_rules(stack_updates)
+    return _applied_tag_exclusion_updates(stack_updates, applied)
 
 
 def _applied_tag_exclusion_updates(

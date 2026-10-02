@@ -466,9 +466,9 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self._write_override_runtime(stack_dir, ("app", "sidecar"))
         self.set_image_state("repo/app:1.0", "old", "sha256:old")
 
-        result = self.run_python("--yes", "--allow-tag-updates")
+        status, stdout, stderr = self.run_direct(allow_tag_updates=True)
 
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(
             self.wud_file.read_text(encoding="utf-8"),
             "repo/app:1.0 tag=2.0\n",
@@ -481,7 +481,7 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertNotIn("compose -f docker-compose.yml pull", calls)
         self.assertNotIn("compose -f docker-compose.yml stop", calls)
         self.assertNotIn("compose -f docker-compose.yml up", calls)
-        output = result.stdout + result.stderr
+        output = stdout + stderr
         self.assertIn("docker-compose.override.yml", output)
         self.assertIn("update was not applied", output)
         report = self.latest_error_report().read_text(encoding="utf-8")
@@ -495,9 +495,9 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self._write_override_runtime(stack_dir, ("sidecar",))
         self.set_image_state("repo/app:latest", "old", "sha256:old")
 
-        result = self.run_python("--yes")
+        status, stdout, stderr = self.run_direct()
 
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(
             self.wud_file.read_text(encoding="utf-8"),
             "repo/app:latest\n",
@@ -517,15 +517,15 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         )
         self.set_image_state("repo/app:latest", "old", "sha256:old")
 
-        result = self.run_python("--yes")
+        status, stdout, stderr = self.run_direct()
 
-        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(
             self.wud_file.read_text(encoding="utf-8"),
             "repo/app:latest\n",
         )
         self.assertNotIn("compose -f docker-compose.yml up", self.calls())
-        self.assertIn("compose.prod.yml", result.stdout + result.stderr)
+        self.assertIn("compose.prod.yml", stdout + stderr)
         report = self.latest_error_report().read_text(encoding="utf-8")
         self.assertIn("reason=compose-override-files", report)
 
@@ -541,13 +541,13 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.set_image_state("repo/app:latest", "old", "sha256:old")
         self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
 
-        result = self.run_python("--yes")
+        status, stdout, stderr = self.run_direct()
 
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status, 0, stderr + stdout)
         calls = self.calls()
         self.assertIn("compose -f docker-compose.yml up -d --pull never", calls)
         self.assertNotIn("--remove-orphans", calls)
-        self.assertIn("uses the same project name", result.stdout + result.stderr)
+        self.assertIn("uses the same project name", stdout + stderr)
 
     def test_stack_update_fails_closed_when_service_list_is_unavailable(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
