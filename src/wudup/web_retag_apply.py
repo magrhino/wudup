@@ -827,25 +827,45 @@ def _restore_retag_compose(
                 f"{', '.join(running)} could not be rolled back to the previous "
                 f"image: {exc}"
             )
-    if not failures and not restored_on_disk:
-        LOGGER.warning(
-            "[%s] Kept the previous Compose file at %s because the restored "
-            "%s may not survive a crash; delete the backup once the storage "
-            "is healthy.",
-            stack.name, backup, stack.file,
+    if not failures:
+        cleanup_exc = _settle_retag_rollback_backup(
+            stack, backup, restored_on_disk=restored_on_disk
         )
-    elif not failures:
-        try:
-            _delete_path(backup)
-        except Exception as exc:  # noqa: BLE001 - reported as a rollback failure.
-            first_exc = exc
-            failures.append(str(exc))
+        if cleanup_exc is not None:
+            first_exc = cleanup_exc
+            failures.append(str(cleanup_exc))
     if failures:
         raise RuntimeError(
             f"{original_error}; compose rollback failed after the Compose file "
             f"was restored: {'; '.join(failures)}; backup retained at {backup}"
         ) from first_exc
     return _retag_rollback_summary(stack, running, stopped)
+
+
+def _settle_retag_rollback_backup(
+    stack: ComposeStack,
+    backup: Path,
+    *,
+    restored_on_disk: bool,
+) -> Exception | None:
+    """Delete the backup after a durable rollback; keep it otherwise.
+
+    Returns the cleanup error, if any, so the caller can report it with the
+    other rollback failures.
+    """
+    if not restored_on_disk:
+        LOGGER.warning(
+            "[%s] Kept the previous Compose file at %s because the restored "
+            "%s may not survive a crash; delete the backup once the storage "
+            "is healthy.",
+            stack.name, backup, stack.file,
+        )
+        return None
+    try:
+        _delete_path(backup)
+    except Exception as exc:  # noqa: BLE001 - reported as a rollback failure.
+        return exc
+    return None
 
 
 def _retag_rollback_summary(
