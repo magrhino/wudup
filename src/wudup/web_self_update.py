@@ -473,6 +473,11 @@ def api_restart_container(
         raise HTTPException(status_code=409, detail=reservation_error)
     try:
         container, audit_run_id = _prepare_container_restart(settings, request)
+        response = ContainerRestartResponse(
+            status="scheduled",
+            audit_run_id=audit_run_id,
+            container=container,
+        )
     except BaseException:
         web_job_registry._release_container_restart(request.app.state)
         raise
@@ -485,11 +490,7 @@ def api_restart_container(
         audit_run_id,
         request.app.state,
     )
-    return ContainerRestartResponse(
-        status="scheduled",
-        audit_run_id=audit_run_id,
-        container=container,
-    )
+    return response
 
 
 def _prepare_container_restart(
@@ -1189,6 +1190,10 @@ def _normalize_self_update_tag(tag: str) -> str:
     return normalized if normalized.startswith("v") else f"v{normalized}"
 
 
+CONTAINER_RESTART_STOP_TIMEOUT_SECONDS = 10
+CONTAINER_RESTART_COMMAND_TIMEOUT_SECONDS = 60.0
+
+
 def _restart_container_task(
     settings: WebSettings,
     container: str,
@@ -1209,7 +1214,10 @@ def _run_container_restart(
     try:
         DockerCli(runner=CommandRunner(env=settings.command_env)).restart_container(
             container,
-            timeout_seconds=10,
+            timeout_seconds=CONTAINER_RESTART_STOP_TIMEOUT_SECONDS,
+            # Bound the CLI call too, so a hung Docker daemon cannot hold the
+            # mutation reservation forever.
+            command_timeout_seconds=CONTAINER_RESTART_COMMAND_TIMEOUT_SECONDS,
         )
     except CommandError as exc:
         detail = exc.result.stderr.strip() or str(exc)

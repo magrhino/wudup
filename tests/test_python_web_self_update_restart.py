@@ -313,3 +313,37 @@ def test_container_restart_releases_reservation_when_preparation_fails(
 
     assert response.status_code == 500
     assert client.app.state.web_container_restart_running is False
+
+
+def test_container_restart_command_is_bounded_and_reports_docker_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, fake_root = _restart_client(tmp_path)
+    (fake_root / "restart_fail").write_text("daemon refused restart\n", encoding="utf-8")
+    calls = []
+    original_capture = self_update_module.CommandRunner.capture
+
+    def recording_capture(self, args, **kwargs):
+        if "restart" in [str(arg) for arg in args]:
+            calls.append(kwargs.get("timeout_seconds"))
+        return original_capture(self, args, **kwargs)
+
+    monkeypatch.setattr(self_update_module.CommandRunner, "capture", recording_capture)
+
+    response = client.post(
+        "/api/v1/container/restart",
+        json={"confirmation": "restart_container"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 202
+    assert calls == [self_update_module.CONTAINER_RESTART_COMMAND_TIMEOUT_SECONDS]
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        row = conn.execute(
+            "SELECT status, metadata_json FROM update_runs WHERE id = ?",
+            (response.json()["audit_run_id"],),
+        ).fetchone()
+    assert row["status"] == "failure"
+    assert "daemon refused restart" in json.loads(row["metadata_json"])["error"]
+    assert client.app.state.web_container_restart_running is False
