@@ -318,6 +318,8 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
         allow_tag_updates: bool = False,
         digest_pin_updates: bool = False,
         digest_pin_plan: tuple[DigestPinUpdate, ...] = (),
+        exclude_tag_lines: str = "",
+        recreate_excluded_services: bool = False,
     ) -> tuple[int, str, str]:
         command_runner = CommandRunner(env=self.env)
         docker = DockerCli(runner=command_runner)
@@ -330,6 +332,8 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
             allow_tag_updates=allow_tag_updates,
             digest_pin_updates=digest_pin_updates,
             digest_pin_plan=digest_pin_plan,
+            exclude_tag_lines=exclude_tag_lines,
+            recreate_excluded_services=recreate_excluded_services,
             no_color=True,
             db_path=self.db_path,
         )
