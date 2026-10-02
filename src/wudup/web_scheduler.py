@@ -314,8 +314,11 @@ def _auto_update_candidate(
         dependency_snoozes=dependency_snoozes,
     )
     if selection is None:
-        if pending_source.degraded:
-            # WUD did not report every container, so this is not a full check.
+        if pending_source.degraded and not pending_source.exists:
+            # WUD's container metadata was unavailable, so the source is empty
+            # and nothing was checked. A source degraded only by individual
+            # containers still counts as a full check, so one container WUD
+            # cannot scan does not hold every idle slot for the late limit.
             raise _AutoUpdateCheckIncomplete
         return None
 
@@ -413,8 +416,11 @@ def _due_auto_update_policies(
             continue
         saved_after_slot = str(row["updated_at"]) > scheduled_for.isoformat()
         if saved_after_slot and now_utc >= window_end:
-            # A policy saved after the slot's time never scheduled that slot,
-            # so it may run only inside the slot's grace window.
+            # A policy saved after the slot's time may not have scheduled that
+            # slot, so it may run only inside the slot's grace window. Any
+            # policy edit updates updated_at, so an edit while a slot is held
+            # late also drops that slot here without a missed row; it fails
+            # closed and the next scheduled slot runs normally.
             continue
         policy = AutoUpdatePolicy(
             service_key=service_key,

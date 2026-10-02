@@ -417,7 +417,7 @@ def test_auto_update_scheduler_keeps_late_slot_while_wud_source_degraded(
     def degraded_resolve_pending_source(*args, **kwargs):
         # An unreachable WUD returns an empty degraded source; it does not raise.
         result = resolve_pending_source(*args, **kwargs)
-        return replace(result, degraded=wud_down)
+        return replace(result, degraded=wud_down, exists=not wud_down)
 
     monkeypatch.setattr(
         web_pending_sources,
@@ -433,3 +433,30 @@ def test_auto_update_scheduler_keeps_late_slot_while_wud_source_degraded(
     assert late is not None
     assert harness.submitted == [("live", ["stack/app"])]
     assert harness.schedule_rows() == [(APP_KEY, "queued")]
+
+
+def test_auto_update_scheduler_checks_idle_slot_when_one_container_degraded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "live"})
+    resolve_pending_source = web_pending_sources.resolve_pending_source
+
+    def partly_degraded_resolve_pending_source(*args, **kwargs):
+        # WUD answered, but one unrelated container could not be scanned.
+        result = resolve_pending_source(*args, **kwargs)
+        return replace(result, degraded=True)
+
+    monkeypatch.setattr(
+        web_pending_sources,
+        "resolve_pending_source",
+        partly_degraded_resolve_pending_source,
+    )
+    idle = [harness.tick(minute) for minute in range(7)]
+    harness.pending("app")
+    late = harness.tick(7)
+
+    assert idle == [None] * 7
+    assert late is None
+    assert harness.submitted == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {IDLE}")]
