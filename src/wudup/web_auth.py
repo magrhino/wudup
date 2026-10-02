@@ -1169,8 +1169,9 @@ def _bearer_token_accepted(
     """
     if not settings.auth_token:
         return False
-    scheme, separator, _token = (authorization or "").partition(" ")
-    if separator != " " or scheme.lower() != "bearer":
+    scheme, separator, token = (authorization or "").partition(" ")
+    # An empty token can never match, so it does not count as a guess.
+    if separator != " " or scheme.lower() != "bearer" or not token:
         return False
     client_address = _request_client_address(request, settings)
     now = time.monotonic()

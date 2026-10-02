@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from tests.web_test_helpers import (
@@ -18,7 +19,11 @@ WEB_TOKEN = "t" * web_auth_module.WEB_TOKEN_RECOMMENDED_MIN_LENGTH
 
 def _token_app(tmp_path: Path, monkeypatch):
     now = {"value": 1_000.0}
-    monkeypatch.setattr(web_auth_module.time, "monotonic", lambda: now["value"])
+    # Patch only the auth clock: these requests also refresh shared WUD caches
+    # that must keep real monotonic timestamps for later tests.
+    monkeypatch.setattr(
+        web_auth_module, "time", SimpleNamespace(monotonic=lambda: now["value"])
+    )
     app = create_app(environ=_web_env(tmp_path, {"WUD_WEB_TOKEN": WEB_TOKEN}))
     _setup_admin(TestClient(app))
     return app, now
@@ -113,7 +118,7 @@ def test_bearer_lockout_does_not_block_password_login(
     assert not app.state.web_login_client_throttle
 
 
-def test_requests_without_bearer_header_are_not_throttled(
+def test_requests_without_a_bearer_token_are_not_throttled(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -122,6 +127,7 @@ def test_requests_without_bearer_header_are_not_throttled(
 
     for _index in range(web_auth_module.LOGIN_THROTTLE_MAX_FAILURES + 1):
         _assert_generic_auth_failed(client.get("/api/v1/status"))
+        _assert_generic_auth_failed(client.get("/api/v1/status", headers=_bearer("")))
     accepted = client.get("/api/v1/status", headers=_bearer(WEB_TOKEN))
 
     assert accepted.status_code == 200
