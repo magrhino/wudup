@@ -161,8 +161,11 @@ def _serve(handler_class):
     return server
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
-def test_real_redirect_does_not_forward_credentials(monkeypatch, method):
+@pytest.mark.parametrize(
+    "method, status",
+    [("GET", 302), ("POST", 302), ("GET", 307), ("POST", 307), ("POST", 308)],
+)
+def test_real_redirect_does_not_forward_credentials(monkeypatch, method, status):
     for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
         monkeypatch.delenv(name, raising=False)
     received = []
@@ -183,7 +186,7 @@ def test_real_redirect_does_not_forward_credentials(monkeypatch, method):
 
     class Wud(BaseHTTPRequestHandler):
         def _redirect(self):
-            self.send_response(302)
+            self.send_response(status)
             self.send_header("Location", f"http://127.0.0.1:{target.server_port}/sso/login")
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -203,9 +206,12 @@ def test_real_redirect_does_not_forward_credentials(monkeypatch, method):
         with pytest.raises(web_wud_transport.WudApiRedirectError):
             request(f"http://127.0.0.1:{wud.server_port}/api", _BEARER_CONFIG)
     finally:
-        wud.shutdown()
-        target.shutdown()
+        for server in (wud, target):
+            server.shutdown()
+            server.server_close()
 
-    assert len(received) == 1
-    assert "Authorization" not in received[0]
-    assert "X-Api-Key" not in received[0]
+    # urllib does not follow a POST 307/308, so nothing reaches the target.
+    assert len(received) == (0 if method == "POST" and status != 302 else 1)
+    for headers in received:
+        assert "Authorization" not in headers
+        assert "X-Api-Key" not in headers

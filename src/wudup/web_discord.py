@@ -9,6 +9,7 @@ import http.client
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -679,6 +680,8 @@ def _discord_webhook(settings: WebSettings) -> _WebhookConfig:
 
 def _post_discord_payload(webhook_url: str, payload: Mapping[str, object]) -> None:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    if urllib.parse.urlsplit(webhook_url).scheme.lower() not in {"http", "https"}:
+        raise OSError(_INVALID_WEBHOOK_URL_DETAIL)
     try:
         request = urllib.request.Request(
             webhook_url,
@@ -702,13 +705,23 @@ def _post_discord_payload(webhook_url: str, payload: Mapping[str, object]) -> No
                     response.headers,
                     None,
                 )
-    except (ValueError, http.client.HTTPException) as exc:
-        # These messages can contain the webhook URL and token. Report an
-        # OSError so callers redact, record history and finish the audit run.
+    # ValueError and InvalidURL messages can contain the webhook URL and token.
+    # Report an OSError so callers redact, record history and finish the audit.
+    except OSError:
+        raise
+    except (ValueError, http.client.InvalidURL):
+        raise OSError(_INVALID_WEBHOOK_URL_DETAIL) from None
+    except http.client.HTTPException as exc:
         raise OSError(
-            f"the Discord webhook request failed ({type(exc).__name__}). "
-            "Check that the webhook is a complete https:// URL without spaces"
+            f"Discord sent an incomplete or malformed response ({type(exc).__name__}). "
+            "Try again later"
         ) from None
+
+
+_INVALID_WEBHOOK_URL_DETAIL = (
+    "the Discord webhook URL is not valid. "
+    "Check that it is a complete https:// URL without spaces"
+)
 
 
 def _test_discord_payload() -> dict[str, object]:

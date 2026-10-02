@@ -269,7 +269,11 @@ def _request_json_with_method(
             response_url = getattr(response, "url", None) or url
             body = response.read()
     except urllib.error.HTTPError as exc:
-        if credential_headers and exc.url not in {None, url}:
+        # urllib refuses to follow a POST 307/308 and reports it as an error.
+        if credential_headers and (
+            exc.url not in {None, url} or 300 <= exc.code < 400
+        ):
+            exc.close()
             raise WudApiRedirectError() from None
         raise
     if credential_headers and response_url != url:
