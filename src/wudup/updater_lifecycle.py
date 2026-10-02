@@ -327,38 +327,13 @@ class StackLifecycleExecutor(
                         matches=matches,
                     )
                     return StackStatus("failure", "runtime-state-unavailable")
-                if (
-                    state_values == {"created"}
-                    and (targets is None or service in targets)
-                    and self._container_start_failed(stack, service)
-                ):
+                if self._start_failed_target(stack, service, state_values, targets):
                     start_failed.append(service)
                     running.append(service)
                     continue
                 (running if state_values == {"running"} else stopped).append(service)
         except (CommandError, ValueError) as exc:
-            self.log.error(
-                f"[{stack.name}] Could not verify whether selected services are running; "
-                "the update was not applied."
-            )
-            self._record_failure(
-                stack,
-                matches,
-                phase="preflight",
-                reason="runtime-state-unavailable",
-                services=services,
-                command_error=exc if isinstance(exc, CommandError) else None,
-                note=str(exc) if isinstance(exc, ValueError) else "",
-            )
-            self._progress(
-                "preflight",
-                "failure",
-                f"[{stack.name}] Selected service runtime state could not be verified.",
-                stack=stack.name,
-                services=services,
-                matches=matches,
-            )
-            return StackStatus("failure", "runtime-state-unavailable")
+            return self._runtime_state_unverified(stack, matches, services, exc)
 
         # History records services whose start failed as not running before
         # the update; the update starts them.
@@ -381,6 +356,50 @@ class StackLifecycleExecutor(
                 f"{' '.join(start_failed)}"
             )
         return tuple(running), tuple(stopped), tuple(start_failed)
+
+    def _runtime_state_unverified(
+        self,
+        stack: ComposeStack,
+        matches: Sequence[Match],
+        services: tuple[str, ...],
+        exc: CommandError | ValueError,
+    ) -> StackStatus:
+        self.log.error(
+            f"[{stack.name}] Could not verify whether selected services are running; "
+            "the update was not applied."
+        )
+        self._record_failure(
+            stack,
+            matches,
+            phase="preflight",
+            reason="runtime-state-unavailable",
+            services=services,
+            command_error=exc if isinstance(exc, CommandError) else None,
+            note=str(exc) if isinstance(exc, ValueError) else "",
+        )
+        self._progress(
+            "preflight",
+            "failure",
+            f"[{stack.name}] Selected service runtime state could not be verified.",
+            stack=stack.name,
+            services=services,
+            matches=matches,
+        )
+        return StackStatus("failure", "runtime-state-unavailable")
+
+    def _start_failed_target(
+        self,
+        stack: ComposeStack,
+        service: str,
+        state_values: set[str],
+        targets: tuple[str, ...] | None,
+    ) -> bool:
+        """Return whether an update target is a created container that failed to start."""
+        if state_values != {"created"}:
+            return False
+        if targets is not None and service not in targets:
+            return False
+        return self._container_start_failed(stack, service)
 
     def _container_start_failed(self, stack: ComposeStack, service: str) -> bool:
         """Return whether the service's never-started container failed to start.
