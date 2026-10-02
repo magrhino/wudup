@@ -838,6 +838,15 @@ def _restore_retag_compose(
             f"{original_error}; compose rollback failed after the Compose file "
             f"was restored: {'; '.join(failures)}; backup retained at {backup}"
         ) from first_exc
+    return _retag_rollback_summary(stack, running, stopped)
+
+
+def _retag_rollback_summary(
+    stack: ComposeStack,
+    running: Sequence[str],
+    stopped: Sequence[str],
+) -> str:
+    """Describe in plain language what a successful rollback did to the services."""
     summary = [f"rollback restored the Compose file for {stack.name}"]
     if running:
         summary.append(
@@ -848,7 +857,7 @@ def _restore_retag_compose(
             f"recreated {', '.join(stopped)} on the previous image without "
             "starting it, because it was stopped before the apply"
         )
-    if not recreated_services:
+    if not running and not stopped:
         summary.append("no services were recreated or started")
     return "; ".join(summary)
 

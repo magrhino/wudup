@@ -21,6 +21,12 @@ from wudup.digest_provenance import DigestTagProvenance
 from wudup.digest_verifier import DigestResolveResult
 from wudup.web_models import WebSettings
 
+_LIVE_ENV = {
+    "WUD_WEB_MUTATIONS_ENABLED": "true",
+    "WUD_UPDATE_MODE": "live",
+    "WUD_MAX_WAIT": "0",
+}
+
 
 @dataclass(frozen=True)
 class _RetagFixture:
@@ -160,6 +166,50 @@ def _make_retag_fixture(
     if retag_digest_pins:
         _set_retag_digest_pins(tmp_path)
     return _RetagFixture(client=client, compose_dir=compose_dir, fake_root=fake_root)
+
+
+@dataclass(frozen=True)
+class _TwoStackFixture:
+    client: TestClient
+    alpha_dir: Path
+    bravo_dir: Path
+    db_path: Path
+    fake_root: Path
+    choices: list[dict[str, str]]
+
+
+def _make_two_stack_fixture(tmp_path: Path) -> _TwoStackFixture:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {"WUD_WEB_DEV_NO_AUTH": "true", **_LIVE_ENV, **fake_env},
+    )
+    dirs: dict[str, Path] = {}
+    for name in ("alpha", "bravo"):
+        image = f"repo/{name}@sha256:old"
+        dirs[name] = _make_fake_stack(
+            tmp_path, fake_root, name, [("app", image, f"cid-{name}")]
+        )
+        _write_compose(dirs[name], "app", image, label_value="^latest$$")
+        _seed_known_image(
+            tmp_path,
+            service_key=f"{name}/app",
+            image=image,
+            source_image=f"repo/{name}:latest",
+            resolved_tag="2.0",
+            watch_tag="latest",
+            target_digest="sha256:old",
+            final_image=image,
+        )
+    _set_retag_digest_pins(tmp_path)
+    return _TwoStackFixture(
+        client=client,
+        alpha_dir=dirs["alpha"],
+        bravo_dir=dirs["bravo"],
+        db_path=tmp_path / "state" / "wud.sqlite",
+        fake_root=fake_root,
+        choices=[_switch_choice("alpha/app"), _switch_choice("bravo/app")],
+    )
 
 
 def _audit_settings(tmp_path: Path) -> WebSettings:

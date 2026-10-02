@@ -11,18 +11,13 @@ from tests.web_retag_test_helpers import (
     _apply_retag_plan,
     _create_retag_plan,
     _make_retag_fixture,
-    _seed_known_image,
-    _set_retag_digest_pins,
+    _make_two_stack_fixture,
     _switch_choice,
     _wait_run_status,
-    _write_compose,
 )
 from tests.web_test_helpers import (
-    _client,
     _csrf_headers,
     _fake_docker_calls,
-    _fake_docker_env,
-    _make_fake_stack,
     _wait_apply_job,
 )
 
@@ -186,35 +181,9 @@ def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
     unreadable_at_plan: bool,
     stale_error: str,
 ) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_UPDATE_MODE": "live",
-            "WUD_MAX_WAIT": "0",
-            **fake_env,
-        },
-    )
-    dirs: dict[str, Path] = {}
-    for name in ("alpha", "bravo"):
-        image = f"repo/{name}@sha256:old"
-        dirs[name] = _make_fake_stack(
-            tmp_path, fake_root, name, [("app", image, f"cid-{name}")]
-        )
-        _write_compose(dirs[name], "app", image, label_value="^latest$$")
-        _seed_known_image(
-            tmp_path,
-            service_key=f"{name}/app",
-            image=image,
-            source_image=f"repo/{name}:latest",
-            resolved_tag="2.0",
-            watch_tag="latest",
-            target_digest="sha256:old",
-            final_image=image,
-        )
-    _set_retag_digest_pins(tmp_path)
+    fixture = _make_two_stack_fixture(tmp_path)
+    client = fixture.client
+    dirs = {"alpha": fixture.alpha_dir, "bravo": fixture.bravo_dir}
     bravo_file = dirs["bravo"] / "docker-compose.yml"
     if unreadable_at_plan:
         # Planning stores an empty hash when it cannot read a Compose file.
@@ -242,10 +211,9 @@ def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
 
     monkeypatch.setattr(ComposeCli, "pull", edit_bravo_while_alpha_pulls)
     headers = _csrf_headers(client)
-    choices = [_switch_choice("alpha/app"), _switch_choice("bravo/app")]
-    plan = _create_retag_plan(client, headers, choices)
+    plan = _create_retag_plan(client, headers, fixture.choices)
 
-    response = _apply_retag_plan(client, headers, plan, choices)
+    response = _apply_retag_plan(client, headers, plan, fixture.choices)
 
     assert response.status_code == 202
     job = _wait_apply_job(client, response.json()["job_id"])
@@ -258,13 +226,13 @@ def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
     ).read_text(encoding="utf-8")
     bravo_mutations = [
         line
-        for line in _fake_docker_calls(fake_root).splitlines()
+        for line in _fake_docker_calls(fixture.fake_root).splitlines()
         if line.startswith(f"{dirs['bravo']}\t")
         and (" pull " in line or " up " in line or " stop " in line)
     ]
     assert bravo_mutations == []
     assert not list(dirs["bravo"].glob(".docker-compose.yml.backup.*"))
-    _wait_run_status(tmp_path / "state" / "wud.sqlite", job["run_id"], "failure")
+    _wait_run_status(fixture.db_path, job["run_id"], "failure")
 
 
 @pytest.mark.parametrize("stays_stopped", [True, False])
@@ -339,11 +307,13 @@ class _RollbackCompose:
         stopped_up_fails: bool = False,
         running_up_fails: bool = False,
         ps_result: str | None = "",
+        stop_fails: bool = False,
     ) -> None:
         self.calls: list[tuple[str, tuple[str, ...]]] = []
         self.stopped_up_fails = stopped_up_fails
         self.running_up_fails = running_up_fails
         self.ps_result = ps_result
+        self.stop_fails = stop_fails
 
     @staticmethod
     def _error(name: str) -> CommandError:
@@ -370,6 +340,8 @@ class _RollbackCompose:
 
     def stop(self, directory: Path, file: str, services: Any, **kwargs: Any) -> None:
         self.calls.append(("stop", tuple(services)))
+        if self.stop_fails:
+            raise self._error("stop")
 
 
 def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
@@ -478,3 +450,57 @@ def test_retag_rollback_reports_every_service_group_that_failed(
     assert "web could not be rolled back to the previous image" in message
     assert message.endswith(f"backup retained at {tmp_path / 'backup.yml'}")
     assert (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_reports_when_stopping_service_again_fails(
+    tmp_path: Path,
+) -> None:
+    compose = _RollbackCompose(stopped_up_fails=True, stop_fails=True)
+
+    with pytest.raises(RuntimeError) as raised:
+        _restore_mixed_stack(tmp_path, compose)
+
+    assert ("stop", ("db",)) in compose.calls
+    message = str(raised.value)
+    assert "WUDup tried to stop it again but that failed" in message
+    assert "WUDup stopped it again" not in message
+    assert (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_reports_backup_cleanup_failure_after_services_restored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def deny_delete(path: Path) -> None:
+        raise PermissionError("backup cleanup denied")
+
+    monkeypatch.setattr(web_retag_apply, "_delete_path", deny_delete)
+    compose = _RollbackCompose()
+
+    with pytest.raises(RuntimeError) as raised:
+        _restore_mixed_stack(tmp_path, compose)
+
+    # Both service groups were rolled back before cleanup failed.
+    assert compose.calls == [
+        ("up-no-start", ("db",)),
+        ("ps", ("db",)),
+        ("up", ("web",)),
+    ]
+    assert str(raised.value) == (
+        "health failed; compose rollback failed after the Compose file was "
+        "restored: backup cleanup denied; backup retained at "
+        f"{tmp_path / 'backup.yml'}"
+    )
+    assert isinstance(raised.value.__cause__, PermissionError)
+    assert (tmp_path / "backup.yml").exists()
+
+
+def test_retag_runtime_revalidation_without_updates_reports_no_stopped_services() -> None:
+    # No approved updates means no Compose or runtime lookups are needed.
+    assert web_retag_apply._revalidate_retag_runtime_before_apply(
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        (),
+    ) == ()
