@@ -534,37 +534,35 @@ def test_self_update_prepare_endpoint_keeps_backup_when_restore_fails(
     assert client.app.state.web_self_update_running is False
 
 
+def _pinned_tag_prepare_client(tmp_path: Path, monkeypatch):
+    """Return a mutating client, fake Docker root, and a pinned wudup stack."""
+
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    release_patches = {
+        "current_tag": lambda: "v0.24.2",
+        "fetch_latest_release_tag": lambda: "v0.25.0",
+        "current_container_image": lambda _env: "ghcr.io/magrhino/wudup:v0.24.2",
+        "_fetch_self_update_release_notes": lambda *_args, **_kwargs: ([], False, []),
+    }
+    for name, replacement in release_patches.items():
+        monkeypatch.setattr(self_update_module, name, replacement)
+    env = {
+        "WUD_WEB_DEV_NO_AUTH": "true",
+        "WUD_WEB_MUTATIONS_ENABLED": "true",
+        "WUD_WEB_RESTART_CONTAINER": "wudup",
+    }
+    client = _client(tmp_path, {**env, **fake_env})
+    stack = [("wudup", "ghcr.io/magrhino/wudup:v0.24.2", "wudup")]
+    compose_dir = _make_fake_stack(tmp_path, fake_root, "wud", stack)
+    return client, fake_root, compose_dir
+
+
 def test_self_update_prepare_keeps_backup_when_restore_directory_sync_fails(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    monkeypatch.setattr(self_update_module, "current_tag", lambda: "v0.24.2")
-    monkeypatch.setattr(self_update_module, "fetch_latest_release_tag", lambda: "v0.25.0")
-    monkeypatch.setattr(
-        self_update_module,
-        "current_container_image",
-        lambda _env: "ghcr.io/magrhino/wudup:v0.24.2",
-    )
-    monkeypatch.setattr(
-        self_update_module,
-        "_fetch_self_update_release_notes",
-        lambda *_args, **_kwargs: ([], False, []),
-    )
-    client = _client(
-        tmp_path,
-        {
-            "WUD_WEB_DEV_NO_AUTH": "true",
-            "WUD_WEB_MUTATIONS_ENABLED": "true",
-            "WUD_WEB_RESTART_CONTAINER": "wudup",
-            **fake_env,
-        },
-    )
-    compose_dir = _make_fake_stack(
-        tmp_path,
-        fake_root,
-        "wud",
-        [("wudup", "ghcr.io/magrhino/wudup:v0.24.2", "wudup")],
+    client, fake_root, compose_dir = _pinned_tag_prepare_client(
+        tmp_path, monkeypatch,
     )
     (fake_root / "stacks" / "wud" / "pull_fail").write_text(
         "pull failed\n",

@@ -713,6 +713,31 @@ def _verify_self_update_digest_pin_updates(
             )
 
 
+def _restore_self_update_compose(
+    backup: Path, compose_path: Path, written_hash: str,
+) -> tuple[bool, str]:
+    """Restore the Compose file; return whether the backup can be deleted and error text."""
+
+    try:
+        # An unsynced restore keeps the backup until it is on disk.
+        if restore_compose_backup(
+            backup, compose_path, expected_source_hash=written_hash,
+        ):
+            return True, ""
+    except Exception as restore_exc:  # noqa: BLE001 - preserve the original apply error.
+        return False, f"; compose rollback failed: {restore_exc}"
+    LOGGER.warning(
+        "Kept the previous Compose file at %s because the restored "
+        "%s may not survive a crash; delete the backup once the "
+        "storage is healthy.",
+        backup, compose_path.name,
+    )
+    return False, (
+        "; the Compose file was restored but may not survive a "
+        "crash, so its backup was kept"
+    )
+
+
 def _prepare_self_update_tag_update(
     settings: WebSettings,
     plan: PlanResponse,
@@ -774,25 +799,9 @@ def _prepare_self_update_tag_update(
                 raise RuntimeError("no Compose image lines were digest-pinned")
     except Exception as exc:
         if written_hashes:
-            restore_succeeded = False
-            try:
-                # An unsynced restore keeps the backup until it is on disk.
-                restore_succeeded = restore_compose_backup(
-                    backup, compose_path, expected_source_hash=written_hashes[-1],
-                )
-                if not restore_succeeded:
-                    restore_error = (
-                        "; the Compose file was restored but may not survive a "
-                        "crash, so its backup was kept"
-                    )
-                    LOGGER.warning(
-                        "Kept the previous Compose file at %s because the restored "
-                        "%s may not survive a crash; delete the backup once the "
-                        "storage is healthy.",
-                        backup, compose_path.name,
-                    )
-            except Exception as restore_exc:  # noqa: BLE001 - preserve the original apply error.
-                restore_error = f"; compose rollback failed: {restore_exc}"
+            restore_succeeded, restore_error = _restore_self_update_compose(
+                backup, compose_path, written_hashes[-1],
+            )
         raise RuntimeError(f"{exc}{restore_error}") from exc
     finally:
         if restore_succeeded:
