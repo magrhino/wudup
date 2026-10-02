@@ -157,6 +157,69 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(pending[0]["status"], "failed")
         self.assertEqual(pending[0]["status_reason"], "tag-exclusion-recreate-failed")
+    def _write_exclusion_runtime_rows(self, stack_dir: Path, *states: str) -> None:
+        runtime_prefix = (
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\t"
+            f"{stack_dir.name}\tapp\tFalse\t"
+        )
+        (self.fake_root / "compose-runtime-all.tsv").write_text(
+            "".join(f"{runtime_prefix}{state}\n" for state in states),
+            encoding="utf-8",
+        )
+    def test_exclude_tag_line_recreate_keeps_exited_container_stopped(self) -> None:
+        self._assert_exclusion_recreate_keeps_inactive_stopped("exited")
+    def test_exclude_tag_line_recreate_keeps_created_container_stopped(self) -> None:
+        self._assert_exclusion_recreate_keeps_inactive_stopped("created")
+    def _assert_exclusion_recreate_keeps_inactive_stopped(self, state: str) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", None)])
+        self._write_exclusion_runtime_rows(stack_dir, state)
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        calls = self.calls()
+        self.assertIn("ps --all --format", calls)
+        self.assertIn(
+            "compose -f docker-compose.yml up -d --remove-orphans --pull never "
+            "--no-build --no-deps --no-start app\n",
+            calls,
+        )
+        self.assertNotRegex(calls, r"compose -f docker-compose.yml up -d (?!.*--no-start)")
+    def test_exclude_tag_line_recreate_fails_closed_for_paused_service(self) -> None:
+        self._assert_exclusion_recreate_fails_closed("paused")
+    def test_exclude_tag_line_recreate_fails_closed_for_scaled_service(self) -> None:
+        self._assert_exclusion_recreate_fails_closed("running", "exited")
+    def _assert_exclusion_recreate_fails_closed(self, *states: str) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        self._write_exclusion_runtime_rows(stack_dir, *states)
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertNotRegex(self.calls(), r"compose -f docker-compose.yml up -d")
+        self.assertIn(
+            "Service app has more than one container or an unexpected state",
+            result.stdout + result.stderr,
+        )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(pending[0]["status"], "failed")
+        self.assertEqual(pending[0]["status_reason"], "tag-exclusion-recreate-failed")
     def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"
