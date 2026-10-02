@@ -45,7 +45,8 @@ from .web_models import (
 AUTO_UPDATE_POLL_SECONDS = 60.0
 AUTO_UPDATE_GRACE_SECONDS = 300
 # A slot that no tick could check during its grace window, because a job was
-# running or the check failed, may still run late, but never more than this
+# running or the check failed (including WUD or Compose discovery being
+# unavailable), may still run late, but never more than this
 # long after its scheduled time. Past that it is recorded as missed.
 AUTO_UPDATE_MAX_LATE_SECONDS = 3600
 AUTO_UPDATE_MISSED_IDLE_REASON = (
@@ -68,6 +69,10 @@ AutoUpdateCandidate = tuple[int, tuple[str, ...], tuple[AutoUpdatePolicy, ...]]
 
 class AutoUpdateScheduleReservationError(RuntimeError):
     """Raised when an automatic update schedule slot was already claimed."""
+
+
+class _AutoUpdateCheckIncomplete(RuntimeError):
+    """Raised when WUD or Compose discovery was unavailable for a check."""
 
 
 class EffectiveConfigLoader(Protocol):
@@ -241,6 +246,9 @@ def _auto_update_tick(
         return response
     except AutoUpdateScheduleReservationError:
         return None
+    except _AutoUpdateCheckIncomplete:
+        # Leave the evaluated time unchanged so the slot stays due.
+        return None
     except Exception:
         if job_submitted and start_event is not None:
             start_event.set()
@@ -292,7 +300,7 @@ def _auto_update_candidate(
         known_digest_provenance_by_service=known_digest_provenance_by_service,
     )
     if grouping.status != "ready":
-        return None
+        raise _AutoUpdateCheckIncomplete
 
     pending_service_keys = _pending_service_keys(grouping)
     dependency_snoozes = active_dependency_snooze_rows(
@@ -306,6 +314,9 @@ def _auto_update_candidate(
         dependency_snoozes=dependency_snoozes,
     )
     if selection is None:
+        if pending_source.degraded:
+            # WUD did not report every container, so this is not a full check.
+            raise _AutoUpdateCheckIncomplete
         return None
 
     plan = _build_auto_update_plan(
@@ -400,6 +411,11 @@ def _due_auto_update_policies(
         )
         if _auto_update_schedule_recorded(conn, schedule_key):
             continue
+        saved_after_slot = str(row["updated_at"]) > scheduled_for.isoformat()
+        if saved_after_slot and now_utc >= window_end:
+            # A policy saved after the slot's time never scheduled that slot,
+            # so it may run only inside the slot's grace window.
+            continue
         policy = AutoUpdatePolicy(
             service_key=service_key,
             update_mode=str(row["update_mode"] or settings.config.update_mode),
@@ -414,9 +430,7 @@ def _due_auto_update_policies(
             last_evaluated_at=last_evaluated_at,
         )
         if missed_reason is not None:
-            # A policy saved after the slot's time never scheduled that slot.
-            if str(row["updated_at"]) <= scheduled_for.isoformat():
-                _record_missed_auto_update_slot(conn, settings, policy, missed_reason)
+            _record_missed_auto_update_slot(conn, settings, policy, missed_reason)
             continue
         if active_snooze(conn, service_key=service_key, now=now_text) is not None:
             continue

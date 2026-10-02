@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -324,7 +325,7 @@ def test_auto_update_scheduler_records_missed_slot_once(
     assert [tuple(row) for row in rows] == [tuple(row) for row in first]
 
 
-def test_auto_update_scheduler_skips_missed_record_for_policy_saved_after_slot(
+def test_auto_update_scheduler_skips_slot_for_policy_saved_after_window(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -334,6 +335,7 @@ def test_auto_update_scheduler_skips_missed_record_for_policy_saved_after_slot(
         {"app": "stop"},
         policy_saved_at=SCHEDULED + timedelta(minutes=10),
     )
+    harness.pending("app")
 
     late = [harness.tick(minute) for minute in (11, MAX_LATE_MINUTES + 1)]
 
@@ -402,3 +404,32 @@ def test_auto_update_scheduler_keeps_late_slot_after_failed_check(
     assert blocked == [None] * 8
     assert late is not None
     assert harness.submitted == [("live", ["stack/app"])]
+
+
+def test_auto_update_scheduler_keeps_late_slot_while_wud_source_degraded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "live"})
+    resolve_pending_source = web_pending_sources.resolve_pending_source
+    wud_down = True
+
+    def degraded_resolve_pending_source(*args, **kwargs):
+        # An unreachable WUD returns an empty degraded source; it does not raise.
+        result = resolve_pending_source(*args, **kwargs)
+        return replace(result, degraded=wud_down)
+
+    monkeypatch.setattr(
+        web_pending_sources,
+        "resolve_pending_source",
+        degraded_resolve_pending_source,
+    )
+    unreachable = [harness.tick(minute) for minute in range(7)]
+    wud_down = False
+    harness.pending("app")
+    late = harness.tick(7)
+
+    assert unreachable == [None] * 7
+    assert late is not None
+    assert harness.submitted == [("live", ["stack/app"])]
+    assert harness.schedule_rows() == [(APP_KEY, "queued")]
