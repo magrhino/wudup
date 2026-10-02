@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest import mock
 
 from compose_rewrite_helpers import ComposeRewriteTestCase
+from wudup import compose_rewrite
 from wudup.compose_rewrite import (
     apply_compose_digest_unpins,
     render_compose_digest_unpins,
@@ -160,6 +161,33 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
         )
 
         with self.assertRaises(ResolvedTagMarkerConflictError):
+            render_compose_digest_unpins(
+                compose_file,
+                (self.digest_unpin_update(),),
+                stack_name="stack",
+            )
+
+    def test_render_rejects_marker_left_after_clearing(self) -> None:
+        # Fail closed if marker clearing ever leaves a marker behind, rather than
+        # writing a Compose file that still carries it.
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    # wudup.resolved-tag=latest\n"
+            "    image: repo/app@sha256:old\n"
+        )
+
+        with (
+            mock.patch.object(
+                compose_rewrite,
+                "_clear_comment_token_resolved_tag_markers",
+                return_value=True,
+            ),
+            self.assertRaisesRegex(
+                ComposeTagRewriteError,
+                "Service app resolved-tag marker is attached ambiguously",
+            ),
+        ):
             render_compose_digest_unpins(
                 compose_file,
                 (self.digest_unpin_update(),),
