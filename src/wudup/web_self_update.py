@@ -776,10 +776,21 @@ def _prepare_self_update_tag_update(
         if written_hashes:
             restore_succeeded = False
             try:
-                restore_compose_backup(
+                # An unsynced restore keeps the backup until it is on disk.
+                restore_succeeded = restore_compose_backup(
                     backup, compose_path, expected_source_hash=written_hashes[-1],
                 )
-                restore_succeeded = True
+                if not restore_succeeded:
+                    restore_error = (
+                        "; the Compose file was restored but may not survive a "
+                        "crash, so its backup was kept"
+                    )
+                    LOGGER.warning(
+                        "Kept the previous Compose file at %s because the restored "
+                        "%s may not survive a crash; delete the backup once the "
+                        "storage is healthy.",
+                        backup, compose_path.name,
+                    )
             except Exception as restore_exc:  # noqa: BLE001 - preserve the original apply error.
                 restore_error = f"; compose rollback failed: {restore_exc}"
         raise RuntimeError(f"{exc}{restore_error}") from exc

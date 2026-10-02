@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from collections.abc import Callable, Sequence
@@ -55,6 +56,8 @@ from .web_retag_runtime import (
     _retag_compose_service_key,
     _running_retag_compose_service_keys,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _RetagApplyFailed(RuntimeError):
@@ -738,7 +741,7 @@ def _restore_retag_compose(
     expected_source_hash: str,
 ) -> None:
     try:
-        restore_compose_backup(
+        restored_on_disk = restore_compose_backup(
             backup, stack.directory / stack.file,
             expected_source_hash=expected_source_hash,
         )
@@ -754,7 +757,15 @@ def _restore_retag_compose(
                 apply_condition,
                 job_id,
             )
-        _delete_path(backup)
+        if restored_on_disk:
+            _delete_path(backup)
+        else:
+            LOGGER.warning(
+                "[%s] Kept the previous Compose file at %s because the restored "
+                "%s may not survive a crash; delete the backup once the storage "
+                "is healthy.",
+                stack.name, backup, stack.file,
+            )
     except Exception as rollback_exc:
         raise RuntimeError(
             f"{original_error}; compose rollback failed: {rollback_exc}; "

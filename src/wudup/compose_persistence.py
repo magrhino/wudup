@@ -14,6 +14,8 @@ version's hash has been recorded, so the caller knows the file changed and can
 restore it. Writers without written hashes, such as restores and tag
 exclusions, have nothing to roll back to; for them the failure is logged as a
 warning and the write counts as done, because the new content is in place.
+Such writes return False so a restore's caller keeps its backup until the
+restored file is known to be on disk.
 """
 
 from __future__ import annotations
@@ -78,7 +80,7 @@ def _fsync_directory(directory: Path) -> None:
         os.close(fd)
 
 
-def _sync_replaced_compose(compose_path: Path, *, can_roll_back: bool) -> None:
+def _sync_replaced_compose(compose_path: Path, *, can_roll_back: bool) -> bool:
     try:
         _fsync_directory(compose_path.parent)
     except OSError as exc:
@@ -90,15 +92,18 @@ def _sync_replaced_compose(compose_path: Path, *, can_roll_back: bool) -> None:
         )
         if not can_roll_back:
             LOGGER.warning(message)
-            return
+            return False
         raise ComposeTagRewriteError(message) from exc
+    return True
 
 
 def _atomic_replace_compose(
     compose_path: Path, rendered: str, *, prefix: str,
     expected_source_hash: str | None = None,
     written_hashes: list[str] | None = None,
-) -> None:
+) -> bool:
+    """Replace the Compose file; return False if the folder sync was skipped."""
+
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{compose_path.name}.{prefix}.",
         dir=str(compose_path.parent),
@@ -122,7 +127,7 @@ def _atomic_replace_compose(
             # sync failure still tells callers the Compose file changed.
             if written_hashes is not None:
                 written_hashes.append(hashlib.sha256(rendered.encode("utf-8")).hexdigest())
-            _sync_replaced_compose(
+            return _sync_replaced_compose(
                 compose_path, can_roll_back=written_hashes is not None,
             )
     finally:
@@ -135,11 +140,15 @@ def _atomic_replace_compose(
 
 def restore_compose_backup(
     backup: Path, compose_path: Path, *, expected_source_hash: str,
-) -> None:
-    """Restore only the Compose version written by this operation."""
+) -> bool:
+    """Restore only the Compose version written by this operation.
+
+    Returns False when the restored file may not survive a crash because its
+    folder could not be synced; callers must then keep the backup.
+    """
 
     with backup.open("r", encoding="utf-8", newline="") as source:
-        _atomic_replace_compose(
+        return _atomic_replace_compose(
             compose_path, source.read(), prefix="rollback",
             expected_source_hash=expected_source_hash,
         )

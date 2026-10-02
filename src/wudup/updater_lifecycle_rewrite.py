@@ -392,8 +392,9 @@ class _LifecycleRewriteMixin:
         ):
             self.log.error(
                 f"[{stack.name}] Kept the previous Compose file at {backup} because "
-                f"{stack.file} could not be restored automatically; compare the two "
-                "and restore the backup by hand if needed."
+                f"{stack.file} could not be restored automatically, or the restored "
+                "file may not survive a crash; compare the two and restore the "
+                "backup by hand if needed."
             )
             return
         try:
@@ -480,11 +481,11 @@ class _LifecycleRewriteMixin:
         rollback_error: CommandError | None = None
         try:
             if state.compose_written_hashes:
-                compose_rewrite.restore_compose_backup(
+                # An unsynced restore keeps the backup until it is on disk.
+                state.compose_restored = compose_rewrite.restore_compose_backup(
                     compose_backup, stack.directory / stack.file,
                     expected_source_hash=state.compose_written_hashes[-1],
                 )
-                state.compose_restored = True
             self.runner.stack_runtime_states_after.pop(stack.index, None)
             active_services = tuple(state.running_services)
             rollback_ok, rollback_error = self._restore_tag_update_services(

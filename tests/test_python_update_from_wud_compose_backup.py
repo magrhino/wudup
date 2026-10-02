@@ -6,7 +6,11 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-from tests.update_from_wud_helpers import UpdateFromWudRunnerTestCase
+from tests.update_from_wud_helpers import (
+    UpdateFromWudRunnerTestCase,
+    manifest_image,
+    manifest_index_digest,
+)
 
 from wudup import compose_persistence
 from wudup.updater_lifecycle import StackLifecycleExecutor
@@ -105,7 +109,9 @@ class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
         self.assertNotRegex(self.calls(), r"compose -f .* pull")
         self.assertEqual(self._backups(stack_dir), [])
 
-    def test_directory_sync_failure_during_restore_still_rolls_back_services(self) -> None:
+    def test_directory_sync_failure_during_restore_keeps_backup_and_rolls_back_services(
+        self,
+    ) -> None:
         stack_dir = self._tag_update_stack()
         compose_file = stack_dir / "docker-compose.yml"
         original = compose_file.read_text(encoding="utf-8")
@@ -136,6 +142,58 @@ class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
         self.assertIn("Rolled back to previous tag", output)
         self.assertNotIn("Could not safely restore Compose", output)
+        # The restore is not known to be on disk, so the backup stays.
+        backups = self._backups(stack_dir)
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), original)
+        self.assertIn(f"Kept the previous Compose file at {backups[0]}", output)
+
+    def test_directory_sync_failure_after_digest_pin_write_restores_compose(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:latest@sha256:child\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        compose_file = stack_dir / "docker-compose.yml"
+        original = compose_file.read_text(encoding="utf-8")
+        self.set_image_state("repo/app:latest", "sha256:old-config", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "sha256:new-config", "sha256:child")
+        self.set_image_state(
+            "repo/app@sha256:child", "sha256:new-config", "sha256:docker-repodigest",
+        )
+        self.set_manifest_stdout(
+            "docker.io/repo/app:latest",
+            manifest_index_digest("sha256:index", "sha256:child"),
+        )
+        self.set_manifest_stdout(
+            "docker.io/repo/app@sha256:child", manifest_image("sha256:new-config"),
+        )
+        real_fsync_directory = compose_persistence._fsync_directory
+        calls = 0
+
+        def fail_after_digest_pin(directory: Path) -> None:
+            nonlocal calls
+            calls += 1
+            # Call 1 syncs the backup; call 2 follows the digest-pin write.
+            # No tag write happened, so only the recorded hash marks the change.
+            if calls == 2:
+                raise OSError(errno.EIO, "I/O error")
+            real_fsync_directory(directory)
+
+        with mock.patch(
+            "wudup.compose_persistence._fsync_directory",
+            side_effect=fail_after_digest_pin,
+        ):
+            status, stdout, stderr = self.run_direct(digest_pin_updates=True)
+
+        output = stderr + stdout
+        self.assertEqual(status, 1, output)
+        self.assertEqual(calls, 3)
+        self.assertIn("could not be synced to disk", output)
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:latest@sha256:child\n",
+        )
         self.assertEqual(self._backups(stack_dir), [])
 
     def test_unexpected_error_keeps_written_backup_and_logs_its_path(self) -> None:

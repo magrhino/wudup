@@ -308,11 +308,27 @@ class ComposeAtomicWriteTests(ComposeRewriteTestCase):
             ),
             self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
         ):
-            compose_rewrite.restore_compose_backup(
+            restored_on_disk = compose_rewrite.restore_compose_backup(
                 backup, compose_file, expected_source_hash=written_hashes[-1],
             )
 
+        self.assertFalse(restored_on_disk)
         self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(), "services: {}\n")
+
+    def test_synced_restore_reports_it_is_on_disk(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        backup = _backup_compose(compose_file)
+        written_hashes: list[str] = []
+        compose_rewrite._atomic_replace_compose(
+            compose_file, "changed", prefix="tag", written_hashes=written_hashes,
+        )
+
+        self.assertTrue(
+            compose_rewrite.restore_compose_backup(
+                backup, compose_file, expected_source_hash=written_hashes[-1],
+            )
+        )
         self.assertEqual(compose_file.read_text(), "services: {}\n")
 
     def test_unsupported_directory_sync_is_not_an_error(self) -> None:

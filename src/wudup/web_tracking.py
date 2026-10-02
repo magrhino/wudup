@@ -562,7 +562,7 @@ def _rollback_tracking_repair(
     expected_image_id: str,
 ) -> str:
     try:
-        _atomic_replace_compose(
+        restored_on_disk = _atomic_replace_compose(
             record.stack.directory / record.stack.file,
             backup.read_bytes().decode("utf-8"),
             prefix="tracking-rollback", expected_source_hash=plan.rendered_hash,
@@ -578,6 +578,9 @@ def _rollback_tracking_repair(
             )
     except Exception as exc:  # noqa: BLE001 - preserve backup for manual recovery.
         return _safe_exception_detail(settings, "rollback failed", exc)
+    if not restored_on_disk:
+        # Keep the backup until the restored file is known to be on disk.
+        return "the restored Compose file may not survive a crash"
     return ""
 
 
