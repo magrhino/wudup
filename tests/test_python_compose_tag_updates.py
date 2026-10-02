@@ -99,6 +99,33 @@ class ComposeTagUpdateTests(ComposeRewriteTestCase):
             "      - wud.tag.include=^old$$\n"
         )
         compose_file = self.write_compose(original)
+        updates = (
+            TagUpdate(
+                old_image="repo/app:1.2.3-distroless",
+                desired_tag="1.3.0-distroless",
+                new_image="repo/app:1.3.0-distroless",
+                services=("app",),
+            ),
+        )
+        stream_updates = (
+            TagStreamUpdate(
+                line_no=1,
+                stack="stack",
+                stack_directory=str(compose_file.parent.resolve(strict=False)),
+                compose_file=compose_file.name,
+                service="app",
+                current_tag="1.2.3-distroless",
+                reported_tag="1.3.0",
+                selected_tag="1.3.0-distroless",
+                decision="preserve",
+                label_key="wud.tag.include",
+                current_label_value="^old$",
+                proposed_label_value=r"^\d+\.\d+\.\d+-distroless$$",
+                proposed_label_regex=r"^\d+\.\d+\.\d+-distroless$",
+                approved=True,
+                reason="approved",
+            ),
+        )
 
         with self.assertRaisesRegex(
             ComposeTagRewriteError,
@@ -106,33 +133,8 @@ class ComposeTagUpdateTests(ComposeRewriteTestCase):
         ):
             apply_compose_tag_updates(
                 compose_file,
-                (
-                    TagUpdate(
-                        old_image="repo/app:1.2.3-distroless",
-                        desired_tag="1.3.0-distroless",
-                        new_image="repo/app:1.3.0-distroless",
-                        services=("app",),
-                    ),
-                ),
-                tag_stream_updates=(
-                    TagStreamUpdate(
-                        line_no=1,
-                        stack="stack",
-                        stack_directory=str(compose_file.parent.resolve(strict=False)),
-                        compose_file=compose_file.name,
-                        service="app",
-                        current_tag="1.2.3-distroless",
-                        reported_tag="1.3.0",
-                        selected_tag="1.3.0-distroless",
-                        decision="preserve",
-                        label_key="wud.tag.include",
-                        current_label_value="^old$",
-                        proposed_label_value=r"^\d+\.\d+\.\d+-distroless$$",
-                        proposed_label_regex=r"^\d+\.\d+\.\d+-distroless$",
-                        approved=True,
-                        reason="approved",
-                    ),
-                ),
+                updates,
+                tag_stream_updates=stream_updates,
                 stack_name="stack",
             )
 

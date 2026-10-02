@@ -159,13 +159,10 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
             "    # wudup.resolved-tag=other\n"
             "    image: repo/app@sha256:old\n"
         )
+        updates = (self.digest_unpin_update(),)
 
         with self.assertRaises(ResolvedTagMarkerConflictError):
-            render_compose_digest_unpins(
-                compose_file,
-                (self.digest_unpin_update(),),
-                stack_name="stack",
-            )
+            render_compose_digest_unpins(compose_file, updates, stack_name="stack")
 
     def test_render_rejects_marker_left_after_clearing(self) -> None:
         # Fail closed if marker clearing ever leaves a marker behind, rather than
@@ -176,6 +173,7 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
             "    # wudup.resolved-tag=latest\n"
             "    image: repo/app@sha256:old\n"
         )
+        updates = (self.digest_unpin_update(),)
 
         with (
             mock.patch.object(
@@ -188,11 +186,7 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
                 "Service app resolved-tag marker is attached ambiguously",
             ),
         ):
-            render_compose_digest_unpins(
-                compose_file,
-                (self.digest_unpin_update(),),
-                stack_name="stack",
-            )
+            render_compose_digest_unpins(compose_file, updates, stack_name="stack")
 
     def test_render_removes_marker_and_keeps_adjacent_operator_comments(self) -> None:
         for comments in (
@@ -230,16 +224,13 @@ class ComposeDigestUnpinTests(ComposeRewriteTestCase):
             "    - wud.watch=true\n"
             "    - wud.tag.include=^latest$$\n"
         )
+        updates = (self.digest_unpin_update(),)
 
         with self.assertRaisesRegex(
             ComposeTagRewriteError,
             "Service app lists the wud.tag.include label more than once",
         ):
-            render_compose_digest_unpins(
-                compose_file,
-                (self.digest_unpin_update(),),
-                stack_name="stack",
-            )
+            render_compose_digest_unpins(compose_file, updates, stack_name="stack")
 
     def test_apply_rejects_empty_digest_unpin_render_without_write(self) -> None:
         original = "services:\n  app:\n    image: repo/app@sha256:old\n"

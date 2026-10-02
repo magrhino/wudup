@@ -16,6 +16,7 @@ from wudup.compose_rewrite import (
 )
 from wudup.compose_source import (
     _get_service_label_value,
+    _sequence_label_source_rewrites,
     _set_service_label_value,
     _yaml_scalar_boundary_matches,
 )
@@ -69,6 +70,21 @@ class ComposeSourceLookupTests(unittest.TestCase):
         self.assertEqual(
             _get_service_label_value(service, "target", service="app"), "new"
         )
+
+    def test_sequence_label_source_rewrite_requires_label_location(self) -> None:
+        # Labels without parsed source positions cannot be rewritten in place.
+        labels = CommentedSeq(["other=value", "target=old"])
+        service = CommentedMap(labels=labels)
+
+        with self.assertRaises(ComposeTagRewriteError) as caught:
+            _sequence_label_source_rewrites(
+                service, labels, "target", "new", "", (0,), None, service="app"
+            )
+
+        self.assertEqual(
+            str(caught.exception), "Label target source location is unavailable."
+        )
+        self.assertEqual(list(labels), ["other=value", "target=old"])
 
     def test_sequence_label_lookup_rejects_non_strings_before_match(self) -> None:
         for labels in ([123, "target=value"], ["other=value", None], ["target", 123]):

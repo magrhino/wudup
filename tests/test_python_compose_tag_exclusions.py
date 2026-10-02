@@ -276,14 +276,13 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
             "    - wud.tag.exclude=^beta\n"
             "    - wud.tag.exclude=^rc\n"
         )
+        updates = (self.tag_exclusion_update(),)
 
         with self.assertRaisesRegex(
             ComposeTagRewriteError,
             "Service app lists the wud.tag.exclude label more than once",
         ):
-            render_compose_tag_exclusions(
-                compose_file, (self.tag_exclusion_update(),), existing_exact_tags={}
-            )
+            render_compose_tag_exclusions(compose_file, updates, existing_exact_tags={})
 
     def test_render_replaces_bare_exclude_label(self) -> None:
         compose_file = self.write_compose(

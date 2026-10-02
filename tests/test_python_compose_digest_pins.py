@@ -29,13 +29,14 @@ class ComposeDigestPinTests(ComposeRewriteTestCase):
             "    - wud.tag.include=^1\\.0$$\n"
         )
         compose_file = self.write_compose(source)
+        updates = (self.digest_pin_update(),)
 
         with self.assertRaisesRegex(
             ComposeTagRewriteError,
             "Service app lists the wud.tag.include label more than once; "
             "Docker Compose uses only the last one",
         ):
-            apply_compose_digest_pins(compose_file, (self.digest_pin_update(),))
+            apply_compose_digest_pins(compose_file, updates)
 
         self.assertEqual(compose_file.read_text(encoding="utf-8"), source)
 
