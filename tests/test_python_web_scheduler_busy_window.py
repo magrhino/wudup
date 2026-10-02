@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,13 +19,23 @@ from wudup.db import open_db
 
 SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
 MAX_LATE_MINUTES = web_scheduler.AUTO_UPDATE_MAX_LATE_SECONDS // 60
-LATE_LOG = "Started scheduled auto-update"
+APP_KEY = "stack/app|2026-05-30|09:30|America/Chicago"
+WORKER_KEY = "stack/worker|2026-05-30|09:30|America/Chicago"
+IDLE = web_scheduler.AUTO_UPDATE_MISSED_IDLE_REASON
+LATE = web_scheduler.AUTO_UPDATE_MISSED_LATE_REASON
 
 
 class _SchedulerHarness:
-    def __init__(self, tmp_path: Path, monkeypatch, policies: dict[str, str]) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        policies: dict[str, str],
+        *,
+        policy_saved_at: datetime = SCHEDULED - timedelta(days=1),
+    ) -> None:
         fake_env, fake_root = _fake_docker_env(tmp_path)
-        self.tmp_path = tmp_path
+        self.db_path = tmp_path / "state" / "wud.sqlite"
         self.client = _client(
             tmp_path,
             {
@@ -60,6 +70,11 @@ class _SchedulerHarness:
                 headers=_csrf_headers(self.client),
             )
             assert response.status_code == 200
+        with open_db(self.db_path) as conn, conn:
+            conn.execute(
+                "UPDATE service_policy SET updated_at = ?",
+                (policy_saved_at.isoformat(),),
+            )
         # Stop the app's real-clock scheduler thread so only this test's ticks
         # record when the scheduler last checked every due slot. Wait for its
         # first tick to finish so it cannot overwrite that record later.
@@ -109,16 +124,27 @@ class _SchedulerHarness:
         self.busy = busy
         return _auto_update_tick(self.client, SCHEDULED + timedelta(minutes=minutes))
 
-    def schedule_keys(self) -> list[str]:
-        with open_db(self.tmp_path / "state" / "wud.sqlite") as conn:
+    def schedule_rows(self) -> list[tuple[str, str]]:
+        """Return (schedule_key, status), with the reason for missed slots."""
+        with open_db(self.db_path) as conn:
             rows = conn.execute(
                 """
-                SELECT schedule_key
+                SELECT schedule_key, status, metadata_json
                 FROM auto_update_schedule_runs
                 ORDER BY schedule_key
                 """
             ).fetchall()
-        return [row["schedule_key"] for row in rows]
+        return [
+            (
+                row["schedule_key"],
+                (
+                    f"missed: {json.loads(row['metadata_json'])['reason']}"
+                    if row["status"] == "missed"
+                    else row["status"]
+                ),
+            )
+            for row in rows
+        ]
 
 
 def test_auto_update_scheduler_runs_other_mode_after_own_job_spans_window(
@@ -145,9 +171,9 @@ def test_auto_update_scheduler_runs_other_mode_after_own_job_spans_window(
         ("live", ["stack/worker"]),
         ("stop", ["stack/app"]),
     ]
-    assert harness.schedule_keys() == [
-        "stack/app|2026-05-30|09:30|America/Chicago",
-        "stack/worker|2026-05-30|09:30|America/Chicago",
+    assert harness.schedule_rows() == [
+        (APP_KEY, "queued"),
+        (WORKER_KEY, "queued"),
     ]
 
 
@@ -164,12 +190,10 @@ def test_auto_update_scheduler_runs_slot_after_other_job_spans_window(
     assert blocked == [None] * 8
     assert late is not None
     assert harness.submitted == [("live", ["stack/app"])]
-    assert harness.schedule_keys() == [
-        "stack/app|2026-05-30|09:30|America/Chicago",
-    ]
+    assert harness.schedule_rows() == [(APP_KEY, "queued")]
 
 
-def test_auto_update_scheduler_drops_closed_slot_after_idle_evaluation(
+def test_auto_update_scheduler_records_slot_missed_after_idle_evaluation(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -184,7 +208,7 @@ def test_auto_update_scheduler_drops_closed_slot_after_idle_evaluation(
     assert idle is None
     assert late is None
     assert harness.submitted == []
-    assert harness.schedule_keys() == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {IDLE}")]
 
 
 def test_auto_update_scheduler_ignores_job_started_after_window_closed(
@@ -202,10 +226,10 @@ def test_auto_update_scheduler_ignores_job_started_after_window_closed(
     assert blocked is None
     assert late is None
     assert harness.submitted == []
-    assert harness.schedule_keys() == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {IDLE}")]
 
 
-def test_auto_update_scheduler_drops_slot_checked_before_job_spans_window(
+def test_auto_update_scheduler_records_slot_checked_before_job_spans_window(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -220,7 +244,7 @@ def test_auto_update_scheduler_drops_slot_checked_before_job_spans_window(
     assert blocked == [None] * 5
     assert late is None
     assert harness.submitted == []
-    assert harness.schedule_keys() == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {IDLE}")]
 
 
 def test_auto_update_scheduler_keeps_late_slot_after_submit_conflict(
@@ -242,17 +266,7 @@ def test_auto_update_scheduler_keeps_late_slot_after_submit_conflict(
     assert blocked == [None] * 8
     assert late is not None
     assert harness.submitted == [("live", ["stack/app"])]
-    assert harness.schedule_keys() == [
-        "stack/app|2026-05-30|09:30|America/Chicago",
-    ]
-
-
-def _late_logs(caplog) -> list[str]:
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.getMessage().startswith(LATE_LOG)
-    ]
+    assert harness.schedule_rows() == [(APP_KEY, "queued")]
 
 
 @pytest.mark.parametrize(
@@ -262,7 +276,6 @@ def _late_logs(caplog) -> list[str]:
 def test_auto_update_scheduler_limits_how_late_unchecked_slot_runs(
     tmp_path: Path,
     monkeypatch,
-    caplog,
     late_minutes: int,
     runs: bool,
 ) -> None:
@@ -270,10 +283,9 @@ def test_auto_update_scheduler_limits_how_late_unchecked_slot_runs(
     harness.pending("app")
 
     blocked = [harness.tick(minute, busy=True) for minute in range(-1, late_minutes)]
-    with caplog.at_level(logging.INFO, logger=web_scheduler.__name__):
-        late = harness.tick(late_minutes)
-        after = harness.tick(late_minutes + 1)
-        next_day = harness.tick(24 * 60 + 1)
+    late = harness.tick(late_minutes)
+    after = harness.tick(late_minutes + 1)
+    next_day = harness.tick(24 * 60 + 1)
 
     assert blocked == [None] * (late_minutes + 1)
     assert (late is not None) is runs
@@ -281,24 +293,56 @@ def test_auto_update_scheduler_limits_how_late_unchecked_slot_runs(
     assert next_day is None
     if runs:
         assert harness.submitted == [("stop", ["stack/app"])]
-        assert harness.schedule_keys() == [
-            "stack/app|2026-05-30|09:30|America/Chicago",
-        ]
-        assert _late_logs(caplog) == [
-            (
-                f"{LATE_LOG} for stack/app {late_minutes} minutes after its "
-                "scheduled time (2026-05-30T09:30:00-05:00) because WUDup could "
-                "not check it during its 5-minute window: another job was "
-                "running or the check failed."
-            )
-        ]
+        assert harness.schedule_rows() == [(APP_KEY, "queued")]
     else:
         assert harness.submitted == []
-        assert harness.schedule_keys() == []
-        assert _late_logs(caplog) == []
+        assert harness.schedule_rows() == [(APP_KEY, f"missed: {LATE}")]
 
 
-def test_auto_update_scheduler_drops_slot_when_checks_fail_past_late_limit(
+def test_auto_update_scheduler_records_missed_slot_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "stop"})
+
+    for minute in range(10):
+        assert harness.tick(minute) is None
+    with open_db(harness.db_path) as conn:
+        first = conn.execute(
+            "SELECT created_at, updated_at FROM auto_update_schedule_runs"
+        ).fetchall()
+    harness.pending("app")
+    later = [harness.tick(minute) for minute in (10, MAX_LATE_MINUTES, 24 * 60 - 1)]
+
+    assert later == [None, None, None]
+    assert harness.submitted == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {IDLE}")]
+    with open_db(harness.db_path) as conn:
+        rows = conn.execute(
+            "SELECT created_at, updated_at FROM auto_update_schedule_runs"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [tuple(row) for row in first]
+
+
+def test_auto_update_scheduler_skips_missed_record_for_policy_saved_after_slot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(
+        tmp_path,
+        monkeypatch,
+        {"app": "stop"},
+        policy_saved_at=SCHEDULED + timedelta(minutes=10),
+    )
+
+    late = [harness.tick(minute) for minute in (11, MAX_LATE_MINUTES + 1)]
+
+    assert late == [None, None]
+    assert harness.submitted == []
+    assert harness.schedule_rows() == []
+
+
+def test_auto_update_scheduler_records_slot_missed_when_checks_fail_past_late_limit(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -326,7 +370,7 @@ def test_auto_update_scheduler_drops_slot_when_checks_fail_past_late_limit(
 
     assert late is None
     assert harness.submitted == []
-    assert harness.schedule_keys() == []
+    assert harness.schedule_rows() == [(APP_KEY, f"missed: {LATE}")]
 
 
 def test_auto_update_scheduler_keeps_late_slot_after_failed_check(
