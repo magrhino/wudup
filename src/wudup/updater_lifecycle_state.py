@@ -40,6 +40,7 @@ class _StackUpdateState:
     applied_digest_unpins: tuple[AppliedDigestUnpinUpdate, ...] = ()
     compose_backup: Path | None = None
     compose_written_hashes: list[str] = field(default_factory=list)
+    compose_restored: bool = False
     running_services: tuple[str, ...] = ()
     stopped_services: tuple[str, ...] = ()
 
@@ -76,8 +77,11 @@ class _StackUpdateState:
 
     @property
     def compose_rewrite_applied(self) -> bool:
+        # A recorded write counts even when the rewrite call then raised, for
+        # example when the directory sync failed after the file was replaced.
         return bool(
-            self.applied_tags
+            self.compose_written_hashes
+            or self.applied_tags
             or self.applied_digest_pins
             or self.applied_digest_unpins
         )

@@ -783,6 +783,40 @@ def test_repair_does_not_recreate_after_tag_moves_during_label_write(
     assert " up " not in _fake_docker_calls(fake_root)
 
 
+def test_repair_restores_compose_when_directory_sync_fails_after_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, fake_root, compose_path = _tracking_fixture(tmp_path)
+    original = compose_path.read_bytes()
+    target = client.get("/api/v1/retag-targets").json()["items"][0]["target_id"]
+    headers = _csrf_headers(client)
+    payload = {"target_id": target, "regex": r"^v\d+(?:\.\d+)+$"}
+    preview = client.post("/api/v1/tracking-repairs", json=payload, headers=headers).json()
+    real_fsync_directory = compose_persistence._fsync_directory
+    calls = 0
+
+    def fail_after_label_write(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 syncs the backup; call 2 follows the tracking-label write.
+        if calls == 2:
+            raise OSError(5, "I/O error")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(compose_persistence, "_fsync_directory", fail_after_label_write)
+    response = client.post(
+        "/api/v1/tracking-repairs/apply",
+        json={**payload, "plan_id": preview["plan_id"], "confirmation": "apply-tracking-repair"},
+        headers=headers,
+    )
+    job = _wait_apply_job(client, response.json()["job_id"])
+
+    assert job["status"] == "failure"
+    assert compose_path.read_bytes() == original
+    assert " up " not in _fake_docker_calls(fake_root)
+    assert not list(compose_path.parent.glob(".docker-compose.yml.backup.*"))
+
+
 def test_repair_rechecks_compose_immediately_before_recreate(
     tmp_path: Path, monkeypatch
 ) -> None:

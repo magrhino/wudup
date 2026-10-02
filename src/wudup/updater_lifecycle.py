@@ -89,6 +89,11 @@ class StackLifecycleExecutor(
             return state_or_status
 
         state = state_or_status
+        status = self._run_stack_update_steps(state)
+        self._discard_compose_backup(state, status)
+        return status
+
+    def _run_stack_update_steps(self, state: _StackUpdateState) -> StackStatus:
         for step in (
             self._apply_compose_tag_updates,
             self._apply_compose_digest_unpin_updates,

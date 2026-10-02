@@ -595,7 +595,7 @@ def _run_tracking_repair(
     run_id: int | None = None
     plan: TrackingRepairPlan | None = None
     record: web_retag_targets._RetagTargetRecord | None = None
-    changed = False
+    written_hashes: list[str] = []
     recreate_started = False
     expected_image_id = ""
     retain_backup = False
@@ -629,8 +629,8 @@ def _run_tracking_repair(
         apply_compose_tracking_label(
             path, item.service, item.image, plan.current_regex, plan.proposed_regex,
             expected_source_hash=plan.source_hash, expected_transform=_service_transform(record),
+            written_hashes=written_hashes,
         )
-        changed = True
         web_job_registry._append_apply_job_progress(
             jobs, condition, job_id,
             UpdaterProgressEvent(phase="compose", status="success", message="Tracking label written; image unchanged."),
@@ -668,7 +668,7 @@ def _run_tracking_repair(
     except Exception as exc:  # noqa: BLE001 - job reports and audits every failure.
         retain_backup = _finish_failed_tracking_repair(
             settings, jobs, condition, job_id, exc, run_id, plan, record, backup,
-            changed, recreate_started, expected_image_id,
+            bool(written_hashes), recreate_started, expected_image_id,
         )
     finally:
         if backup is not None and not retain_backup:

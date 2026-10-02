@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
+import stat
 import unittest
 from unittest import mock
 
@@ -145,13 +148,40 @@ class ComposeBackupTests(ComposeRewriteTestCase):
                 with self.assertRaisesRegex(RuntimeError, "copy failed"):
                     _backup_compose(compose_file)
 
+    def test_backup_syncs_copy_and_directory_before_returning(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        synced: list[str] = []
+        real_fsync = os.fsync
+
+        def record_fsync(fd: int) -> None:
+            synced.append("dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+            real_fsync(fd)
+
+        with mock.patch("wudup.compose_persistence.os.fsync", side_effect=record_fsync):
+            backup = _backup_compose(compose_file)
+
+        self.assertEqual(synced, ["file", "dir"])
+        self.assertEqual(backup.read_text(), "services: {}\n")
+
+    def test_backup_sync_failure_removes_backup(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+
+        with mock.patch(
+            "wudup.compose_persistence.os.fsync",
+            side_effect=OSError(errno.EIO, "I/O error"),
+        ):
+            with self.assertRaises(OSError):
+                _backup_compose(compose_file)
+
+        self.assertEqual(list(self.root.glob(".compose.yml.backup.*")), [])
+
 
 class ComposeAtomicWriteTests(ComposeRewriteTestCase):
     def test_filesystem_failures_preserve_source_and_clean_temporary_file(self) -> None:
         original = b"services:\r\n  app:\r\n    image: repo/app:1.0\r\n"
         compose_file = self.root / "compose.yml"
         compose_file.write_bytes(original)
-        for operation in ("chown", "chmod", "replace"):
+        for operation in ("chown", "chmod", "fsync", "replace"):
             with self.subTest(operation=operation):
                 error = OSError(f"{operation} failed")
                 written_hashes = ["previous write"]
@@ -204,3 +234,61 @@ class ComposeAtomicWriteTests(ComposeRewriteTestCase):
         self.assertEqual(written_hashes, [hashlib.sha256(compose_file.read_bytes()).hexdigest()])
         self.assertEqual(backup.read_bytes(), b"services: {}\n")
         self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
+
+    def test_write_syncs_file_before_replace_and_directory_after(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        events: list[str] = []
+        real_fsync = os.fsync
+        real_replace = os.replace
+
+        def record_fsync(fd: int) -> None:
+            events.append("sync-dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "sync-file")
+            real_fsync(fd)
+
+        def record_replace(src: object, dst: object) -> None:
+            events.append("replace")
+            real_replace(src, dst)
+
+        with (
+            mock.patch("wudup.compose_persistence.os.fsync", side_effect=record_fsync),
+            mock.patch("wudup.compose_persistence.os.replace", side_effect=record_replace),
+        ):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="tag")
+
+        self.assertEqual(events, ["sync-file", "replace", "sync-dir"])
+        self.assertEqual(compose_file.read_text(), "changed")
+
+    def test_directory_sync_failure_after_replace_reports_written_version(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        written_hashes: list[str] = []
+
+        with mock.patch(
+            "wudup.compose_persistence._fsync_directory",
+            side_effect=OSError(errno.EIO, "I/O error"),
+        ):
+            with self.assertRaises(ComposeTagRewriteError) as caught:
+                compose_rewrite._atomic_replace_compose(
+                    compose_file, "changed", prefix="tag",
+                    written_hashes=written_hashes,
+                )
+
+        self.assertIn("was replaced, but its folder could not be synced", str(caught.exception))
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(written_hashes, [hashlib.sha256(b"changed").hexdigest()])
+        self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
+
+    def test_unsupported_directory_sync_is_not_an_error(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        real_fsync = os.fsync
+
+        def reject_directories(fd: int) -> None:
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "Invalid argument")
+            real_fsync(fd)
+
+        with mock.patch("wudup.compose_persistence.os.fsync", side_effect=reject_directories):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="tag")
+            backup = _backup_compose(compose_file)
+
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(backup.read_text(), "changed")

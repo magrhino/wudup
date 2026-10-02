@@ -12,7 +12,7 @@ from tests.web_retag_test_helpers import (
 )
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
-from wudup import web_retag_apply, web_retag_audit, web_retags
+from wudup import compose_persistence, web_retag_apply, web_retag_audit, web_retags
 from wudup.compose import ComposeCli
 
 
@@ -150,3 +150,41 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
     assert "compose rollback failed" in job["error"]
     assert "backup retained at [REDACTED_PATH]" in job["error"]
     assert str(tmp_path) not in job["error"]
+
+
+def test_retag_restores_compose_when_directory_sync_fails_after_rewrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+    compose_file = fixture.compose_dir / "docker-compose.yml"
+    before = compose_file.read_bytes()
+    real_fsync_directory = compose_persistence._fsync_directory
+    calls = 0
+
+    def fail_after_rewrite(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 syncs the backup; call 2 follows the retag rewrite.
+        if calls == 2:
+            raise OSError(5, "I/O error")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(compose_persistence, "_fsync_directory", fail_after_rewrite)
+
+    response = _apply_retag_plan(fixture.client, headers, plan)
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    _wait_run_status(tmp_path / "state" / "wud.sqlite", job["run_id"], "failure")
+    assert compose_file.read_bytes() == before
+    assert not list(fixture.compose_dir.glob(".docker-compose.yml.backup.*"))

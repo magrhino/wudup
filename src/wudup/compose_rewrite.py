@@ -1293,6 +1293,7 @@ def apply_compose_tracking_label(
     *,
     expected_source_hash: str | None = None,
     expected_transform: str = "",
+    written_hashes: list[str] | None = None,
 ) -> None:
     rendered = render_compose_tracking_label(
         compose_path, service, expected_image, expected_label, proposed_regex,
@@ -1302,6 +1303,7 @@ def apply_compose_tracking_label(
     _atomic_replace_compose(
         compose_path, rendered, prefix="tracking-repair",
         expected_source_hash=expected_source_hash,
+        written_hashes=written_hashes,
     )
 
 
