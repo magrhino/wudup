@@ -1,0 +1,83 @@
+name: edge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Queue runs instead of cancelling them so edge never moves back to an older
+# commit and a half-promoted run is never interrupted.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: magrhino/wudup
+  BUILDX_CACHE_FROM: type=gha,scope=wudup-edge
+  BUILDX_CACHE_TO: type=gha,scope=wudup-edge,mode=max
+
+permissions:
+  contents: read
+
+jobs:
+  publish-edge-image:
+    name: scan and publish edge images
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve edge commit
+        id: edge-commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          {
+            printf 'sha=%s\n' "$sha"
+            printf 'tag=edge-%s\n' "${sha:0:7}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Scan all staged images and publish edge tags
+        shell: bash
+        env:
+          RELEASE_CHANNEL: edge
+          RELEASE_TAG: ${{ steps.edge-commit.outputs.tag }}
+          RELEASE_SHA: ${{ steps.edge-commit.outputs.sha }}
+          APT_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          bash .github/scripts/publish-release-image.sh all

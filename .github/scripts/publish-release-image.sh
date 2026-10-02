@@ -10,6 +10,27 @@ case "$requested_variant" in
     ;;
 esac
 
+# Stable releases move vX.Y.Z, X.Y.Z, X.Y, and latest. Edge builds of main move
+# only edge and the immutable edge-<sha> tag passed as RELEASE_TAG.
+release_channel="${RELEASE_CHANNEL:-stable}"
+case "$release_channel" in
+  stable)
+    staging_prefix="staging-"
+    ;;
+  edge)
+    if [[ ! "${RELEASE_TAG:-}" =~ ^edge-[0-9a-f]{7,40}$ ]]; then
+      printf 'Edge images need RELEASE_TAG formatted as edge-<commit sha>, got: %s\n' "${RELEASE_TAG:-}" >&2
+      exit 2
+    fi
+    # Keep edge staging separate so a release of the same commit cannot race it.
+    staging_prefix="staging-edge-"
+    ;;
+  *)
+    printf 'RELEASE_CHANNEL must be stable or edge, got: %s\n' "$release_channel" >&2
+    exit 2
+    ;;
+esac
+
 # Use the same pinned scanner as the optional image, outside the scanned image.
 scanner_image="$(sed -n 's/^FROM \(aquasec\/trivy:[^ ]*\) AS trivy$/\1/p' Dockerfile)"
 if [[ ! "$scanner_image" =~ ^aquasec/trivy:[^@]+@sha256:[0-9a-f]{64}$ ]]; then
@@ -38,7 +59,7 @@ stage_and_verify() {
 
   image="$REGISTRY/$IMAGE_NAME"
   expected_platforms="linux/amd64 linux/arm64"
-  staging_ref="$image:staging-${RELEASE_SHA}${suffix}"
+  staging_ref="$image:${staging_prefix}${RELEASE_SHA}${suffix}"
   label_args=(
     --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
     --label "org.opencontainers.image.revision=$RELEASE_SHA"
@@ -159,12 +180,19 @@ fi
 for index in "${!verified_refs[@]}"; do
   verified_ref="${verified_refs[$index]}"
   suffix="${verified_suffixes[$index]}"
-  production_tags=(
-    "$image:$RELEASE_TAG$suffix"
-    "$image:$VERSION$suffix"
-    "$image:$MINOR_VERSION$suffix"
-    "$image:latest$suffix"
-  )
+  if [[ "$release_channel" == edge ]]; then
+    production_tags=(
+      "$image:$RELEASE_TAG$suffix"
+      "$image:edge$suffix"
+    )
+  else
+    production_tags=(
+      "$image:$RELEASE_TAG$suffix"
+      "$image:$VERSION$suffix"
+      "$image:$MINOR_VERSION$suffix"
+      "$image:latest$suffix"
+    )
+  fi
 
   for ref in "${production_tags[@]}"; do
     docker buildx imagetools create --tag "$ref" "$verified_ref"

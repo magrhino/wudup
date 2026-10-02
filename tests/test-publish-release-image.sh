@@ -172,4 +172,54 @@ if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
   exit 1
 fi
 
+# Edge builds of main move only edge tags and never touch stable release tags.
+: > "$FAKE_DOCKER_LOG"
+env -u VERSION -u MINOR_VERSION RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 \
+  bash .github/scripts/publish-release-image.sh all
+edge_staging_ref="ghcr.io/magrhino/wudup:staging-edge-${RELEASE_SHA}"
+grep -Fq -- "-t ${edge_staging_ref} " "$FAKE_DOCKER_LOG"
+grep -Fq -- "-t ${edge_staging_ref}-trivy " "$FAKE_DOCKER_LOG"
+grep -Fq -- "--label org.opencontainers.image.version=edge-0123456" "$FAKE_DOCKER_LOG"
+[[ "$(grep -c -- '--scanners vuln' "$FAKE_DOCKER_LOG")" == 4 ]]
+expected_edge_tags="$(printf '%s\n' \
+  ghcr.io/magrhino/wudup:edge \
+  ghcr.io/magrhino/wudup:edge-0123456 \
+  ghcr.io/magrhino/wudup:edge-0123456-trivy \
+  ghcr.io/magrhino/wudup:edge-trivy)"
+actual_edge_tags="$(sed -n 's/^buildx imagetools create --tag \([^ ]*\) .*/\1/p' "$FAKE_DOCKER_LOG" | sort)"
+if [[ "$actual_edge_tags" != "$expected_edge_tags" ]]; then
+  printf 'edge publish moved unexpected tags:\n%s\n' "$actual_edge_tags" >&2
+  exit 1
+fi
+last_scan="$(grep -n -- '--scanners vuln' "$FAKE_DOCKER_LOG" | tail -1 | cut -d: -f1)"
+first_promote="$(grep -n -m1 -- 'imagetools create --tag' "$FAKE_DOCKER_LOG" | cut -d: -f1)"
+(( last_scan < first_promote ))
+
+: > "$FAKE_DOCKER_LOG"
+if FAIL_SCAN_VARIANT=trivy FAIL_SCAN_PLATFORM=linux/arm64 RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 \
+  bash .github/scripts/publish-release-image.sh all; then
+  printf 'failed edge scan unexpectedly succeeded\n' >&2
+  exit 1
+fi
+if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
+  printf 'edge tags changed after a failed scan\n' >&2
+  exit 1
+fi
+
+for bad_edge in edge:v1.2.3 nightly:edge-0123456; do
+  : > "$FAKE_DOCKER_LOG"
+  if RELEASE_CHANNEL="${bad_edge%%:*}" RELEASE_TAG="${bad_edge#*:}" \
+    bash .github/scripts/publish-release-image.sh all 2>/dev/null; then
+    printf 'invalid edge publish settings unexpectedly succeeded: %s\n' "$bad_edge" >&2
+    exit 1
+  fi
+  if [[ -s "$FAKE_DOCKER_LOG" ]]; then
+    printf 'invalid edge publish settings ran docker: %s\n' "$bad_edge" >&2
+    exit 1
+  fi
+done
+
+grep -Fq 'RELEASE_CHANNEL: edge' .github/workflows/edge.yml
+grep -Fq 'bash .github/scripts/publish-release-image.sh all' .github/workflows/edge.yml
+
 printf 'ok - release image freshness, immutable scans, and publication barrier\n'

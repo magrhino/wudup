@@ -71,6 +71,13 @@ Candidate security scanning deployments can use matching Trivy-enabled suffixes:
 `vX.Y.Z-trivy`, `X.Y.Z-trivy`, `X.Y-trivy`, and `latest-trivy`. Those images
 include the Trivy CLI on `PATH`; the default image does not.
 
+The `edge` and `edge-<sha>` tags (plus `edge-trivy` and `edge-<sha>-trivy`) are
+unreleased builds of `main` for testing changes before a stable release. They
+pass the same image scan as releases but may change or break at any time, so
+use `latest` or a release tag for normal deployments. WebUI self-update is
+skipped on `edge` images; set the image back to a release tag to receive stable
+releases again.
+
 Build a local helper image from this repository only for development or smoke
 testing:
 

@@ -410,3 +410,31 @@ tags are available. The release gate includes Python, shell, WebUI, WebUI smoke,
 container build, and Docker Compose E2E validation. Image tags are published as
 `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `latest`. Direct pushes of stable `vX.Y.Z` tags
 also run the same publisher as a fallback.
+
+### Edge Channel
+
+Every push to `main` runs the `edge` workflow, which builds both variants for
+amd64 and arm64 with the same smoke test, digest-pinned scan, and promotion
+barrier as releases, then moves only `edge`, `edge-<sha>`, `edge-trivy`, and
+`edge-<sha>-trivy` (`<sha>` is the 7-character commit). It creates no GitHub
+Release and never moves `latest`, `X.Y.Z`, `X.Y`, or `vX.Y.Z`, so users and
+WebUI self-update, which follow GitHub's latest release, are unaffected. Edge
+runs queue rather than cancel, so `edge` never moves back to an older commit.
+Rerun it for the current `main` with:
+
+```bash
+gh workflow run edge.yml --ref main
+```
+
+Soak `edge` on production before merging the open Release Please PR; the PR
+keeps collecting commits until then. WebUI self-update is skipped on `edge`
+images so it never offers the last stable release as an "update".
+
+To leave beta, cut `1.0.0` deliberately after an `edge` soak: push an empty
+commit to `main` with a `Release-As: 1.0.0` footer, then merge the resulting
+Release Please PR. Keep the `chore: release ` subject; other direct `chore:`
+commits to `main` skip Release Please.
+
+```bash
+git commit --allow-empty -m "chore: release 1.0.0" -m "Release-As: 1.0.0"
+```
