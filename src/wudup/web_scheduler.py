@@ -59,10 +59,10 @@ class EffectiveConfigLoader(Protocol):
 
 def initialize_auto_update_scheduler_state(state: Any) -> None:
     state.web_auto_update_started_at = datetime.now(timezone.utc)
-    # When the scheduler last stopped being able to evaluate every due slot,
-    # because a job was running or it had just submitted one. Slots whose
-    # grace window closed while it was blocked stay due until an idle tick.
-    state.web_auto_update_blocked_since = None
+    # When a tick last finished checking every due slot without submitting a
+    # job or failing. A slot whose grace window closed with no such check
+    # since its scheduled time stays due until one runs.
+    state.web_auto_update_evaluated_at = None
     state.web_auto_update_stop = Event()
     state.web_auto_update_thread = None
 
@@ -133,12 +133,12 @@ def _auto_update_tick(
     effective_config_loader: EffectiveConfigLoader,
     now: datetime | None = None,
 ) -> ApplyJobResponse | None:
-    if not settings.mutations_enabled:
+    if (
+        not settings.mutations_enabled
+        or web_job_registry._active_apply_job_exists_in_state(app.state)
+    ):
         return None
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    if web_job_registry._active_apply_job_exists_in_state(app.state):
-        _mark_auto_update_blocked(app.state, now_utc)
-        return None
     started_at = app.state.web_auto_update_started_at
     if not isinstance(started_at, datetime):
         started_at = now_utc
@@ -155,9 +155,10 @@ def _auto_update_tick(
                 effective_config_loader=effective_config_loader,
                 now_utc=now_utc,
                 started_at=started_at_utc,
-                blocked_since=_auto_update_blocked_since(app.state),
+                last_evaluated_at=_auto_update_evaluated_at(app.state),
             )
             if candidate is None:
+                app.state.web_auto_update_evaluated_at = now_utc
                 return None
             selection, plan, pending_source = candidate
             with _immediate_transaction(conn):
@@ -209,7 +210,6 @@ def _auto_update_tick(
                     )
                 raise
             job_submitted = True
-            _mark_auto_update_blocked(app.state, now_utc)
             with _immediate_transaction(conn):
                 _queue_auto_update_schedule_runs(
                     conn,
@@ -226,21 +226,11 @@ def _auto_update_tick(
         if job_submitted and start_event is not None:
             start_event.set()
         raise
-    finally:
-        if not job_submitted:
-            # The scheduler had its chance to run every due slot without a
-            # job in the way, so slots whose window closed are dropped now.
-            app.state.web_auto_update_blocked_since = None
 
 
-def _auto_update_blocked_since(state: Any) -> datetime | None:
-    blocked_since = getattr(state, "web_auto_update_blocked_since", None)
-    return blocked_since if isinstance(blocked_since, datetime) else None
-
-
-def _mark_auto_update_blocked(state: Any, now_utc: datetime) -> None:
-    if _auto_update_blocked_since(state) is None:
-        state.web_auto_update_blocked_since = now_utc
+def _auto_update_evaluated_at(state: Any) -> datetime | None:
+    evaluated_at = getattr(state, "web_auto_update_evaluated_at", None)
+    return evaluated_at if isinstance(evaluated_at, datetime) else None
 
 
 def _auto_update_candidate(
@@ -250,7 +240,7 @@ def _auto_update_candidate(
     effective_config_loader: EffectiveConfigLoader,
     now_utc: datetime,
     started_at: datetime,
-    blocked_since: datetime | None = None,
+    last_evaluated_at: datetime | None = None,
 ) -> tuple[
     AutoUpdateSelection,
     DryRunPlan,
@@ -261,7 +251,7 @@ def _auto_update_candidate(
         settings,
         now_utc=now_utc,
         started_at=started_at,
-        blocked_since=blocked_since,
+        last_evaluated_at=last_evaluated_at,
     )
     if not policies:
         return None
@@ -347,7 +337,7 @@ def _due_auto_update_policies(
     *,
     now_utc: datetime,
     started_at: datetime,
-    blocked_since: datetime | None = None,
+    last_evaluated_at: datetime | None = None,
 ) -> dict[str, AutoUpdatePolicy]:
     tz = ZoneInfo(settings.config.timezone_name)
     local_now = now_utc.astimezone(tz)
@@ -375,7 +365,7 @@ def _due_auto_update_policies(
             days=days,
             now_utc=now_utc,
             tz=tz,
-            blocked_since=blocked_since,
+            last_evaluated_at=last_evaluated_at,
         )
         if occurrence is None:
             continue
@@ -396,8 +386,10 @@ def _due_auto_update_policies(
         if now_utc >= window_end:
             LOGGER.info(
                 "Scheduled auto-update for %s at %s is still due after its "
-                "%s-second window because another update job was running; "
-                "WUDup will apply it now if an update is still pending.",
+                "%s-second window because WUDup could not check it while the "
+                "window was open (another job was running or the check "
+                "failed); WUDup will apply it now if an update is still "
+                "pending.",
                 service_key,
                 scheduled_local.isoformat(),
                 AUTO_UPDATE_GRACE_SECONDS,
@@ -420,7 +412,7 @@ def _auto_update_due_occurrence(
     days: Sequence[str],
     now_utc: datetime,
     tz: ZoneInfo,
-    blocked_since: datetime | None = None,
+    last_evaluated_at: datetime | None = None,
 ) -> tuple[datetime, datetime, datetime] | None:
     candidate_dates = (
         local_now.date(),
@@ -435,10 +427,13 @@ def _auto_update_due_occurrence(
         window_end = scheduled_for + timedelta(seconds=AUTO_UPDATE_GRACE_SECONDS)
         if scheduled_for > now_utc:
             continue
-        # A slot whose window closed while the scheduler was blocked by a
-        # running job stays due until it can be evaluated.
-        if now_utc < window_end or (
-            blocked_since is not None and blocked_since < window_end
+        # A slot whose window closed before any tick finished checking it,
+        # because a job was running or the check failed, stays due until one
+        # does. A slot already checked during its window is not run late.
+        if (
+            now_utc < window_end
+            or last_evaluated_at is None
+            or last_evaluated_at < scheduled_for
         ):
             return scheduled_local, scheduled_for, window_end
         return None

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from tests.web_scheduler_test_helpers import _auto_update_tick
 from tests.web_test_helpers import (
     _client,
@@ -11,7 +13,7 @@ from tests.web_test_helpers import (
     _make_fake_stack,
 )
 
-from wudup import web_job_registry, web_jobs, web_scheduler
+from wudup import web_job_registry, web_jobs, web_pending_sources, web_scheduler
 from wudup.db import open_db
 
 SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
@@ -55,10 +57,15 @@ class _SchedulerHarness:
                 headers=_csrf_headers(self.client),
             )
             assert response.status_code == 200
+        # Stop the app's real-clock scheduler thread so only this test's ticks
+        # record when the scheduler last checked every due slot.
+        web_scheduler.shutdown_auto_update_scheduler_state(self.client.app.state)
+        self.client.app.state.web_auto_update_evaluated_at = None
         self.client.app.state.web_auto_update_started_at = SCHEDULED - timedelta(
             minutes=30
         )
         self.busy = False
+        self.submit_error: Exception | None = None
         self.submitted: list[tuple[str | None, list[str]]] = []
         monkeypatch.setattr(
             web_job_registry,
@@ -68,6 +75,9 @@ class _SchedulerHarness:
         monkeypatch.setattr(web_jobs, "_submit_apply_job_state", self._submit)
 
     def _submit(self, _state, _settings, plan, **kwargs):
+        if self.submit_error is not None:
+            error, self.submit_error = self.submit_error, None
+            raise error
         run_context = kwargs["run_context"]
         self.submitted.append(
             (
@@ -185,3 +195,75 @@ def test_auto_update_scheduler_ignores_job_started_after_window_closed(
     assert late is None
     assert harness.submitted == []
     assert harness.schedule_keys() == []
+
+
+def test_auto_update_scheduler_drops_slot_checked_before_job_spans_window(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "stop"})
+
+    idle = [harness.tick(minute) for minute in range(4)]
+    harness.pending("app")
+    blocked = [harness.tick(minute, busy=True) for minute in range(4, 9)]
+    late = harness.tick(9)
+
+    assert idle == [None] * 4
+    assert blocked == [None] * 5
+    assert late is None
+    assert harness.submitted == []
+    assert harness.schedule_keys() == []
+
+
+def test_auto_update_scheduler_keeps_late_slot_after_submit_conflict(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "live"})
+    harness.pending("app")
+    harness.submit_error = HTTPException(
+        status_code=409,
+        detail="Another update job is already running.",
+    )
+
+    blocked = [harness.tick(minute, busy=True) for minute in range(-1, 7)]
+    with pytest.raises(HTTPException):
+        harness.tick(7)
+    late = harness.tick(8)
+
+    assert blocked == [None] * 8
+    assert late is not None
+    assert harness.submitted == [("live", ["stack/app"])]
+    assert harness.schedule_keys() == [
+        "stack/app|2026-05-30|09:30|America/Chicago",
+    ]
+
+
+def test_auto_update_scheduler_keeps_late_slot_after_failed_check(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "live"})
+    harness.pending("app")
+    resolve_pending_source = web_pending_sources.resolve_pending_source
+    failures = [RuntimeError("WUD API unreachable")]
+
+    def flaky_resolve_pending_source(*args, **kwargs):
+        if failures:
+            raise failures.pop()
+        return resolve_pending_source(*args, **kwargs)
+
+    monkeypatch.setattr(
+        web_pending_sources,
+        "resolve_pending_source",
+        flaky_resolve_pending_source,
+    )
+
+    blocked = [harness.tick(minute, busy=True) for minute in range(-1, 7)]
+    with pytest.raises(RuntimeError, match="WUD API unreachable"):
+        harness.tick(7)
+    late = harness.tick(8)
+
+    assert blocked == [None] * 8
+    assert late is not None
+    assert harness.submitted == [("live", ["stack/app"])]
