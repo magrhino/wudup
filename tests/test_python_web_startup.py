@@ -17,7 +17,7 @@ from tests.web_test_helpers import (
 )
 
 from wudup import web as web_module
-from wudup import web_startup
+from wudup import web_config, web_startup
 
 
 def test_web_startup_rejects_bind_host_missing_from_allowed_hosts(
@@ -144,6 +144,25 @@ def test_web_startup_summary_uses_public_origin_when_setup_not_required(
     assert status == 0
     assert "Web URL: https://wud.example.test/" in stderr
     assert "Setup link:" not in stderr
+
+
+def test_web_startup_summary_warns_about_short_web_token(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    short = web_config.load_web_settings(_web_env(tmp_path, {"WUD_WEB_TOKEN": "short"}))
+    long = web_config.load_web_settings(
+        _web_env(tmp_path, {"WUD_WEB_TOKEN": "t" * 32})
+    )
+
+    web_startup.print_web_startup_summary(short, host="0.0.0.0", port=7417, setup_claim="")
+    short_stderr = capsys.readouterr().err
+    web_startup.print_web_startup_summary(long, host="0.0.0.0", port=7417, setup_claim="")
+    long_stderr = capsys.readouterr().err
+
+    assert "Warning: WUD_WEB_TOKEN is shorter than 32 characters" in short_stderr
+    assert "short" not in short_stderr.replace("shorter", "")
+    assert "Warning:" not in long_stderr
 
 
 def test_static_spa_mount_serves_index_when_configured(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ import sqlite3
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from functools import cache
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -108,6 +109,7 @@ LOGIN_THROTTLE_MAX_FAILURES = 5
 LOGIN_THROTTLE_COOLDOWN_SECONDS = 60.0
 LOGIN_THROTTLE_MAX_ENTRIES = 1024
 LOGIN_THROTTLE_MAX_CLIENT_ENTRIES = 1024
+WEB_TOKEN_RECOMMENDED_MIN_LENGTH = 32
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
@@ -176,7 +178,7 @@ async def require_auth(
         return
     if _setup_required(settings):
         raise HTTPException(status_code=403, detail="setup required")
-    if _bearer_token_valid(settings, authorization):
+    if _bearer_token_accepted(settings, request, authorization):
         return
     if _session_user(settings, request) is not None:
         return
@@ -257,22 +259,27 @@ def api_auth_login(
     if _setup_required(settings):
         raise HTTPException(status_code=403, detail="setup required")
     username = _normalize_username(payload.username)
-    if _login_throttle_blocked(request, settings, username):
+    # Reserve the attempt before the slow password check so concurrent
+    # requests cannot all pass the throttle before any failure is recorded.
+    if not _reserve_login_attempt(request, settings, username):
         raise _auth_failed()
-    user = _verify_web_user(settings, payload.username, payload.password)
-    if user is None:
-        _record_login_failure(request, settings, username)
-        raise _auth_failed()
-    session_id = _create_web_session(
-        settings,
-        user_id=int(user["id"]),
-        password_hash=str(user["password_hash"]),
-        request=request,
-    )
-    if session_id is None:
-        _record_login_failure(request, settings, username)
-        raise _auth_failed()
-    _clear_login_throttle(request, settings, username)
+    try:
+        user = _verify_web_user(settings, payload.username, payload.password)
+        if user is None:
+            _record_login_failure(request, settings, username)
+            raise _auth_failed()
+        session_id = _create_web_session(
+            settings,
+            user_id=int(user["id"]),
+            password_hash=str(user["password_hash"]),
+            request=request,
+        )
+        if session_id is None:
+            _record_login_failure(request, settings, username)
+            raise _auth_failed()
+        _clear_login_throttle(request, settings, username)
+    finally:
+        _release_login_attempt(request, settings, username)
     _set_session_cookie(response, session_id, request, settings)
     return _auth_session_response(
         settings,
@@ -335,7 +342,10 @@ def api_auth_session(
     user = _session_user(settings, request)
     authenticated = (
         settings.dev_no_auth
-        or (not setup_required and _bearer_token_valid(settings, authorization))
+        or (
+            not setup_required
+            and _bearer_token_accepted(settings, request, authorization)
+        )
         or user is not None
     )
     return _auth_session_response(
@@ -650,6 +660,12 @@ def _verify_web_user(
                 (normalized,),
             ).fetchone()
             if user is None:
+                # Do the same Argon2 work as for a real user, so response
+                # timing does not reveal whether the username exists.
+                try:
+                    _password_hasher().verify(_dummy_password_hash(), password)
+                except (InvalidHashError, VerificationError, VerifyMismatchError):
+                    pass
                 return None
             try:
                 verified = _password_hasher().verify(
@@ -674,6 +690,11 @@ def _verify_web_user(
                 exc,
             ),
         ) from exc
+
+
+@cache
+def _dummy_password_hash() -> str:
+    return _password_hasher().hash(secrets.token_urlsafe(32))
 
 
 def _rehash_web_user(
@@ -724,11 +745,12 @@ def _auth_failed() -> HTTPException:
     )
 
 
-def _login_throttle_blocked(
+def _reserve_login_attempt(
     request: Request,
     settings: WebSettings,
     username: str,
 ) -> bool:
+    """Count an in-flight attempt toward the limit; release it when done."""
     client_address = _request_client_address(request, settings)
     key = _login_throttle_key(username, client_address)
     now = time.monotonic()
@@ -739,14 +761,52 @@ def _login_throttle_blocked(
         client_throttle: dict[str, LoginThrottleEntry] = (
             request.app.state.web_login_client_throttle
         )
+        pending: dict[tuple[str, str], int] = request.app.state.web_login_pending
+        client_pending: dict[str, int] = request.app.state.web_login_client_pending
         _prune_login_throttle(throttle, now)
         _prune_login_throttle(client_throttle, now)
-        entry = throttle.get(key)
-        client_entry = client_throttle.get(client_address)
-        return (
-            (entry is not None and entry.locked_until > now)
-            or (client_entry is not None and client_entry.locked_until > now)
-        )
+        if _login_attempts_exhausted(
+            throttle.get(key), pending.get(key, 0), now
+        ) or _login_attempts_exhausted(
+            client_throttle.get(client_address),
+            client_pending.get(client_address, 0),
+            now,
+        ):
+            return False
+        pending[key] = pending.get(key, 0) + 1
+        client_pending[client_address] = client_pending.get(client_address, 0) + 1
+        return True
+
+
+def _release_login_attempt(
+    request: Request,
+    settings: WebSettings,
+    username: str,
+) -> None:
+    client_address = _request_client_address(request, settings)
+    key = _login_throttle_key(username, client_address)
+    with request.app.state.web_login_throttle_lock:
+        _decrement_pending(request.app.state.web_login_pending, key)
+        _decrement_pending(request.app.state.web_login_client_pending, client_address)
+
+
+def _decrement_pending(pending: dict[Any, int], key: object) -> None:
+    remaining = pending.get(key, 0) - 1
+    if remaining > 0:
+        pending[key] = remaining
+    else:
+        pending.pop(key, None)
+
+
+def _login_attempts_exhausted(
+    entry: LoginThrottleEntry | None,
+    pending: int,
+    now: float,
+) -> bool:
+    if entry is not None and entry.locked_until > now:
+        return True
+    failures = 0 if entry is None else entry.failures
+    return failures + pending >= _login_throttle_max_failures()
 
 
 def _record_login_failure(
@@ -993,7 +1053,7 @@ def _request_authenticated(
         return True
     if _setup_required(settings):
         return False
-    return _bearer_token_valid(settings, authorization) or _session_user(
+    return _bearer_token_accepted(settings, request, authorization) or _session_user(
         settings,
         request,
     ) is not None
@@ -1095,6 +1155,38 @@ def _insert_auth_audit(
         ),
     )
     return run_id
+
+
+def _bearer_token_accepted(
+    settings: WebSettings,
+    request: Request,
+    authorization: str | None,
+) -> bool:
+    """Check a bearer token, throttling wrong tokens per client address.
+
+    Bearer failures use their own bucket so a client with a stale token
+    cannot lock browser password logins out of the same address.
+    """
+    if not settings.auth_token:
+        return False
+    scheme, separator, token = (authorization or "").partition(" ")
+    # An empty token can never match, so it does not count as a guess.
+    if separator != " " or scheme.lower() != "bearer" or not token:
+        return False
+    client_address = _request_client_address(request, settings)
+    now = time.monotonic()
+    with request.app.state.web_login_throttle_lock:
+        throttle: dict[str, LoginThrottleEntry] = (
+            request.app.state.web_bearer_throttle
+        )
+        _prune_login_throttle(throttle, now)
+        entry = throttle.get(client_address)
+        if entry is not None and entry.locked_until > now:
+            return False
+        if _bearer_token_valid(settings, authorization):
+            return True
+        _record_login_client_failure(throttle, client_address, now)
+        return False
 
 
 def _bearer_token_valid(settings: WebSettings, authorization: str | None) -> bool:
@@ -1240,6 +1332,19 @@ def _secure_cookie(settings: WebSettings, request: Request) -> bool:
 
 def _forbidden(detail: str) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=403)
+
+
+def weak_auth_token_warning(settings: WebSettings) -> str:
+    if not settings.auth_token or (
+        len(settings.auth_token) >= WEB_TOKEN_RECOMMENDED_MIN_LENGTH
+    ):
+        return ""
+    return (
+        f"WUD_WEB_TOKEN is shorter than {WEB_TOKEN_RECOMMENDED_MIN_LENGTH} "
+        "characters, so a client that can reach the WebUI could guess it. "
+        "Replace it with a long random value, for example from "
+        "`openssl rand -hex 32`."
+    )
 
 
 def _validate_startup_auth(settings: WebSettings) -> None:
