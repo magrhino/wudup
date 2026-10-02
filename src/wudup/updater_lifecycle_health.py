@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 from . import updater_logging
 from .command import CommandError, CommandResult
@@ -13,6 +14,18 @@ from .updater_models import ImageState, Match, UpResult
 
 CONTAINER_SUMMARY_FORMAT = "{{.Name}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.ExitCode}}"
 HEALTH_LOG_FORMAT = "{{if .State.Health}}{{range .State.Health.Log}}{{println .Output}}{{end}}{{end}}"
+
+
+@dataclass(frozen=True)
+class _ContainerImageCheck:
+    """Result of comparing service containers with the pulled images."""
+
+    behind: dict[str, tuple[str, str]]
+    """Service -> (Compose image, image ID the container still uses)."""
+    failed_start: tuple[str, ...]
+    """Stopped services whose last container start attempt failed."""
+    unverified: tuple[str, ...]
+    error: CommandError | None = None
 
 
 class _LifecycleHealthMixin:
@@ -260,25 +273,32 @@ class _LifecycleHealthMixin:
             if image
         }
 
-    def _services_behind_pulled_images(
+    def _check_container_images(
         self,
         stack: ComposeStack,
         services: Sequence[str],
+        stopped_services: Sequence[str],
         after: Mapping[str, ImageState],
-    ) -> tuple[str, ...]:
-        """Return services whose containers do not use the pulled image.
+    ) -> _ContainerImageCheck:
+        """Compare each service's containers with the image just pulled.
 
-        An earlier run can pull a same-tag image and then fail to recreate the
-        container, so the local tag alone cannot show that the update applied.
+        An earlier run can pull a same-tag image and then fail to recreate or
+        start the container, so the local tag alone cannot show that the
+        update applied. Anything that cannot be read is reported as unverified
+        instead of being treated as current.
         """
         pulled_ids = {
-            item.service: after[item.image].image_id
+            item.service: (item.image, after[item.image].image_id)
             for item in stack.service_images
             if item.image in after and after[item.image].image_id
         }
-        behind: list[str] = []
+        stopped = set(stopped_services)
+        behind: dict[str, tuple[str, str]] = {}
+        failed_start: list[str] = []
+        unverified: list[str] = []
+        error: CommandError | None = None
         for service in services:
-            pulled_id = pulled_ids.get(service)
+            image, pulled_id = pulled_ids.get(service, ("", ""))
             if not pulled_id:
                 continue
             try:
@@ -289,20 +309,28 @@ class _LifecycleHealthMixin:
                     project_directory=stack.project_directory,
                     all_containers=True,
                 )
+                for container_id in container_ids:
+                    container_image_id = self.docker.container_image_id(container_id)
+                    if not container_image_id:
+                        unverified.append(service)
+                        break
+                    if container_image_id != pulled_id:
+                        behind.setdefault(service, (image, container_image_id))
+                    if (
+                        service in stopped
+                        and service not in failed_start
+                        and self.docker.container_state_error(container_id)
+                    ):
+                        failed_start.append(service)
             except CommandError as exc:
-                self.log.warning(
-                    f"[{stack.name}] Could not check which image service {service} "
-                    f"is using, so it was treated as current ({exc})"
-                )
-                continue
-            if any(
-                running_id and running_id != pulled_id
-                for running_id in (
-                    self.docker.try_container_image_id(cid) for cid in container_ids
-                )
-            ):
-                behind.append(service)
-        return tuple(behind)
+                unverified.append(service)
+                error = error or exc
+        return _ContainerImageCheck(
+            behind=behind,
+            failed_start=tuple(failed_start),
+            unverified=tuple(unverified),
+            error=error,
+        )
 
 
 def _updated_images(

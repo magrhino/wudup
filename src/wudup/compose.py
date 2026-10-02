@@ -470,6 +470,22 @@ class ComposeCli:
             project_directory=project_directory,
         )
 
+    def start(
+        self,
+        directory: str | Path,
+        file: str,
+        services: Sequence[str] | None = None,
+        *,
+        project_directory: str | Path | None = None,
+    ) -> CommandResult:
+        return self.run_with_services(
+            directory,
+            file,
+            services,
+            "start",
+            project_directory=project_directory,
+        )
+
     def pause(
         self,
         directory: str | Path,

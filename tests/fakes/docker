@@ -450,6 +450,13 @@ compose_cmd(){
       fi
       return 0
       ;;
+    start)
+      if [[ -f "$ROOT/stacks/$id/start_fail" ]]; then
+        emit_failure_output "$id" start
+        return 25
+      fi
+      return 0
+      ;;
     down)
       if [[ -f "$ROOT/stacks/$id/down_fail" ]]; then
         emit_failure_output "$id" down
@@ -551,6 +558,12 @@ inspect_cmd(){
   if [[ "$format" == *'.Image'* ]]; then
     local image_file="$ROOT/containers/$target.image-id"
     [[ -f "$image_file" ]] && cat "$image_file"
+    return 0
+  fi
+
+  if [[ "$format" == *'.State.Error'* ]]; then
+    local error_file="$ROOT/containers/$target.state-error"
+    [[ -f "$error_file" ]] && cat "$error_file"
     return 0
   fi
 

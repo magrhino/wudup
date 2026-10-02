@@ -11,6 +11,7 @@ IMAGE_ID_FORMAT = "{{.Id}}"
 IMAGE_DIGESTS_FORMAT = "{{range .RepoDigests}}{{println .}}{{end}}"
 CONTAINER_ID_FORMAT = "{{.Id}}"
 CONTAINER_IMAGE_ID_FORMAT = "{{.Image}}"
+CONTAINER_STATE_ERROR_FORMAT = "{{.State.Error}}"
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,13 @@ class DockerCli:
 
     def container_id(self, container: str) -> str:
         return _first_nonblank(self.inspect(container, CONTAINER_ID_FORMAT))
+
+    def container_image_id(self, container: str) -> str:
+        return _first_nonblank(self.inspect(container, CONTAINER_IMAGE_ID_FORMAT))
+
+    def container_state_error(self, container: str) -> str:
+        """Return the error from the container's last failed start, if any."""
+        return _first_nonblank(self.inspect(container, CONTAINER_STATE_ERROR_FORMAT))
 
     def try_container_image_id(self, container: str) -> str:
         return _first_nonblank(

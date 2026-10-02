@@ -57,6 +57,7 @@ class _LifecycleRecreateMixin:
                     state,
                     stop_result,
                     preserved,
+                    restart_stopped=False,
                 )
 
         self._progress(
@@ -140,6 +141,7 @@ class _LifecycleRecreateMixin:
         up_result: UpResult,
         *,
         prepared: bool = True,
+        restart_stopped: bool = True,
     ) -> StackStatus:
         stack = state.stack
         unpaused = (
@@ -165,6 +167,11 @@ class _LifecycleRecreateMixin:
                 failure_health=up_result.health_details,
             )
 
+        restart_note = (
+            self._restart_services_stopped_for_update(state)
+            if prepared and restart_stopped
+            else ""
+        )
         if stop_result.failed and stop_result.error is not None:
             self._record_failure(
                 stack,
@@ -185,6 +192,7 @@ class _LifecycleRecreateMixin:
             services=state.services,
             command_error=up_result.command_error,
             health_details=up_result.health_details,
+            note=restart_note,
         )
         self._progress(
             "recreate",
@@ -195,6 +203,41 @@ class _LifecycleRecreateMixin:
             matches=state.matches,
         )
         return StackStatus("failure", "up-or-health-failed")
+
+    def _restart_services_stopped_for_update(self, state: _StackUpdateState) -> str:
+        """Start services that stop mode stopped before a failed recreate.
+
+        Leaving them stopped would make the next run treat them as
+        intentionally stopped and never start them again.
+        """
+        if self.options.mode != "stop":
+            return ""
+        stack = state.stack
+        services = state.running_stop_services or state.running_services
+        if not services:
+            return ""
+        label = " ".join(services)
+        try:
+            self.compose.start(
+                stack.directory,
+                stack.file,
+                services,
+                project_directory=stack.project_directory,
+            )
+        except CommandError as exc:
+            message = (
+                f"Could not start service(s) {label} again after the failed "
+                "update, so they are still stopped. Fix the error above, then "
+                "rerun the update or start them with docker compose start."
+            )
+            self.log.error(f"[{stack.name}] {message} ({exc})")
+            return message
+        message = (
+            f"Service(s) {label} were stopped for the update and were started "
+            "again after it failed."
+        )
+        self.log.warning(f"[{stack.name}] {message}")
+        return message
 
     def _unpause_after_recreate(
         self,

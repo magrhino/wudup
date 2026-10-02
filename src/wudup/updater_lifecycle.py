@@ -57,6 +57,7 @@ from .updater_lifecycle_state import _StackUpdateState
 from .updater_matching import _update_services
 from .updater_models import (
     STALE_PENDING_DIGEST_REASON,
+    ImageState,
     Match,
     StackStatus,
     UpdaterError,
@@ -539,6 +540,91 @@ class StackLifecycleExecutor(
 
         return None
 
+    def _find_unfinished_update(self, state: _StackUpdateState) -> bool | StackStatus:
+        """Detect containers an earlier failed run left behind the pulled image.
+
+        A retry of a same-tag update finds the image already pulled, so it must
+        check the containers themselves: a container still on the older image
+        is recreated, and a stopped container whose last start failed is
+        started again because it was meant to be running.
+        """
+        stack = state.stack
+        targets = _update_services(state.matches)
+        services = tuple(
+            service
+            for service in (*state.running_services, *state.stopped_services)
+            if targets is None or service in targets
+        )
+        if not services:
+            return False
+        check = self._check_container_images(
+            state.current_stack,
+            services,
+            state.stopped_services,
+            state.after,
+        )
+        if check.unverified:
+            message = (
+                "Could not confirm which image service(s) "
+                f"{' '.join(check.unverified)} are using, so the update was not "
+                "marked as applied and the WUD entry was kept. Check that Docker "
+                "is responding, then rerun the update."
+            )
+            self.log.error(f"[{stack.name}] {message}")
+            self._record_failure(
+                stack,
+                state.matches,
+                phase="recreate",
+                reason="runtime-image-unverified",
+                services=check.unverified,
+                command_error=check.error,
+                note=message,
+            )
+            self._progress(
+                "recreate",
+                "failure",
+                f"[{stack.name}] Could not confirm the image used by the selected "
+                "containers.",
+                stack=stack.name,
+                services=check.unverified,
+                matches=state.matches,
+            )
+            return StackStatus("failure", "runtime-image-unverified")
+
+        if check.failed_start:
+            self.log.info(
+                f"[{stack.name}] Service(s) failed to start during an earlier "
+                f"update attempt and will be started: {' '.join(check.failed_start)}"
+            )
+            state.running_services = (*state.running_services, *check.failed_start)
+            state.stopped_services = tuple(
+                service
+                for service in state.stopped_services
+                if service not in check.failed_start
+            )
+        if check.behind:
+            self.log.info(
+                f"[{stack.name}] Image is already pulled, but service(s) still "
+                "use an older image and will be recreated: "
+                f"{' '.join(check.behind)}"
+            )
+            for image, container_image_id in check.behind.values():
+                state.before[image] = ImageState(
+                    image_id=container_image_id,
+                    digest=self._try_image_digest(container_image_id),
+                )
+            self.runner.stack_image_states[stack.index] = (
+                dict(state.before),
+                dict(state.after),
+            )
+        return bool(check.failed_start or check.behind)
+
+    def _try_image_digest(self, image: str) -> str:
+        try:
+            return self.docker.image_digest(image)
+        except CommandError:
+            return ""
+
     def _finish_pull_phase(self, state: _StackUpdateState) -> StackStatus | None:
         stack = state.stack
         self.runner.stack_image_states[state.stack.index] = (
@@ -566,17 +652,10 @@ class StackLifecycleExecutor(
             self.log.info(f"[{stack.name}] Image updated: {image} -> {target}")
 
         if not update_needed:
-            behind = self._services_behind_pulled_images(
-                state.current_stack,
-                (*state.running_services, *state.stopped_services),
-                state.after,
-            )
-            if behind:
-                self.log.info(
-                    f"[{stack.name}] Image is already pulled, but service(s) still "
-                    f"use an older image and will be recreated: {' '.join(behind)}"
-                )
-                update_needed = True
+            unfinished = self._find_unfinished_update(state)
+            if isinstance(unfinished, StackStatus):
+                return unfinished
+            update_needed = unfinished
 
         if not update_needed:
             self.log.info(f"[{stack.name}] All images up to date, skipping restart")
