@@ -149,7 +149,8 @@ against the planned digest, then writes the final image as
 an exact regex for the resolved tag. Dry-run remains non-mutating; Compose edits
 and final digest writes happen only during apply. Lines without a safe resolved
 tag, custom compound `wud.tag.include` regexes, YAML anchors/aliases,
-interpolation, and inherited image values fail closed.
+interpolation, inherited image values, and WUD labels listed more than once on
+a service (Compose uses only the last one) fail closed.
 
 ## Locking
 
