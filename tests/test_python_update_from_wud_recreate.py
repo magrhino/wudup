@@ -807,6 +807,45 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertIn("reason=health-failed", report)
         self.assertIn("phase=health", report)
         self.assertIn("health: container=cid-app status=running health=unhealthy", report)
+
+    def test_pause_mode_health_wait_fails_when_selected_service_has_no_container(
+        self,
+    ) -> None:
+        self.wud_file.write_text(
+            "repo/app:latest\nrepo/worker:latest\n", encoding="utf-8"
+        )
+        self.make_stack(
+            "app",
+            [
+                ("app", "repo/app:latest", "cid-app"),
+                ("worker", "repo/worker:latest", "cid-worker"),
+            ],
+        )
+        for image in ("repo/app:latest", "repo/worker:latest"):
+            self.set_image_state(image, "old", "sha256:old")
+            self.set_image_after_pull(image, "new", "sha256:new")
+        # The recreated worker exits at once, so `compose ps -q` no longer lists it.
+        hook = self.fake_root / "post-up-hook"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            ': > "$FAKE_DOCKER_ROOT/stacks/app/cids-worker.txt"\n',
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+
+        result = self.run_python("--yes", "--mode", "pause")
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("no running container for service(s): worker", output)
+        self.assertNotIn("Healthy", output)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=health-failed", report)
+        self.assertIn("health: service=worker has no running container", report)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:latest\nrepo/worker:latest\n",
+        )
     def test_recreate_stop_failure_and_up_failure_without_rewrite(self) -> None:
         self.env["FAKE_COMPOSE_UP_WAIT"] = "1"
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")

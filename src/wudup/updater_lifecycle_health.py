@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from . import updater_logging
 from .command import CommandError, CommandResult
-from .compose import ComposeStack
+from .compose import ComposeCli, ComposeStack
 from .images import image_repo_ref
 from .updater_models import ImageState, Match, UpResult
 
@@ -156,13 +156,8 @@ class _LifecycleHealthMixin:
             time.sleep(2)
 
         while True:
-            cids = self.compose.ps_quiet(
-                stack.directory,
-                stack.file,
-                services,
-                project_directory=stack.project_directory,
-            )
-            ok = bool(cids)
+            cids, missing = running_service_containers(self.compose, stack, services)
+            ok = bool(cids) and not missing
             for cid in cids:
                 summary = self._cid_summary(cid)
                 if not summary or not _cid_is_ok(summary):
@@ -187,6 +182,12 @@ class _LifecycleHealthMixin:
                         "ERROR",
                         f"[{stack.name}] Health blocker: docker compose ps -q returned no containers",
                     )
+                if missing:
+                    self.log.error(
+                        f"[{stack.name}] Health blocker: no running container for "
+                        f"service(s): {', '.join(missing)}. The container exited or "
+                        "never started; check `docker compose logs` for that service.",
+                    )
                 self._log_health_details(stack, services)
                 self._progress(
                     "health",
@@ -204,16 +205,14 @@ class _LifecycleHealthMixin:
         stack: ComposeStack,
         services: Sequence[str] | None,
     ) -> str:
-        cids = self.compose.ps_quiet(
-            stack.directory,
-            stack.file,
-            services,
-            project_directory=stack.project_directory,
-        )
+        cids, missing = running_service_containers(self.compose, stack, services)
         if not cids:
             return "health: docker compose ps -q returned no containers\n"
 
-        lines: list[str] = []
+        lines = [
+            f"health: service={service} has no running container"
+            for service in missing
+        ]
         for cid in cids:
             summary = self._cid_summary(cid)
             if not summary:
@@ -259,6 +258,40 @@ class _LifecycleHealthMixin:
             for image in images
             if image
         }
+
+
+def running_service_containers(
+    compose: ComposeCli,
+    stack: ComposeStack,
+    services: Sequence[str] | None,
+) -> tuple[list[str], list[str]]:
+    """Return running container IDs and the selected services that have none.
+
+    ``docker compose ps -q`` lists only running containers, so a combined
+    lookup lets a service whose container exited or never started hide behind
+    a running sibling. Look up each selected service on its own instead.
+    """
+    if not services:
+        return compose.ps_quiet(
+            stack.directory,
+            stack.file,
+            services,
+            project_directory=stack.project_directory,
+        ), []
+
+    cids: list[str] = []
+    missing: list[str] = []
+    for service in dict.fromkeys(services):
+        service_cids = compose.ps_quiet(
+            stack.directory,
+            stack.file,
+            [service],
+            project_directory=stack.project_directory,
+        )
+        if not service_cids:
+            missing.append(service)
+        cids.extend(cid for cid in service_cids if cid not in cids)
+    return cids, missing
 
 
 def _updated_images(

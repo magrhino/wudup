@@ -28,6 +28,7 @@ from .updater_lifecycle_health import (
     CONTAINER_SUMMARY_FORMAT,
     HEALTH_LOG_FORMAT,
     _cid_is_ok,
+    running_service_containers,
 )
 from .updater_models import UpdaterProgressEvent
 from .web_models import (
@@ -688,13 +689,8 @@ def _wait_for_retag_health(
     if config.max_wait > 0:
         time.sleep(2)
     while True:
-        cids = compose.ps_quiet(
-            stack.directory,
-            stack.file,
-            services,
-            project_directory=stack.project_directory,
-        )
-        ok = bool(cids)
+        cids, missing = running_service_containers(compose, stack, services)
+        ok = bool(cids) and not missing
         for cid in cids:
             summary = _first_nonblank(
                 docker.try_inspect(cid, CONTAINER_SUMMARY_FORMAT)
@@ -804,15 +800,15 @@ def _retag_health_details(
     stack: ComposeStack,
     services: Sequence[str],
 ) -> str:
-    cids = compose.ps_quiet(
-        stack.directory,
-        stack.file,
-        services,
-        project_directory=stack.project_directory,
-    )
+    cids, missing = running_service_containers(compose, stack, services)
     details: list[str] = []
     if not cids:
         details.append("docker compose ps -q returned no containers")
+    if missing:
+        details.append(
+            f"no running container for service(s): {', '.join(missing)} "
+            "(the container exited or never started)"
+        )
     for cid in cids:
         summary = _first_nonblank(docker.try_inspect(cid, CONTAINER_SUMMARY_FORMAT))
         if summary:

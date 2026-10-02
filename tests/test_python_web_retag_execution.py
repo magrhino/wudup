@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from threading import Condition
+from types import SimpleNamespace
 
 import pytest
 from tests.web_retag_test_helpers import (
@@ -13,7 +15,7 @@ from tests.web_retag_test_helpers import (
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
 from wudup import web_retag_apply, web_retag_audit, web_retags
-from wudup.compose import ComposeCli
+from wudup.compose import ComposeCli, ComposeStack
 
 
 @pytest.mark.parametrize("failure", [None, "rewrite", "pull", "health", "known"])
@@ -150,3 +152,42 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
     assert "compose rollback failed" in job["error"]
     assert "backup retained at [REDACTED_PATH]" in job["error"]
     assert str(tmp_path) not in job["error"]
+
+
+def test_retag_health_wait_fails_when_selected_service_has_no_container(
+    tmp_path: Path,
+) -> None:
+    class FakeCompose:
+        def ps_quiet(self, directory, file, services=None, *, project_directory=None):
+            # `compose ps -q` lists only running containers; worker exited.
+            running = {"app": ["cid-app"], "worker": []}
+            return [cid for service in services or running for cid in running[service]]
+
+    class FakeDocker:
+        def try_inspect(self, cid: str, fmt: str) -> list[str]:
+            if fmt == web_retag_apply.CONTAINER_SUMMARY_FORMAT:
+                return [f"/{cid}|running|healthy|0|0"]
+            return []
+
+    stack = ComposeStack(
+        index=0,
+        directory=tmp_path,
+        file="docker-compose.yml",
+        name="stack",
+        images=(),
+        service_images=(),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        web_retag_apply._wait_for_retag_health(
+            FakeCompose(),
+            FakeDocker(),
+            SimpleNamespace(max_wait=0),
+            stack,
+            ("app", "worker"),
+            {},
+            Condition(),
+            "job",
+        )
+
+    assert "no running container for service(s): worker" in str(raised.value)
