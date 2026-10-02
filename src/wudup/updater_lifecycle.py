@@ -309,7 +309,7 @@ class StackLifecycleExecutor(
                 self._progress(
                     "preflight",
                     "failure",
-                    f"[{stack.name}] Stack runs with extra Compose files that "
+                    f"[{stack.name}] Stack runs with Compose files that "
                     "WUDup does not load; the update was not applied.",
                     stack=stack.name,
                     services=services,

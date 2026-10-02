@@ -506,6 +506,29 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         report = self.latest_error_report().read_text(encoding="utf-8")
         self.assertIn("reason=compose-override-files", report)
 
+    def test_update_refuses_project_started_from_different_compose_file(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'compose.prod.yml'}\tapp\tapp\tFalse\n",
+            encoding="utf-8",
+        )
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+
+        result = self.run_python("--yes")
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:latest\n",
+        )
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
+        self.assertIn("compose.prod.yml", result.stdout + result.stderr)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=compose-override-files", report)
+
     def test_stack_update_fails_closed_when_service_list_is_unavailable(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])

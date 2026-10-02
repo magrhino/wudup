@@ -8,6 +8,7 @@ from .command import CommandError, CommandRunner
 from .compose import (
     COMPOSE_RUNTIME_FORMAT,
     ComposeStack,
+    compose_runtime_extra_config_files,
     compose_runtime_service_key,
     compose_runtime_service_keys,
 )
@@ -30,6 +31,25 @@ def _running_retag_compose_service_keys(
     except CommandError:
         return None
     return compose_runtime_service_keys(rows)
+
+
+def _retag_project_extra_config_files(
+    settings: WebSettings,
+    stack: ComposeStack,
+    project_name: str,
+) -> tuple[Path, ...] | None:
+    """Return Compose files the project's containers loaded besides ``stack.file``."""
+    docker = DockerCli(runner=_command_runner(settings))
+    try:
+        rows = docker.ps_format(COMPOSE_RUNTIME_FORMAT, all_containers=True)
+    except CommandError:
+        return None
+    return compose_runtime_extra_config_files(
+        stack.project_directory or stack.directory,
+        stack.file,
+        project_name,
+        compose_runtime_service_keys(rows),
+    )
 
 
 def _retag_compose_service_key(

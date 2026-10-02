@@ -13,7 +13,7 @@ from starlette.datastructures import State
 
 from . import web_job_registry, web_retag_audit
 from .command import CommandError, CommandRunner
-from .compose import ComposeCli, ComposeStack
+from .compose import ComposeCli, ComposeStack, compose_override_files_message
 from .compose_rewrite import (
     _backup_compose,
     _compose_source_hash,
@@ -53,6 +53,7 @@ from .web_retag_plans import (
 )
 from .web_retag_runtime import (
     _retag_compose_service_key,
+    _retag_project_extra_config_files,
     _running_retag_compose_service_keys,
 )
 
@@ -519,6 +520,16 @@ def _revalidate_retag_runtime_before_apply(
         raise RuntimeError("retag Compose project could not be revalidated")
     if project_name != stack.project_name:
         raise RuntimeError("retag Compose project changed before apply")
+    extra_files = _retag_project_extra_config_files(settings, stack, project_name)
+    if extra_files is None:
+        raise RuntimeError("retag runtime state could not be revalidated")
+    if extra_files:
+        # WebUI errors redact absolute paths, so name the files by basename.
+        extra_names = tuple(Path(path.name) for path in extra_files)
+        raise RuntimeError(
+            f"{compose_override_files_message(stack.file, extra_names)} "
+            "The retag was not applied."
+        )
     running_service_keys = _running_retag_compose_service_keys(settings)
     if running_service_keys is None:
         raise RuntimeError("retag runtime state could not be revalidated")

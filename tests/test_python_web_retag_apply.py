@@ -443,6 +443,54 @@ def test_retag_apply_allows_explicit_inactive_start_approval(tmp_path: Path) -> 
     ) in calls
 
 
+def test_retag_apply_refuses_project_started_with_override_file(
+    tmp_path: Path,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    stack_dir = fixture.compose_dir
+    config_files = (
+        f"{stack_dir / 'docker-compose.yml'},"
+        f"{stack_dir / 'docker-compose.override.yml'}"
+    )
+    (fixture.fake_root / "compose-runtime.tsv").write_text(
+        "".join(
+            f"{stack_dir}\t{config_files}\t{stack_dir.name}\t{service}\tFalse\n"
+            for service in ("app", "sidecar")
+        ),
+        encoding="utf-8",
+    )
+    compose_file = stack_dir / "docker-compose.yml"
+    before = compose_file.read_text(encoding="utf-8")
+    headers = _csrf_headers(fixture.client)
+    choice = {**_switch_choice(), "allow_start": True}
+    plan = _create_retag_plan(fixture.client, headers, choices=[choice])
+
+    response = _apply_retag_plan(
+        fixture.client,
+        headers,
+        plan,
+        choices=[choice],
+    )
+
+    assert plan["status"] == "ready"
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    assert "docker-compose.override.yml" in job["error"]
+    assert "retag was not applied" in job["error"]
+    assert compose_file.read_text(encoding="utf-8") == before
+    calls = _fake_docker_calls(fixture.fake_root)
+    assert "compose -f docker-compose.yml pull" not in calls
+    assert "compose -f docker-compose.yml up" not in calls
+
+
 def test_retag_apply_worker_rechecks_runtime_before_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

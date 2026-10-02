@@ -142,20 +142,35 @@ def compose_runtime_extra_config_files(
     project_name: str,
     runtime_keys: Iterable[ComposeRuntimeServiceKey],
 ) -> tuple[Path, ...]:
-    """Return Compose files the project's containers loaded beyond ``compose_file``.
+    """Return Compose files the project was started with besides ``compose_file``.
 
     WUDup runs Compose with only the discovered file, so recreating a project
-    that was started with override or extra ``-f`` files would drop their
-    settings and let ``--remove-orphans`` delete the services they define.
+    started with override or extra ``-f`` files would drop their settings and
+    let ``--remove-orphans`` delete the services they define. A project whose
+    containers all came from other files (for example ``compose.prod.yml``)
+    would also be treated as stopped and recreated from the wrong file.
+    Containers from a different file set are tolerated only while some
+    container still runs from exactly the discovered file, which is how
+    separately discovered stacks that share a project name are told apart.
     """
     expected_paths, _project, _service = compose_runtime_service_key(
         project_directory, compose_file, project_name, ""
     )
-    extra: set[Path] = set()
+    superset_extra: set[Path] = set()
+    other_files: set[Path] = set()
+    started_from_discovered_file = False
     for runtime_paths, runtime_project, _runtime_service in runtime_keys:
-        if runtime_project == project_name and expected_paths < runtime_paths:
-            extra.update(runtime_paths - expected_paths)
-    return tuple(sorted(extra))
+        if runtime_project != project_name:
+            continue
+        if runtime_paths == expected_paths:
+            started_from_discovered_file = True
+        elif expected_paths < runtime_paths:
+            superset_extra.update(runtime_paths - expected_paths)
+        else:
+            other_files.update(runtime_paths)
+    if not started_from_discovered_file:
+        superset_extra.update(other_files)
+    return tuple(sorted(superset_extra))
 
 
 def compose_override_files_message(
@@ -164,7 +179,7 @@ def compose_override_files_message(
 ) -> str:
     files = ", ".join(str(path) for path in extra_files)
     return (
-        "This Compose project is running with extra Compose file(s) that WUDup "
+        "This Compose project is running with Compose file(s) that WUDup "
         f"does not load: {files}. Recreating it from {compose_file} alone would "
         "drop their settings and could remove the services they add. Merge those "
         f"settings into {compose_file} and recreate the stack from that file, or "

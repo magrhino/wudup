@@ -366,11 +366,12 @@ def recreate_tag_exclusion_services(
     updates_by_stack = _tag_exclusion_updates_by_stack(updates)
     runtime_keys = _compose_runtime_keys(runner) if updates_by_stack else None
     for stack, stack_updates in updates_by_stack.items():
-        if not _uses_only_discovered_compose_file(runner, stack, runtime_keys):
+        refusal_reason = _compose_file_refusal_reason(runner, stack, runtime_keys)
+        if refusal_reason:
             for update in stack_updates:
                 statuses[(update.stack.index, update.source_line)] = StackStatus(
                     "failure",
-                    "tag-exclusion-recreate-failed",
+                    refusal_reason,
                 )
             continue
         services = tuple(sorted({update.service for update in stack_updates}))
@@ -417,13 +418,14 @@ def _compose_runtime_keys(runner: Any) -> set[ComposeRuntimeServiceKey] | None:
         return None
 
 
-def _uses_only_discovered_compose_file(
+def _compose_file_refusal_reason(
     runner: Any,
     stack: ComposeStack,
     runtime_keys: set[ComposeRuntimeServiceKey] | None,
-) -> bool:
+) -> str:
+    """Return a failure reason when the stack must not be recreated, else ``""``."""
     if runtime_keys is None:
-        return False
+        return "tag-exclusion-recreate-failed"
     extra_files = compose_runtime_extra_config_files(
         stack.project_directory or stack.directory,
         stack.file,
@@ -431,12 +433,12 @@ def _uses_only_discovered_compose_file(
         runtime_keys,
     )
     if not extra_files:
-        return True
+        return ""
     runner.log.error(
         f"[{stack.name}] {compose_override_files_message(stack.file, extra_files)} "
         "Services with new wud.tag.exclude labels were not recreated."
     )
-    return False
+    return "compose-override-files"
 
 
 def mark_tag_exclusions_pending(

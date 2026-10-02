@@ -777,6 +777,20 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
     def test_ignores_projects_started_from_discovered_file_only(self) -> None:
         keys = compose_runtime_service_keys([
             "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            "/srv/app\tdocker-compose.yml\tapp\tworker\tFalse",
+            "/elsewhere\t/elsewhere/compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (),
+        )
+
+    def test_keeps_same_named_stacks_started_from_their_own_files(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
             (
                 "/elsewhere\t/elsewhere/compose.yml,/elsewhere/extra.yml"
                 "\tapp\tapp\tFalse"
@@ -788,6 +802,20 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
                 "/srv/app", "docker-compose.yml", "app", keys
             ),
             (),
+        )
+
+    def test_reports_project_started_only_from_different_files(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/compose.prod.yml\tapp\tapp\tFalse",
+            "/srv/app\t/srv/app/compose.prod.yml\tapp\tworker\tFalse",
+            "/srv/other\t/srv/other/docker-compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (Path("/srv/app/compose.prod.yml"),),
         )
 
 

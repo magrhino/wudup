@@ -113,6 +113,11 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             "docker-compose.override.yml",
             result.stdout + result.stderr,
         )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "compose-override-files"),
+        )
 
     def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(

@@ -192,11 +192,12 @@ instead of service-scoped stop/up: it stops the project services and runs
 `docker compose up -d --remove-orphans` without tearing down Compose networks.
 
 The updater runs Compose with the single discovered Compose file for each
-project. If any container in the project was started with extra Compose files,
-such as an automatically loaded `docker-compose.override.yml` or extra `-f`
-files, the updater refuses to update or recreate that project instead of
-dropping those settings. Merge the extra settings into the discovered Compose
-file and recreate the stack from it, or update that stack manually.
+project. If any container in the project was started with other Compose files,
+such as an automatically loaded `docker-compose.override.yml`, extra `-f`
+files, or only a different file that uses the same project name, the updater
+and WebUI retag refuse to update or recreate that project instead of dropping those
+settings. Merge the extra settings into the discovered Compose file and
+recreate the stack from it, or update that stack manually.
 
 When you exclude a tag, the updater writes WUD's native
 `wud.tag.exclude` label into the matched Compose service definition. If every
