@@ -6,6 +6,11 @@ from threading import Condition
 from types import SimpleNamespace
 
 import pytest
+from tests.health_gate_test_helpers import (
+    FakeHealthCompose,
+    FakeHealthDocker,
+    health_stack,
+)
 from tests.web_retag_test_helpers import (
     _apply_retag_plan,
     _create_retag_plan,
@@ -15,8 +20,7 @@ from tests.web_retag_test_helpers import (
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
 from wudup import web_retag_apply, web_retag_audit, web_retags
-from wudup.command import CommandError, CommandResult
-from wudup.compose import ComposeCli, ComposeStack
+from wudup.compose import ComposeCli
 
 
 @pytest.mark.parametrize("failure", [None, "rewrite", "pull", "health", "known"])
@@ -155,16 +159,41 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
     assert str(tmp_path) not in job["error"]
 
 
+def _retag_health_error(
+    tmp_path: Path,
+    compose: FakeHealthCompose,
+    services: tuple[str, ...],
+    docker: FakeHealthDocker | None = None,
+) -> str:
+    args = (
+        compose,
+        docker or FakeHealthDocker(),
+        SimpleNamespace(max_wait=0),
+        health_stack(tmp_path),
+        services,
+        {},
+        Condition(),
+        "job",
+    )
+    with pytest.raises(RuntimeError) as raised:
+        web_retag_apply._wait_for_retag_health(*args)
+    return str(raised.value)
+
+
+# `compose ps -q` lists only running containers, so an exited worker has none;
+# a combined lookup would hide it behind the running app.
 @pytest.mark.parametrize(
-    ("worker_lookup", "expected", "unexpected"),
+    ("compose", "expected", "unexpected"),
     [
         (
-            "exited",
+            FakeHealthCompose({"app": ["cid-app"], "worker": []}),
             "no running container for service(s): worker",
             "could not list containers",
         ),
         (
-            "compose_error",
+            FakeHealthCompose(
+                {"app": ["cid-app"], "worker": []}, failing=["worker"]
+            ),
             (
                 "could not list containers for service(s): worker because docker "
                 "compose ps failed"
@@ -172,64 +201,68 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
             "exited or never started",
         ),
         (
-            "all_exited",
+            FakeHealthCompose({"app": [], "worker": []}),
             "no running container for service(s): app, worker",
             "returned no containers",
         ),
     ],
+    ids=["exited", "compose_error", "all_exited"],
 )
 def test_retag_health_wait_fails_when_selected_service_has_no_container(
     tmp_path: Path,
-    worker_lookup: str,
+    compose: FakeHealthCompose,
     expected: str,
     unexpected: str,
 ) -> None:
-    # `compose ps -q` lists only running containers; worker exited.
-    running = {
-        "app": [] if worker_lookup == "all_exited" else ["cid-app"],
-        "worker": [],
-    }
+    error = _retag_health_error(tmp_path, compose, ("app", "worker"))
 
-    class FakeCompose:
-        def ps_quiet(self, directory, file, services=None, *, project_directory=None):
-            # A combined lookup hides the exited worker behind the running app.
-            return [cid for service in services or running for cid in running[service]]
+    assert expected in error
+    assert unexpected not in error
 
-        def ps_quiet_checked(
-            self, directory, file, services=None, *, project_directory=None
-        ):
-            if worker_lookup == "compose_error" and "worker" in (services or ()):
-                raise CommandError(
-                    CommandResult(("docker", "compose", "ps"), None, 1)
-                )
-            return self.ps_quiet(directory, file, services)
 
-    class FakeDocker:
-        def try_inspect(self, cid: str, fmt: str) -> list[str]:
-            if fmt == web_retag_apply.CONTAINER_SUMMARY_FORMAT:
-                return [f"/{cid}|running|healthy|0|0"]
-            return []
+@pytest.mark.parametrize(
+    ("compose", "expected", "unexpected"),
+    [
+        (
+            FakeHealthCompose({"app": ["cid-app"]}, fail_all=True),
+            (
+                "could not list containers for service(s): (all services) because "
+                "docker compose ps failed"
+            ),
+            "returned no containers",
+        ),
+        (
+            FakeHealthCompose({"app": []}),
+            "docker compose ps -q returned no containers",
+            "could not list containers",
+        ),
+    ],
+    ids=["compose_error", "no_containers"],
+)
+def test_retag_health_wait_reports_whole_stack_lookup(
+    tmp_path: Path,
+    compose: FakeHealthCompose,
+    expected: str,
+    unexpected: str,
+) -> None:
+    error = _retag_health_error(tmp_path, compose, ())
 
-    stack = ComposeStack(
-        index=0,
-        directory=tmp_path,
-        file="docker-compose.yml",
-        name="stack",
-        images=(),
-        service_images=(),
+    assert expected in error
+    assert unexpected not in error
+
+
+def test_retag_health_wait_reports_unhealthy_container_output(
+    tmp_path: Path,
+) -> None:
+    docker = FakeHealthDocker(
+        summaries={"cid-app": "/app|running|unhealthy|1|0"},
+        health_logs={"cid-app": ["", "probe failed: connection refused"]},
     )
 
-    with pytest.raises(RuntimeError) as raised:
-        web_retag_apply._wait_for_retag_health(
-            FakeCompose(),
-            FakeDocker(),
-            SimpleNamespace(max_wait=0),
-            stack,
-            ("app", "worker"),
-            {},
-            Condition(),
-            "job",
-        )
+    error = _retag_health_error(
+        tmp_path, FakeHealthCompose({"app": ["cid-app"]}), ("app",), docker
+    )
 
-    assert expected in str(raised.value)
-    assert unexpected not in str(raised.value)
+    assert "/app|running|unhealthy|1|0" in error
+    assert "probe failed: connection refused" in error
+    assert "no running container" not in error

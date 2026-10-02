@@ -27,7 +27,7 @@ from .docker_cli import DockerCli
 from .updater_lifecycle_health import (
     CONTAINER_SUMMARY_FORMAT,
     HEALTH_LOG_FORMAT,
-    _cid_is_ok,
+    health_gate_passed,
     running_service_containers,
 )
 from .updater_models import UpdaterProgressEvent
@@ -690,13 +690,14 @@ def _wait_for_retag_health(
         time.sleep(2)
     while True:
         cids, missing, failed = running_service_containers(compose, stack, services)
-        ok = bool(cids) and not missing and not failed
-        for cid in cids:
-            summary = _first_nonblank(
+        ok = health_gate_passed(
+            cids,
+            missing,
+            failed,
+            lambda cid: _first_nonblank(
                 docker.try_inspect(cid, CONTAINER_SUMMARY_FORMAT)
-            )
-            if not summary or not _cid_is_ok(summary):
-                ok = False
+            ),
+        )
         elapsed = int(time.monotonic() - start)
         if ok:
             _progress(

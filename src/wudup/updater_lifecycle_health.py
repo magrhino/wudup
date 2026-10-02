@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from . import updater_logging
 from .command import CommandError, CommandResult
@@ -13,6 +13,8 @@ from .updater_models import ImageState, Match, UpResult
 
 CONTAINER_SUMMARY_FORMAT = "{{.Name}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.ExitCode}}"
 HEALTH_LOG_FORMAT = "{{if .State.Health}}{{range .State.Health.Log}}{{println .Output}}{{end}}{{end}}"
+# Names a failed whole-stack container lookup, where no service was selected.
+ALL_SERVICES_LOOKUP = "(all services)"
 
 
 class _LifecycleHealthMixin:
@@ -159,11 +161,7 @@ class _LifecycleHealthMixin:
             cids, missing, failed = running_service_containers(
                 self.compose, stack, services
             )
-            ok = bool(cids) and not missing and not failed
-            for cid in cids:
-                summary = self._cid_summary(cid)
-                if not summary or not _cid_is_ok(summary):
-                    ok = False
+            ok = health_gate_passed(cids, missing, failed, self._cid_summary)
 
             elapsed = int(time.monotonic() - start)
             if ok:
@@ -179,24 +177,7 @@ class _LifecycleHealthMixin:
                 return True
             if elapsed >= self.options.max_wait:
                 self.log.error(f"[{stack.name}] Failed health gate after {elapsed}s")
-                if not cids and not failed and not missing:
-                    self.log.plain(
-                        "ERROR",
-                        f"[{stack.name}] Health blocker: docker compose ps -q returned no containers",
-                    )
-                if failed:
-                    self.log.error(
-                        f"[{stack.name}] Health blocker: could not list containers for "
-                        f"service(s): {', '.join(failed)} because `docker compose ps` "
-                        "failed. Check that the Compose file is valid and Docker is "
-                        "reachable.",
-                    )
-                if missing:
-                    self.log.error(
-                        f"[{stack.name}] Health blocker: no running container for "
-                        f"service(s): {', '.join(missing)}. The container exited or "
-                        "never started; check `docker compose logs` for that service.",
-                    )
+                self._log_health_blockers(stack, cids, missing, failed)
                 self._log_health_details(
                     stack,
                     services,
@@ -214,6 +195,32 @@ class _LifecycleHealthMixin:
                 )
                 return False
             time.sleep(2)
+
+    def _log_health_blockers(
+        self,
+        stack: ComposeStack,
+        cids: Sequence[str],
+        missing: Sequence[str],
+        failed: Sequence[str],
+    ) -> None:
+        if not cids and not failed and not missing:
+            self.log.plain(
+                "ERROR",
+                f"[{stack.name}] Health blocker: docker compose ps -q returned no containers",
+            )
+        if failed:
+            self.log.error(
+                f"[{stack.name}] Health blocker: could not list containers for "
+                f"service(s): {', '.join(failed)} because `docker compose ps` "
+                "failed. Check that the Compose file is valid and Docker is "
+                "reachable.",
+            )
+        if missing:
+            self.log.error(
+                f"[{stack.name}] Health blocker: no running container for "
+                f"service(s): {', '.join(missing)}. The container exited or "
+                "never started; check `docker compose logs` for that service.",
+            )
 
     def _capture_health_details(
         self,
@@ -310,15 +317,20 @@ def running_service_containers(
     lookup lets a service whose container exited or never started hide behind
     a running sibling. Look up each selected service on its own instead, and
     keep a failed lookup apart from a missing container so the operator sees
-    the real cause.
+    the real cause. A failed whole-stack lookup is reported as
+    ``ALL_SERVICES_LOOKUP``.
     """
     if not services:
-        return compose.ps_quiet(
-            stack.directory,
-            stack.file,
-            services,
-            project_directory=stack.project_directory,
-        ), [], []
+        try:
+            cids = compose.ps_quiet_checked(
+                stack.directory,
+                stack.file,
+                services,
+                project_directory=stack.project_directory,
+            )
+        except CommandError:
+            return [], [], [ALL_SERVICES_LOOKUP]
+        return cids, [], []
 
     cids: list[str] = []
     missing: list[str] = []
@@ -338,6 +350,22 @@ def running_service_containers(
             missing.append(service)
         cids.extend(cid for cid in service_cids if cid not in cids)
     return cids, missing, failed
+
+
+def health_gate_passed(
+    cids: Sequence[str],
+    missing: Sequence[str],
+    failed: Sequence[str],
+    summary: Callable[[str], str],
+) -> bool:
+    """Return whether every selected service has a running, healthy container."""
+    summaries = [summary(cid) for cid in cids]
+    return (
+        bool(cids)
+        and not missing
+        and not failed
+        and all(text and _cid_is_ok(text) for text in summaries)
+    )
 
 
 def _updated_images(
