@@ -299,7 +299,11 @@ def build_retag_plan(
         warnings=list(extra_warnings),
     )
     plan.plan_id = _retag_plan_id(plan, updates=selected, compose_hashes=compose_hashes)
-    return _RetagPlanBuild(response=plan, updates=tuple(selected))
+    return _RetagPlanBuild(
+        response=plan,
+        updates=tuple(selected),
+        compose_hashes=compose_hashes,
+    )
 
 
 def _selected_retag_plan_updates(

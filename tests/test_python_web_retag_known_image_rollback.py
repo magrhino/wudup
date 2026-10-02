@@ -2,27 +2,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from tests.web_retag_test_helpers import (
+    _LIVE_ENV,
     _apply_retag_plan,
     _audit_settings,
     _create_retag_plan,
     _make_retag_fixture,
+    _make_two_stack_fixture,
     _seed_known_image,
-    _set_retag_digest_pins,
-    _switch_choice,
+    _TwoStackFixture,
     _wait_run_status,
-    _write_compose,
 )
 from tests.web_test_helpers import (
-    _client,
     _csrf_headers,
-    _fake_docker_env,
-    _make_fake_stack,
     _wait_apply_job,
 )
 
@@ -32,12 +27,6 @@ from wudup.db import init_db, open_db, upsert_known_image
 from wudup.digest_provenance import DigestTagProvenance
 from wudup.updater_digest_pin import digest_pin_update_from_values
 from wudup.web_retag_plans import RetagPlanUpdate
-
-_LIVE_ENV = {
-    "WUD_WEB_MUTATIONS_ENABLED": "true",
-    "WUD_UPDATE_MODE": "live",
-    "WUD_MAX_WAIT": "0",
-}
 
 
 def _known_image_row(db_path: Path, service_key: str) -> dict[str, object] | None:
@@ -77,48 +66,6 @@ def _fail_first_backup_cleanup(
         original_delete(path)
 
     monkeypatch.setattr(web_retag_apply, "_delete_path", delete_path)
-
-
-@dataclass(frozen=True)
-class _TwoStackFixture:
-    client: TestClient
-    alpha_dir: Path
-    bravo_dir: Path
-    db_path: Path
-    choices: list[dict[str, str]]
-
-
-def _make_two_stack_fixture(tmp_path: Path) -> _TwoStackFixture:
-    fake_env, fake_root = _fake_docker_env(tmp_path)
-    client = _client(
-        tmp_path,
-        {"WUD_WEB_DEV_NO_AUTH": "true", **_LIVE_ENV, **fake_env},
-    )
-    dirs: dict[str, Path] = {}
-    for name in ("alpha", "bravo"):
-        image = f"repo/{name}@sha256:old"
-        dirs[name] = _make_fake_stack(
-            tmp_path, fake_root, name, [("app", image, f"cid-{name}")]
-        )
-        _write_compose(dirs[name], "app", image, label_value="^latest$$")
-        _seed_known_image(
-            tmp_path,
-            service_key=f"{name}/app",
-            image=image,
-            source_image=f"repo/{name}:latest",
-            resolved_tag="2.0",
-            watch_tag="latest",
-            target_digest="sha256:old",
-            final_image=image,
-        )
-    _set_retag_digest_pins(tmp_path)
-    return _TwoStackFixture(
-        client=client,
-        alpha_dir=dirs["alpha"],
-        bravo_dir=dirs["bravo"],
-        db_path=tmp_path / "state" / "wud.sqlite",
-        choices=[_switch_choice("alpha/app"), _switch_choice("bravo/app")],
-    )
 
 
 def _apply_two_stacks(fixture: _TwoStackFixture) -> dict[str, object]:
