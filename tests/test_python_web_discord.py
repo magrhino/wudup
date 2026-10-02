@@ -1,6 +1,7 @@
 """Characterization of Discord payload rendering and bounded HTTP delivery."""
 from __future__ import annotations
 
+import http.client
 import urllib.error
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -96,3 +97,58 @@ def test_digest_payload_preserves_exact_copy_escaping_and_suppression():
             ),
         },
     }]
+
+
+@pytest.mark.parametrize(
+    "webhook",
+    [
+        "discord.test/api/webhooks/123/webhook-secret",
+        "https://discord.test/api/webhooks/123/webhook secret",
+    ],
+)
+def test_delivery_hides_malformed_webhook_url_errors(webhook):
+    with pytest.raises(OSError) as caught:
+        discord._post_discord_payload(webhook, {})
+
+    assert "secret" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None or caught.value.__suppress_context__
+
+
+def test_delivery_reports_malformed_responses_as_os_errors(monkeypatch):
+    failure = http.client.IncompleteRead(b"partial webhook-secret")
+    monkeypatch.setattr(discord.urllib.request, "urlopen", MagicMock(side_effect=failure))
+
+    with pytest.raises(OSError) as caught:
+        discord._post_discord_payload("https://discord.test/webhook-secret", {})
+
+    assert "IncompleteRead" in str(caught.value)
+    assert "webhook-secret" not in str(caught.value)
+
+
+def test_delivery_keeps_connection_errors_that_are_also_http_exceptions(monkeypatch):
+    failure = http.client.RemoteDisconnected("Remote end closed connection")
+    monkeypatch.setattr(discord.urllib.request, "urlopen", MagicMock(side_effect=failure))
+
+    with pytest.raises(http.client.RemoteDisconnected) as caught:
+        discord._post_discord_payload("https://discord.test/webhook-secret", {})
+
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize(
+    "webhook",
+    ["file:///etc/webhook-secret", "data:,webhook-secret", "ftp://discord.test/webhook-secret"],
+)
+def test_delivery_refuses_non_http_webhook_schemes(monkeypatch, webhook):
+    monkeypatch.setattr(
+        discord.urllib.request,
+        "urlopen",
+        MagicMock(side_effect=AssertionError("must not open non-HTTP webhooks")),
+    )
+
+    with pytest.raises(OSError) as caught:
+        discord._post_discord_payload(webhook, {})
+
+    assert "not valid" in str(caught.value)
+    assert "secret" not in str(caught.value)

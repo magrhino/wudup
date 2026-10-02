@@ -2154,3 +2154,75 @@ def test_release_notification_send_audits_partial_discord_failure(
     serialized = json.dumps({"run": run_metadata, "event": event_metadata})
     assert "webhook-secret" not in serialized
     assert "webhook-secret" not in json.dumps(history_metadata)
+
+
+def test_release_notification_send_with_malformed_webhook_finishes_audit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _fake_release_refresh(monkeypatch)
+    client = _client(
+        tmp_path,
+        {
+            **_RELEASE_NOTIFICATION_ENV,
+            "DISCORD_WEBHOOK": "discord.test/api/webhooks/123/webhook-secret",
+        },
+    )
+    _write_pending_lines(tmp_path, ["ghcr.io/acme/app:1.0.0 tag=2.0.0"])
+
+    response = client.post(
+        "/api/v1/release-notifications/send",
+        json={"line_numbers": [1], "confirmation": "send-release-notes"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith(
+        "could not send Discord release-note notifications:"
+    )
+    assert "webhook-secret" not in response.text
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        runs = conn.execute(
+            "SELECT status, finished_at, metadata_json FROM update_runs "
+            "WHERE mode = 'web-release-notifications'"
+        ).fetchall()
+        history = conn.execute(
+            "SELECT status FROM release_notification_history"
+        ).fetchall()
+
+    assert [(run["status"], run["finished_at"] is not None) for run in runs] == [
+        ("failure", True)
+    ]
+    assert [row["status"] for row in history] == ["failure"]
+    assert "webhook-secret" not in runs[0]["metadata_json"]
+
+
+def test_release_notification_test_webhook_with_malformed_url_is_sanitized(
+    tmp_path: Path,
+) -> None:
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "DISCORD_WEBHOOK": "https://discord.test/api/webhooks/123/webhook secret",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/release-notifications/test",
+        json={"confirmation": "send-test-webhook"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith("could not send Discord test webhook:")
+    assert "secret" not in response.text
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        run = conn.execute(
+            "SELECT status, finished_at FROM update_runs "
+            "WHERE mode = 'web-release-notifications'"
+        ).fetchone()
+
+    assert run["status"] == "failure"
+    assert run["finished_at"] is not None
