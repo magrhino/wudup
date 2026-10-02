@@ -84,6 +84,36 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             self.calls(),
             r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
         )
+    def test_exclude_tag_line_does_not_recreate_override_file_project(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        config_files = (
+            f"{stack_dir / 'docker-compose.yml'},"
+            f"{stack_dir / 'docker-compose.override.yml'}"
+        )
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{config_files}\tapp\tapp\tFalse\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertNotRegex(self.calls(), r"compose -f .* up -d")
+        self.assertIn(
+            "docker-compose.override.yml",
+            result.stdout + result.stderr,
+        )
+
     def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"

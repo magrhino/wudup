@@ -20,6 +20,8 @@ from wudup.compose import (
     _project_directory_for_stack,
     _service_bind_mounts_from_config_json,
     _service_runtime_port_issues_from_config_json,
+    compose_runtime_extra_config_files,
+    compose_runtime_service_keys,
 )
 from wudup.docker_cli import ContainerImage, DockerCli
 from wudup.platforms import ImagePlatform
@@ -744,6 +746,50 @@ class ComposeCliTests(FakeDockerCase):
             self.compose.ps_quiet_checked(stack, "docker-compose.yml", ["app"]),
             [],
         )
+
+class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
+    def test_reports_files_loaded_beyond_discovered_compose_file(self) -> None:
+        keys = compose_runtime_service_keys([
+            (
+                "/srv/app\t/srv/app/docker-compose.yml,docker-compose.override.yml"
+                "\tapp\tapp\tFalse"
+            ),
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tworker\tFalse",
+            (
+                "/srv/other\t/srv/other/docker-compose.yml,/srv/other/extra.yml"
+                "\tother\tapp\tFalse"
+            ),
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (Path("/srv/app/docker-compose.override.yml"),),
+        )
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/other", "docker-compose.yml", "unrelated", keys
+            ),
+            (),
+        )
+
+    def test_ignores_projects_started_from_discovered_file_only(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            (
+                "/elsewhere\t/elsewhere/compose.yml,/elsewhere/extra.yml"
+                "\tapp\tapp\tFalse"
+            ),
+        ])
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app", "docker-compose.yml", "app", keys
+            ),
+            (),
+        )
+
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value)

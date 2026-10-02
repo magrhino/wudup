@@ -136,6 +136,42 @@ def compose_runtime_service_key_matches(
     )
 
 
+def compose_runtime_extra_config_files(
+    project_directory: str | Path,
+    compose_file: str,
+    project_name: str,
+    runtime_keys: Iterable[ComposeRuntimeServiceKey],
+) -> tuple[Path, ...]:
+    """Return Compose files the project's containers loaded beyond ``compose_file``.
+
+    WUDup runs Compose with only the discovered file, so recreating a project
+    that was started with override or extra ``-f`` files would drop their
+    settings and let ``--remove-orphans`` delete the services they define.
+    """
+    expected_paths, _project, _service = compose_runtime_service_key(
+        project_directory, compose_file, project_name, ""
+    )
+    extra: set[Path] = set()
+    for runtime_paths, runtime_project, _runtime_service in runtime_keys:
+        if runtime_project == project_name and expected_paths < runtime_paths:
+            extra.update(runtime_paths - expected_paths)
+    return tuple(sorted(extra))
+
+
+def compose_override_files_message(
+    compose_file: str,
+    extra_files: Sequence[Path],
+) -> str:
+    files = ", ".join(str(path) for path in extra_files)
+    return (
+        "This Compose project is running with extra Compose file(s) that WUDup "
+        f"does not load: {files}. Recreating it from {compose_file} alone would "
+        "drop their settings and could remove the services they add. Merge those "
+        f"settings into {compose_file} and recreate the stack from that file, or "
+        "update this stack manually."
+    )
+
+
 def _compose_runtime_service_key_from_fields(
     fields: Sequence[str],
 ) -> ComposeRuntimeServiceKey | None:

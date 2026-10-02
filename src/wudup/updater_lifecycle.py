@@ -12,6 +12,8 @@ from .compose import (
     COMPOSE_RUNTIME_STATE_FORMAT,
     ComposeRuntimeServiceState,
     ComposeStack,
+    compose_override_files_message,
+    compose_runtime_extra_config_files,
     compose_runtime_service_key,
     compose_runtime_service_key_matches,
     compose_runtime_service_states,
@@ -285,6 +287,35 @@ class StackLifecycleExecutor(
                     all_containers=True,
                 )
             )
+            extra_files = compose_runtime_extra_config_files(
+                stack.project_directory or stack.directory,
+                stack.file,
+                stack.project_name,
+                (key for key, _state in runtime_states),
+            )
+            if extra_files:
+                message = compose_override_files_message(stack.file, extra_files)
+                self.log.error(
+                    f"[{stack.name}] {message} The update was not applied."
+                )
+                self._record_failure(
+                    stack,
+                    matches,
+                    phase="preflight",
+                    reason="compose-override-files",
+                    services=services,
+                    note=message,
+                )
+                self._progress(
+                    "preflight",
+                    "failure",
+                    f"[{stack.name}] Stack runs with extra Compose files that "
+                    "WUDup does not load; the update was not applied.",
+                    stack=stack.name,
+                    services=services,
+                    matches=matches,
+                )
+                return StackStatus("failure", "compose-override-files")
             for service in services:
                 service_states = self._compose_service_runtime_states(
                     stack,

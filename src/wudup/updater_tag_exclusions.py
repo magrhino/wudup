@@ -6,7 +6,15 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from . import compose_rewrite, updater_audit
-from .compose import ComposeStack
+from .command import CommandError
+from .compose import (
+    COMPOSE_RUNTIME_FORMAT,
+    ComposeRuntimeServiceKey,
+    ComposeStack,
+    compose_override_files_message,
+    compose_runtime_extra_config_files,
+    compose_runtime_service_keys,
+)
 from .images import (
     image_has_tag,
     image_matches_resolved_target,
@@ -355,7 +363,16 @@ def recreate_tag_exclusion_services(
     updates: Sequence[TagExclusionUpdate],
     statuses: dict[tuple[int, int], StackStatus],
 ) -> None:
-    for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
+    updates_by_stack = _tag_exclusion_updates_by_stack(updates)
+    runtime_keys = _compose_runtime_keys(runner) if updates_by_stack else None
+    for stack, stack_updates in updates_by_stack.items():
+        if not _uses_only_discovered_compose_file(runner, stack, runtime_keys):
+            for update in stack_updates:
+                statuses[(update.stack.index, update.source_line)] = StackStatus(
+                    "failure",
+                    "tag-exclusion-recreate-failed",
+                )
+            continue
         services = tuple(sorted({update.service for update in stack_updates}))
         network_providers = _network_mode_providers(stack.service_images)
         up_services, uses_network_provider = _expand_network_mode_services(
@@ -384,6 +401,42 @@ def recreate_tag_exclusion_services(
                 "failure",
                 "tag-exclusion-recreate-failed",
             )
+
+
+def _compose_runtime_keys(runner: Any) -> set[ComposeRuntimeServiceKey] | None:
+    try:
+        return compose_runtime_service_keys(
+            runner.docker.ps_format(COMPOSE_RUNTIME_FORMAT, all_containers=True)
+        )
+    except CommandError as exc:
+        runner.log.error(
+            "Could not check how Compose projects were started, so services with "
+            "new wud.tag.exclude labels were not recreated. Check that Docker is "
+            f"reachable and retry. ({exc})"
+        )
+        return None
+
+
+def _uses_only_discovered_compose_file(
+    runner: Any,
+    stack: ComposeStack,
+    runtime_keys: set[ComposeRuntimeServiceKey] | None,
+) -> bool:
+    if runtime_keys is None:
+        return False
+    extra_files = compose_runtime_extra_config_files(
+        stack.project_directory or stack.directory,
+        stack.file,
+        stack.project_name,
+        runtime_keys,
+    )
+    if not extra_files:
+        return True
+    runner.log.error(
+        f"[{stack.name}] {compose_override_files_message(stack.file, extra_files)} "
+        "Services with new wud.tag.exclude labels were not recreated."
+    )
+    return False
 
 
 def mark_tag_exclusions_pending(
