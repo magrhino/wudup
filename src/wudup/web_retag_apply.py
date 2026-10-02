@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from collections.abc import Callable, Sequence
@@ -57,6 +58,8 @@ from .web_retag_runtime import (
     _retag_project_config_files,
     _running_retag_compose_service_keys,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _RetagApplyFailed(RuntimeError):
@@ -807,7 +810,7 @@ def _restore_retag_compose(
     Returns a plain-language summary of what rollback did to the services.
     """
     try:
-        restore_compose_backup(
+        restored_on_disk = restore_compose_backup(
             backup, stack.directory / stack.file,
             expected_source_hash=expected_source_hash,
         )
@@ -860,17 +863,44 @@ def _restore_retag_compose(
                 f"image: {exc}"
             )
     if not failures:
-        try:
-            _delete_path(backup)
-        except Exception as exc:  # noqa: BLE001 - reported as a rollback failure.
-            first_exc = exc
-            failures.append(str(exc))
+        cleanup_exc = _settle_retag_rollback_backup(
+            stack, backup, restored_on_disk=restored_on_disk
+        )
+        if cleanup_exc is not None:
+            first_exc = cleanup_exc
+            failures.append(str(cleanup_exc))
     if failures:
         raise RuntimeError(
             f"{original_error}; compose rollback failed after the Compose file "
             f"was restored: {'; '.join(failures)}; backup retained at {backup}"
         ) from first_exc
     return _retag_rollback_summary(stack, running, stopped)
+
+
+def _settle_retag_rollback_backup(
+    stack: ComposeStack,
+    backup: Path,
+    *,
+    restored_on_disk: bool,
+) -> Exception | None:
+    """Delete the backup after a durable rollback; keep it otherwise.
+
+    Returns the cleanup error, if any, so the caller can report it with the
+    other rollback failures.
+    """
+    if not restored_on_disk:
+        LOGGER.warning(
+            "[%s] Kept the previous Compose file at %s because the restored "
+            "%s may not survive a crash; delete the backup once the storage "
+            "is healthy.",
+            stack.name, backup, stack.file,
+        )
+        return None
+    try:
+        _delete_path(backup)
+    except Exception as exc:  # noqa: BLE001 - reported as a rollback failure.
+        return exc
+    return None
 
 
 def _retag_rollback_summary(
