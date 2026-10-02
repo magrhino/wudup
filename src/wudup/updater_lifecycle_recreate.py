@@ -57,6 +57,7 @@ class _LifecycleRecreateMixin:
                     state,
                     stop_result,
                     preserved,
+                    restart_stopped=False,
                 )
 
         self._progress(
@@ -140,6 +141,7 @@ class _LifecycleRecreateMixin:
         up_result: UpResult,
         *,
         prepared: bool = True,
+        restart_stopped: bool = True,
     ) -> StackStatus:
         stack = state.stack
         unpaused = (
@@ -165,6 +167,11 @@ class _LifecycleRecreateMixin:
                 failure_health=up_result.health_details,
             )
 
+        restart_note = (
+            self._restart_services_stopped_for_update(state)
+            if prepared and restart_stopped
+            else ""
+        )
         if stop_result.failed and stop_result.error is not None:
             self._record_failure(
                 stack,
@@ -185,6 +192,7 @@ class _LifecycleRecreateMixin:
             services=state.services,
             command_error=up_result.command_error,
             health_details=up_result.health_details,
+            note=restart_note,
         )
         self._progress(
             "recreate",
@@ -195,6 +203,53 @@ class _LifecycleRecreateMixin:
             matches=state.matches,
         )
         return StackStatus("failure", "up-or-health-failed")
+
+    def _restart_services_stopped_for_update(self, state: _StackUpdateState) -> str:
+        """Start services that stop mode stopped before a failed recreate.
+
+        This is the only recovery attempt: leaving them stopped would make the
+        next run treat them as intentionally stopped and never start them
+        again. If it fails, the run stays failed, the pending entry is kept,
+        and the operator gets the exact command to start them by hand.
+        """
+        if self.options.mode != "stop":
+            return ""
+        stack = state.stack
+        services = state.running_stop_services or state.running_services
+        if not services:
+            return ""
+        label = " ".join(services)
+        try:
+            self.compose.start(
+                stack.directory,
+                stack.file,
+                services,
+                project_directory=stack.project_directory,
+            )
+        except CommandError as exc:
+            command = self.compose.display_command(
+                stack.directory,
+                stack.file,
+                services,
+                "start",
+                project_directory=stack.project_directory,
+            )
+            message = (
+                f"Service(s) {label} were stopped for the update, and starting "
+                "them again after the failed update also failed, so they are "
+                "still stopped and not running the new image. Fix the error "
+                f"above, then start them with: {command}. The pending update "
+                "was kept, so rerunning the update after that is safe and "
+                "retries it."
+            )
+            self.log.error(f"[{stack.name}] {message} ({exc})")
+            return message
+        message = (
+            f"Service(s) {label} were stopped for the update and were started "
+            "again after it failed."
+        )
+        self.log.warning(f"[{stack.name}] {message}")
+        return message
 
     def _unpause_after_recreate(
         self,
@@ -302,6 +357,12 @@ class _LifecycleRecreateMixin:
                 )
                 return StackStatus("failure", "down-failed")
 
+            # Record the verified state so history shows services whose
+            # earlier start failed as running after this update.
+            self.runner.stack_runtime_states_after[stack.index] = (
+                state.running_services,
+                state.stopped_services,
+            )
             self._remember_applied_digest_changes(state)
             return StackStatus("success", "updated")
 

@@ -61,6 +61,7 @@ from .updater_lifecycle_state import _StackUpdateState
 from .updater_matching import _update_services
 from .updater_models import (
     STALE_PENDING_DIGEST_REASON,
+    ImageState,
     Match,
     StackStatus,
     UpdaterError,
@@ -200,7 +201,7 @@ class StackLifecycleExecutor(
         runtime_state = self._initial_service_runtime(stack, scope, matches)
         if isinstance(runtime_state, StackStatus):
             return runtime_state
-        running_services, stopped_services = runtime_state
+        running_services, stopped_services, start_failed_services = runtime_state
 
         images = tuple(stack.images)
         before = self._image_state(images)
@@ -267,6 +268,7 @@ class StackLifecycleExecutor(
             tag_stream_updates=tag_stream_updates,
             running_services=running_services,
             stopped_services=stopped_services,
+            start_failed_services=start_failed_services,
         )
 
     def _initial_service_runtime(
@@ -274,7 +276,7 @@ class StackLifecycleExecutor(
         stack: ComposeStack,
         scope: UpdateScope,
         matches: Sequence[Match],
-    ) -> tuple[tuple[str, ...], tuple[str, ...]] | StackStatus:
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | StackStatus:
         services = runtime_services_for_scope(scope)
         if not services:
             self.log.error(
@@ -300,6 +302,8 @@ class StackLifecycleExecutor(
             return StackStatus("failure", "runtime-state-unavailable")
         running: list[str] = []
         stopped: list[str] = []
+        start_failed: list[str] = []
+        targets = _update_services(matches)
         try:
             if not stack.project_name:
                 raise ValueError("Compose project identity is unavailable.")
@@ -348,32 +352,20 @@ class StackLifecycleExecutor(
                         matches=matches,
                     )
                     return StackStatus("failure", "runtime-state-unavailable")
+                if self._start_failed_target(stack, service, state_values, targets):
+                    start_failed.append(service)
+                    running.append(service)
+                    continue
                 (running if state_values == {"running"} else stopped).append(service)
         except (CommandError, ValueError) as exc:
-            self.log.error(
-                f"[{stack.name}] Could not verify whether selected services are running; "
-                "the update was not applied."
-            )
-            self._record_failure(
-                stack,
-                matches,
-                phase="preflight",
-                reason="runtime-state-unavailable",
-                services=services,
-                command_error=exc if isinstance(exc, CommandError) else None,
-                note=str(exc) if isinstance(exc, ValueError) else "",
-            )
-            self._progress(
-                "preflight",
-                "failure",
-                f"[{stack.name}] Selected service runtime state could not be verified.",
-                stack=stack.name,
-                services=services,
-                matches=matches,
-            )
-            return StackStatus("failure", "runtime-state-unavailable")
+            return self._runtime_state_unverified(stack, matches, services, exc)
 
-        runtime_state = tuple(running), tuple(stopped)
+        # History records services whose start failed as not running before
+        # the update; the update starts them.
+        runtime_state = (
+            tuple(service for service in running if service not in start_failed),
+            (*stopped, *start_failed),
+        )
         self.runner.stack_runtime_states[stack.index] = runtime_state
         self.runner.stack_runtime_states_after[stack.index] = runtime_state
         if stopped:
@@ -381,7 +373,78 @@ class StackLifecycleExecutor(
                 f"[{stack.name}] Selected service(s) already stopped and will remain "
                 f"stopped: {' '.join(stopped)}"
             )
-        return runtime_state
+        if start_failed:
+            self.log.warning(
+                f"[{stack.name}] Service(s) are not running because their container "
+                "was created but could not start, for example after an earlier "
+                "update failed. They will be started with this update: "
+                f"{' '.join(start_failed)}"
+            )
+        return tuple(running), tuple(stopped), tuple(start_failed)
+
+    def _runtime_state_unverified(
+        self,
+        stack: ComposeStack,
+        matches: Sequence[Match],
+        services: tuple[str, ...],
+        exc: CommandError | ValueError,
+    ) -> StackStatus:
+        self.log.error(
+            f"[{stack.name}] Could not verify whether selected services are running; "
+            "the update was not applied."
+        )
+        self._record_failure(
+            stack,
+            matches,
+            phase="preflight",
+            reason="runtime-state-unavailable",
+            services=services,
+            command_error=exc if isinstance(exc, CommandError) else None,
+            note=str(exc) if isinstance(exc, ValueError) else "",
+        )
+        self._progress(
+            "preflight",
+            "failure",
+            f"[{stack.name}] Selected service runtime state could not be verified.",
+            stack=stack.name,
+            services=services,
+            matches=matches,
+        )
+        return StackStatus("failure", "runtime-state-unavailable")
+
+    def _start_failed_target(
+        self,
+        stack: ComposeStack,
+        service: str,
+        state_values: set[str],
+        targets: tuple[str, ...] | None,
+    ) -> bool:
+        """Return whether an update target is a created container that failed to start."""
+        if state_values != {"created"}:
+            return False
+        if targets is not None and service not in targets:
+            return False
+        return self._container_start_failed(stack, service)
+
+    def _container_start_failed(self, stack: ComposeStack, service: str) -> bool:
+        """Return whether the service's never-started container failed to start.
+
+        Only a created container whose first start failed counts: something
+        asked Docker to run it, such as an earlier update's compose up, so the
+        operator did not stop it on purpose. A container that ran before keeps
+        its stopped state even when a later start attempt failed.
+        """
+        container_ids = self.compose.ps_quiet_checked(
+            stack.directory,
+            stack.file,
+            (service,),
+            project_directory=stack.project_directory,
+            all_containers=True,
+        )
+        return any(
+            self.docker.container_state_error(container_id)
+            for container_id in container_ids
+        )
 
     def _compose_file_set_refusal(
         self,
@@ -623,6 +686,78 @@ class StackLifecycleExecutor(
 
         return None
 
+    def _find_unfinished_update(self, state: _StackUpdateState) -> bool | StackStatus:
+        """Detect containers an earlier failed run left behind the pulled image.
+
+        A retry of a same-tag update finds the image already pulled, so it must
+        check the containers themselves: a container still on the older image
+        is recreated.
+        """
+        stack = state.stack
+        targets = _update_services(state.matches)
+        services = tuple(
+            service
+            for service in (*state.running_services, *state.stopped_services)
+            if targets is None or service in targets
+        )
+        if not services:
+            return False
+        check = self._check_container_images(
+            state.current_stack,
+            services,
+            state.after,
+        )
+        unverified = (*check.unverified, *check.missing)
+        if unverified:
+            message = check.failure_message()
+            self.log.error(f"[{stack.name}] {message}")
+            self._record_failure(
+                stack,
+                state.matches,
+                phase="recreate",
+                reason="runtime-image-unverified",
+                services=unverified,
+                command_error=check.error,
+                note=message,
+            )
+            self._progress(
+                "recreate",
+                "failure",
+                f"[{stack.name}] Could not confirm the image used by the selected "
+                "containers.",
+                stack=stack.name,
+                services=unverified,
+                matches=state.matches,
+            )
+            return StackStatus("failure", "runtime-image-unverified")
+
+        if check.behind:
+            self.log.info(
+                f"[{stack.name}] Image is already pulled, but service(s) still "
+                "use an older image and will be recreated: "
+                f"{' '.join(check.behind)}"
+            )
+            # Keep the old image per service: the shared before-state stays the
+            # tag's local image, so a sibling already on it records no change.
+            previous = self.runner.retry_previous_images.setdefault(stack.index, {})
+            digests: dict[str, str] = {}
+            for service, (_image, container_image_id) in check.behind.items():
+                if container_image_id not in digests:
+                    digests[container_image_id] = self._try_image_digest(
+                        container_image_id
+                    )
+                previous[service] = ImageState(
+                    image_id=container_image_id,
+                    digest=digests[container_image_id],
+                )
+        return bool(check.behind)
+
+    def _try_image_digest(self, image: str) -> str:
+        try:
+            return self.docker.image_digest(image)
+        except CommandError:
+            return ""
+
     def _finish_pull_phase(self, state: _StackUpdateState) -> StackStatus | None:
         stack = state.stack
         self.runner.stack_image_states[state.stack.index] = (
@@ -644,10 +779,17 @@ class StackLifecycleExecutor(
             or state.applied_digest_pins
             or state.applied_digest_unpins
             or changes
+            or state.start_failed_services
         )
         for image, image_state in changes:
             target = image_state.digest if image_state.digest else image_state.image_id
             self.log.info(f"[{stack.name}] Image updated: {image} -> {target}")
+
+        if not update_needed:
+            unfinished = self._find_unfinished_update(state)
+            if isinstance(unfinished, StackStatus):
+                return unfinished
+            update_needed = unfinished
 
         if not update_needed:
             self.log.info(f"[{stack.name}] All images up to date, skipping restart")

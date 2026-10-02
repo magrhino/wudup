@@ -665,13 +665,32 @@ def _image_states_for_match(
     if states is None:
         return None, None
     before, after = states
-    old_state = _image_state_for_reference(before, match.compose_image)
+    old_state = _retry_previous_image_state(runner, match) or (
+        _image_state_for_reference(before, match.compose_image)
+    )
     new_state = (
         _image_state_for_reference(after, target_image)
         or _image_state_for_reference(after, match.resolved)
         or _image_state_for_reference(after, match.compose_image)
     )
     return old_state, new_state
+
+
+def _retry_previous_image_state(runner: Any, match: Match) -> ImageState | None:
+    """Return the old image a retry found this match's container still using.
+
+    A match without a service covers every service using its image; it gets
+    the old image only when those lagging services agree on one.
+    """
+    previous = runner.retry_previous_images.get(match.stack.index, {})
+    if match.service:
+        return previous.get(match.service)
+    states = {
+        previous[item.service]
+        for item in match.stack.service_images
+        if item.image == match.compose_image and item.service in previous
+    }
+    return states.pop() if len(states) == 1 else None
 
 
 def _image_state_for_reference(

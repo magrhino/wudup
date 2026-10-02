@@ -495,6 +495,21 @@ class ComposeCliTests(FakeDockerCase):
             self.call_commands(),
         )
 
+    def test_display_command_matches_the_command_the_updater_runs(self) -> None:
+        compose = ComposeCli(runner=self.runner)
+
+        self.assertEqual(
+            compose.display_command(
+                Path("/srv/my stacks/app"),
+                "docker-compose.yml",
+                ["app", "db"],
+                "start",
+                project_directory=Path("/host/docker/app"),
+            ),
+            "cd '/srv/my stacks/app' && docker compose --project-directory "
+            "/host/docker/app -f docker-compose.yml start app db",
+        )
+
     def test_project_directory_mapping_rejects_stack_outside_base(self) -> None:
         with self.assertRaisesRegex(ComposeDiscoveryError, "not under DOCKER_BASE"):
             _project_directory_for_stack(

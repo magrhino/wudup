@@ -192,6 +192,17 @@ container has that label, the updater uses stack-level pull/recreate behavior
 instead of service-scoped stop/up: it stops the project services and runs
 `docker compose up -d --remove-orphans` without tearing down Compose networks.
 
+In `stop` mode, the updater stops the running services before it recreates
+them. If the recreate fails, it runs `docker compose start` for those services
+once. If that start fails too, the run fails, the pending WUD entry is kept,
+and the error names the services and the exact command to start them, such as
+`cd /stacks/app && docker compose -f docker-compose.yml start app`. Fix the
+reported error, run that command, then rerun the update. Start the services
+before the rerun, because the updater keeps services that are already stopped
+in that state. Known limitation: if the updater is killed or the host crashes
+after it stops the services and before they run again, nothing starts them
+again. Check the stack and run the same start command.
+
 The updater runs Compose with the single discovered Compose file for each
 project. If any container in the project was started with other Compose files,
 such as an automatically loaded `docker-compose.override.yml`, extra `-f`

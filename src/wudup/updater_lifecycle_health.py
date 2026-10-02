@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 from . import updater_logging
 from .command import CommandError, CommandResult
@@ -15,6 +16,44 @@ CONTAINER_SUMMARY_FORMAT = "{{.Name}}|{{.State.Status}}|{{if .State.Health}}{{.S
 HEALTH_LOG_FORMAT = "{{if .State.Health}}{{range .State.Health.Log}}{{println .Output}}{{end}}{{end}}"
 # Names a failed whole-stack container lookup, where no service was selected.
 ALL_SERVICES_LOOKUP = "(all services)"
+
+
+@dataclass(frozen=True)
+class _ContainerImageCheck:
+    """Result of comparing service containers with the pulled images."""
+
+    behind: dict[str, tuple[str, str]]
+    """Service -> (Compose image, image ID the container still uses)."""
+    unverified: tuple[str, ...]
+    error: CommandError | None = None
+    missing: tuple[str, ...] = ()
+    """Selected services with no container, as a failed recreate can leave."""
+
+    def failure_message(self) -> str:
+        """Explain why the retry could not confirm the pulled image is in use."""
+        parts: list[str] = []
+        if self.unverified:
+            parts.append(
+                "Could not confirm which image service(s) "
+                f"{' '.join(self.unverified)} are using."
+            )
+        if self.missing:
+            parts.append(
+                f"Service(s) {' '.join(self.missing)} have no container, which "
+                "an earlier failed recreate can leave behind."
+            )
+        parts.append(
+            "The update was not marked as applied and the WUD entry was kept."
+        )
+        if self.unverified:
+            parts.append("Check that Docker is responding, then rerun the update.")
+        if self.missing:
+            parts.append(
+                "Create the missing container(s) with docker compose up -d (or "
+                "up --no-start for a service you keep stopped), then rerun the "
+                "update."
+            )
+        return " ".join(parts)
 
 
 class _LifecycleHealthMixin:
@@ -310,6 +349,79 @@ class _LifecycleHealthMixin:
             for image in images
             if image
         }
+
+    def _check_container_images(
+        self,
+        stack: ComposeStack,
+        services: Sequence[str],
+        after: Mapping[str, ImageState],
+    ) -> _ContainerImageCheck:
+        """Compare each service's containers with the image just pulled.
+
+        An earlier run can pull a same-tag image and then fail to recreate or
+        start the container, so the local tag alone cannot show that the
+        update applied. Anything that cannot be read is reported as unverified
+        instead of being treated as current.
+        """
+        pulled_ids = {
+            item.service: (item.image, after[item.image].image_id)
+            for item in stack.service_images
+            if item.image in after and after[item.image].image_id
+        }
+        behind: dict[str, tuple[str, str]] = {}
+        unverified: list[str] = []
+        missing: list[str] = []
+        error: CommandError | None = None
+        for service in services:
+            image, pulled_id = pulled_ids.get(service, ("", ""))
+            if not pulled_id:
+                continue
+            try:
+                container_ids = self.compose.ps_quiet_checked(
+                    stack.directory,
+                    stack.file,
+                    (service,),
+                    project_directory=stack.project_directory,
+                    all_containers=True,
+                )
+                if not container_ids:
+                    missing.append(service)
+                    continue
+                lagging_id, unreadable = _compare_container_images(
+                    (self.docker.container_image_id(cid) for cid in container_ids),
+                    pulled_id,
+                )
+            except CommandError as exc:
+                unverified.append(service)
+                error = error or exc
+                continue
+            if lagging_id:
+                behind[service] = (image, lagging_id)
+            if unreadable:
+                unverified.append(service)
+        return _ContainerImageCheck(
+            behind=behind,
+            unverified=tuple(unverified),
+            error=error,
+            missing=tuple(missing),
+        )
+
+
+def _compare_container_images(
+    image_ids: Iterable[str],
+    pulled_id: str,
+) -> tuple[str, bool]:
+    """Return the first older image ID and whether a container image was unreadable.
+
+    Stops at the first unreadable container, like the lookup it replaces.
+    """
+    lagging_id = ""
+    for image_id in image_ids:
+        if not image_id:
+            return lagging_id, True
+        if image_id != pulled_id and not lagging_id:
+            lagging_id = image_id
+    return lagging_id, False
 
 
 def running_service_containers(

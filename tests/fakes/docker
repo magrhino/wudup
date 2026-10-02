@@ -275,9 +275,12 @@ service_images(){
 }
 
 service_cids(){
-  local id="$1" service="${2:-}" file
+  local id="$1" service="${2:-}" include_all="${3:-0}" file
   if [[ -n "$service" ]]; then
     file="$ROOT/stacks/$id/cids-$service.txt"
+    if [[ "$include_all" -eq 1 && -f "$ROOT/stacks/$id/cids-all-$service.txt" ]]; then
+      file="$ROOT/stacks/$id/cids-all-$service.txt"
+    fi
     [[ -f "$file" ]] && cat "$file"
   else
     file="$ROOT/stacks/$id/cids.txt"
@@ -339,6 +342,29 @@ run_post_up_hook(){
   if [[ -x "$ROOT/post-up-hook" ]]; then
     "$ROOT/post-up-hook" "$id" "$@"
   fi
+}
+
+# Mimic Docker after `compose up` created a service's new container but could
+# not start it (for example a port conflict): the container is left created on
+# the current image with its start error recorded.
+leave_created_containers(){
+  local id="$1" file="$2"
+  shift 2 || true
+  local arg cid image runtime="$ROOT/compose-runtime.tsv"
+  for arg in "$@"; do
+    [[ "$arg" == -* || ! -f "$ROOT/stacks/$id/cids-$arg.txt" ]] && continue
+    cid="$(head -n 1 "$ROOT/stacks/$id/cids-$arg.txt")"
+    image="$(service_images "$id" "$arg" "$file" | head -n 1)"
+    image_id "$image" > "$ROOT/containers/$cid.image-id"
+    printf 'driver failed programming external connectivity: port is already allocated\n' \
+      > "$ROOT/containers/$cid.state-error"
+    if [[ -f "$runtime" ]]; then
+      awk -v project="$id" -v service="$arg" 'BEGIN {FS=OFS="\t"}
+        $3 == project && $4 == service {print $1, $2, $3, $4, $5, "created"; next}
+        {print}' "$runtime" > "$runtime.tmp"
+      mv "$runtime.tmp" "$runtime"
+    fi
+  done
 }
 
 emit_failure_output(){
@@ -447,6 +473,13 @@ compose_cmd(){
       fi
       return 0
       ;;
+    start)
+      if [[ -f "$ROOT/stacks/$id/start_fail" || -f "$ROOT/stacks/$id/up_start_fail" ]]; then
+        emit_failure_output "$id" start
+        return 25
+      fi
+      return 0
+      ;;
     down)
       if [[ -f "$ROOT/stacks/$id/down_fail" ]]; then
         emit_failure_output "$id" down
@@ -469,6 +502,11 @@ compose_cmd(){
           no_start=1
         fi
       done
+      if [[ "$no_start" -eq 0 && -f "$ROOT/stacks/$id/up_start_fail" ]]; then
+        leave_created_containers "$id" "$file" "$@"
+        emit_failure_output "$id" up
+        return 19
+      fi
       if [[ -f "$ROOT/stacks/$id/up_fail" ||
             "$no_start" -eq 1 && -f "$ROOT/stacks/$id/up_no_start_fail" ]]; then
         emit_failure_output "$id" up
@@ -499,12 +537,17 @@ compose_cmd(){
         emit_failure_output "$id" ps
         return 22
       fi
+      local ps_all=0
+      if [[ "${1:-}" == "-a" ]]; then
+        ps_all=1
+        shift
+      fi
       if [[ "${1:-}" == "-q" ]]; then
         shift
         if (($#)); then
           local service
           for service in "$@"; do
-            service_cids "$id" "$service"
+            service_cids "$id" "$service" "$ps_all"
           done
         else
           service_cids "$id"
@@ -543,6 +586,12 @@ inspect_cmd(){
   if [[ "$format" == *'.Image'* ]]; then
     local image_file="$ROOT/containers/$target.image-id"
     [[ -f "$image_file" ]] && cat "$image_file"
+    return 0
+  fi
+
+  if [[ "$format" == *'.State.Error'* ]]; then
+    local error_file="$ROOT/containers/$target.state-error"
+    [[ -f "$error_file" ]] && cat "$error_file"
     return 0
   fi
 
