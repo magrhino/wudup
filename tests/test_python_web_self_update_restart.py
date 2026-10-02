@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from tests.web_test_helpers import (
@@ -10,6 +11,8 @@ from tests.web_test_helpers import (
     _fake_docker_env,
 )
 
+from wudup import web_job_registry
+from wudup import web_self_update as self_update_module
 from wudup.db import (
     open_db,
 )
@@ -76,6 +79,7 @@ def test_container_restart_endpoint_requires_configured_target(tmp_path: Path) -
 
     assert response.status_code == 409
     assert response.json()["detail"] == "container restart target is not configured"
+    assert client.app.state.web_container_restart_running is False
 
 
 def test_container_restart_endpoint_rejects_active_apply_job(tmp_path: Path) -> None:
@@ -204,3 +208,142 @@ def test_container_restart_endpoint_marks_audit_failed_when_restart_fails(
     assert metadata["status"] == "failure"
     assert "error" in metadata
     assert json.loads(event["metadata_json"]) == metadata
+
+
+def _restart_client(tmp_path: Path):
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_WEB_RESTART_CONTAINER": "wudup",
+            **fake_env,
+        },
+    )
+    (fake_root / "containers" / "wudup.summary").write_text(
+        "/wudup|running|healthy|0|0\n",
+        encoding="utf-8",
+    )
+    return client, fake_root
+
+
+def test_in_flight_container_restart_blocks_other_mutations(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, _fake_root = _restart_client(tmp_path)
+    state = client.app.state
+    started = threading.Event()
+    release = threading.Event()
+    original_run = self_update_module._run_container_restart
+
+    def blocking_run(settings, container, audit_run_id):
+        started.set()
+        release.wait(timeout=10)
+        original_run(settings, container, audit_run_id)
+
+    monkeypatch.setattr(self_update_module, "_run_container_restart", blocking_run)
+    responses = []
+    first = threading.Thread(
+        target=lambda: responses.append(
+            client.post(
+                "/api/v1/container/restart",
+                json={"confirmation": "restart_container"},
+                headers=_csrf_headers(client),
+            )
+        )
+    )
+    first.start()
+    assert started.wait(timeout=10)
+
+    second = client.post(
+        "/api/v1/container/restart",
+        json={"confirmation": "restart_container"},
+        headers=_csrf_headers(client),
+    )
+    self_update_error = web_job_registry._reserve_self_update(state)
+    apply_error = web_job_registry._active_mutation_error_in_state(state)
+    release.set()
+    first.join(timeout=10)
+
+    assert second.status_code == 409
+    assert second.json()["detail"] == "container restart is already running"
+    assert self_update_error == "container restart is already running"
+    assert state.web_self_update_running is False
+    assert apply_error == "container restart is already running"
+    assert [response.status_code for response in responses] == [202]
+    assert state.web_container_restart_running is False
+
+
+def test_container_restart_releases_reservation_after_restart_failure(
+    tmp_path: Path,
+) -> None:
+    client, fake_root = _restart_client(tmp_path)
+    (fake_root / "restart_fail").write_text("restart failed\n", encoding="utf-8")
+
+    response = client.post(
+        "/api/v1/container/restart",
+        json={"confirmation": "restart_container"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 202
+    assert client.app.state.web_container_restart_running is False
+    assert web_job_registry._active_mutation_error_in_state(client.app.state) == ""
+
+
+def test_container_restart_releases_reservation_when_preparation_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, _fake_root = _restart_client(tmp_path)
+
+    def fail_inspect(*_args, **_kwargs):
+        raise RuntimeError("inspect crashed")
+
+    monkeypatch.setattr(self_update_module, "_prepare_container_restart", fail_inspect)
+    failing_client = type(client)(client.app, raise_server_exceptions=False)
+
+    response = failing_client.post(
+        "/api/v1/container/restart",
+        json={"confirmation": "restart_container"},
+        headers=_csrf_headers(failing_client),
+    )
+
+    assert response.status_code == 500
+    assert client.app.state.web_container_restart_running is False
+
+
+def test_container_restart_command_is_bounded_and_reports_docker_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, fake_root = _restart_client(tmp_path)
+    (fake_root / "restart_fail").write_text("daemon refused restart\n", encoding="utf-8")
+    calls = []
+    original_capture = self_update_module.CommandRunner.capture
+
+    def recording_capture(self, args, **kwargs):
+        if "restart" in [str(arg) for arg in args]:
+            calls.append(kwargs.get("timeout_seconds"))
+        return original_capture(self, args, **kwargs)
+
+    monkeypatch.setattr(self_update_module.CommandRunner, "capture", recording_capture)
+
+    response = client.post(
+        "/api/v1/container/restart",
+        json={"confirmation": "restart_container"},
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 202
+    assert calls == [self_update_module.CONTAINER_RESTART_COMMAND_TIMEOUT_SECONDS]
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        row = conn.execute(
+            "SELECT status, metadata_json FROM update_runs WHERE id = ?",
+            (response.json()["audit_run_id"],),
+        ).fetchone()
+    assert row["status"] == "failure"
+    assert "daemon refused restart" in json.loads(row["metadata_json"])["error"]
+    assert client.app.state.web_container_restart_running is False

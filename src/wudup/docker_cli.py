@@ -135,8 +135,9 @@ class DockerCli:
         container: str,
         *,
         timeout_seconds: int = 10,
+        command_timeout_seconds: float | None = None,
     ) -> CommandResult:
-        return self.runner.run(
+        return self.runner.capture(
             [
                 self.executable,
                 "restart",
@@ -145,6 +146,7 @@ class DockerCli:
                 container,
             ],
             check=True,
+            timeout_seconds=command_timeout_seconds,
         )
 
 
