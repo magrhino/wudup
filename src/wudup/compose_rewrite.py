@@ -75,6 +75,7 @@ RESOLVED_TAG_MARKER_PREFIXES = (
 WUD_TAG_INCLUDE_LABEL = "wud.tag.include"
 WUD_TAG_TRANSFORM_LABEL = "wud.tag.transform"
 _JS_REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
+_COMPOSE_INTERPOLATION_RE = re.compile(r"\$(?:\{|[A-Za-z_])")
 # WUD parses tags with loose semver, which misreads 4.0.19.2979-ls321 as
 # 4.0.1-9.2979-ls321 and ranks older 4.0.9.x tags above it.
 _FOUR_PART_VERSION_TAG_RE = re.compile(r"(v?)\d+\.\d+\.\d+\.\d+(-ls\d+)?", re.ASCII)
@@ -913,6 +914,14 @@ def render_compose_tag_exclusions(
         existing_tags = set(existing_exact_tags.get(service, set()))
         new_tags = existing_tags | service_tags[service]
         current_value = _get_service_label_value(service_config, "wud.tag.exclude")
+        if compose_value_has_interpolation(current_value):
+            tags = ", ".join(sorted(service_tags[service]))
+            raise ComposeTagRewriteError(
+                f"Service {service} wud.tag.exclude label uses a Compose variable, "
+                "so WUDup cannot add to it without replacing the variable with "
+                f"literal text. Exclude tag {tags} by hand in that label or in "
+                "the variable's value."
+            )
         current_regex = compose_unescape_dollars(current_value)
         previous_managed = exact_tags_regex(existing_tags)
         next_managed = exact_tags_regex(new_tags)
@@ -1406,6 +1415,12 @@ def compose_escape_dollars(value: str) -> str:
 
 def compose_unescape_dollars(value: str) -> str:
     return value.replace("$$", "$")
+
+
+def compose_value_has_interpolation(value: str) -> bool:
+    """Return whether a raw Compose value contains ``$VAR`` or ``${...}`` interpolation."""
+
+    return bool(_COMPOSE_INTERPOLATION_RE.search(value.replace("$$", "")))
 
 
 def merge_wud_exclude_regex(

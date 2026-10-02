@@ -53,11 +53,14 @@ docker compose -f docs/examples/docker-compose.example.yml run --rm wudup docker
 ```
 
 Add `--recreate-excluded-services` when you want Compose to recreate affected
-services immediately so WUD sees the new labels before its next scan.
+services immediately so WUD sees the new labels before its next scan. Services
+that were stopped are recreated without being started, as in a normal update.
 
 Automatic Compose tag rewrites and exclusion labels only support direct service
 `image:` values; image values provided through interpolation or inherited YAML
-snippets are left pending for manual review.
+snippets are left pending for manual review. An existing `wud.tag.exclude`
+label that uses a Compose variable such as `${APP_TAG_EXCLUDE}` is not
+rewritten either; add the tag to that label or variable by hand.
 
 By default, the updater recreates only the Compose service that owns the matched
 image. For services whose update should restart the whole Compose project, add

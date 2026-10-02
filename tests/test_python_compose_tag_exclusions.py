@@ -260,6 +260,53 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
         replace.assert_not_called()
         self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
 
+    def test_render_refuses_interpolated_exclude_label(self) -> None:
+        for label in (
+            "${APP_TAG_EXCLUDE:-^.*-beta$$}",
+            "$APP_TAG_EXCLUDE",
+            "^rc$$|${APP_TAG_EXCLUDE}",
+        ):
+            with self.subTest(label=label):
+                compose_file = self.write_compose(
+                    "services:\n"
+                    "  app:\n"
+                    "    image: repo/app:1.0\n"
+                    "    labels:\n"
+                    f"    - wud.tag.exclude={label}\n"
+                )
+                original = compose_file.read_text(encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    ComposeTagRewriteError,
+                    r"wud\.tag\.exclude label uses a Compose variable.*"
+                    r"Exclude tag 1\.2 by hand",
+                ):
+                    apply_compose_tag_exclusions(
+                        compose_file,
+                        (self.tag_exclusion_update(tag="1.2"),),
+                        existing_exact_tags={},
+                    )
+
+                self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+
+    def test_render_keeps_escaped_dollar_brace_as_literal_regex(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=^beta$${x}\n"
+        )
+
+        rendered, applied = render_compose_tag_exclusions(
+            compose_file,
+            (self.tag_exclusion_update(tag="1.2"),),
+            existing_exact_tags={},
+        )
+
+        self.assertEqual(applied[0].tags, ("1.2",))
+        self.assertIn("- wud.tag.exclude=(?:^beta$${x})|(?:^1\\.2$$)\n", rendered)
+
     def test_render_compose_tag_exclusions_service_not_map(self) -> None:
         compose_file = self.write_compose("services:\n  app: repo/app:1.0\n")
         with self.assertRaisesRegex(ComposeTagRewriteError, "is not a mapping"):

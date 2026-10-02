@@ -196,8 +196,11 @@ When you exclude a tag, the updater writes WUD's native
 service using the same image repository can be updated cleanly, the exclusion is
 applied repo-wide; otherwise it falls back to the selected service. Existing
 user-authored exclude regexes are preserved and the updater stores managed exact
-tag exclusions in SQLite. Add `--recreate-excluded-services` to recreate affected
-services immediately so WUD sees the new container labels before its next scan.
+tag exclusions in SQLite. An existing exclude label that uses a Compose variable
+is left unchanged and the line stays pending for a manual edit. Add
+`--recreate-excluded-services` to recreate affected services immediately so WUD
+sees the new container labels before its next scan; stopped services are
+recreated without being started.
 
 Override a WUD-proposed tag directly:
 
