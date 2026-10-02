@@ -57,6 +57,9 @@ class _ContainerImageCheck:
 
 
 class _LifecycleHealthMixin:
+    def _remove_orphans(self, stack: ComposeStack) -> bool:
+        return stack.index not in self.runner.stacks_keeping_orphans
+
     def _run_compose_up_no_start(
         self,
         stack: ComposeStack,
@@ -72,6 +75,7 @@ class _LifecycleHealthMixin:
                 force_recreate=force_recreate,
                 no_deps=True,
                 no_start=True,
+                remove_orphans=self._remove_orphans(stack),
                 project_directory=stack.project_directory,
             )
         except CommandError as exc:
@@ -153,6 +157,7 @@ class _LifecycleHealthMixin:
                     wait_timeout=self.options.max_wait,
                     force_recreate=force_recreate,
                     no_deps=no_deps,
+                    remove_orphans=self._remove_orphans(stack),
                     project_directory=stack.project_directory,
                 )
                 return UpResult(True, True)
@@ -169,6 +174,7 @@ class _LifecycleHealthMixin:
                 services,
                 force_recreate=force_recreate,
                 no_deps=no_deps,
+                remove_orphans=self._remove_orphans(stack),
                 project_directory=stack.project_directory,
             )
             return UpResult(True, False)

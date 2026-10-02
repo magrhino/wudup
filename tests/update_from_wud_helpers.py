@@ -173,6 +173,16 @@ class FakeDockerTestCase(unittest.TestCase):
         )
         return directory
 
+    def make_project_sharing_stack(self, stack_id: str, project_name: str) -> Path:
+        """Create a discovered stack that sets Compose project ``project_name``."""
+        directory = self.make_stack(stack_id, [("db", "repo/db:latest", None)])
+        compose_file = directory / "docker-compose.yml"
+        compose_file.write_text(
+            f"name: {project_name}\n" + compose_file.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return directory
+
     def _set_manifest_stdout(self, image: str, payload: object) -> None:
         safe = safe_name(image)
         (self.fake_root / "manifests" / f"{safe}.stdout").write_text(
@@ -318,6 +328,8 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
         allow_tag_updates: bool = False,
         digest_pin_updates: bool = False,
         digest_pin_plan: tuple[DigestPinUpdate, ...] = (),
+        exclude_tag_lines: str = "",
+        recreate_excluded_services: bool = False,
     ) -> tuple[int, str, str]:
         command_runner = CommandRunner(env=self.env)
         docker = DockerCli(runner=command_runner)
@@ -330,6 +342,8 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
             allow_tag_updates=allow_tag_updates,
             digest_pin_updates=digest_pin_updates,
             digest_pin_plan=digest_pin_plan,
+            exclude_tag_lines=exclude_tag_lines,
+            recreate_excluded_services=recreate_excluded_services,
             no_color=True,
             db_path=self.db_path,
         )

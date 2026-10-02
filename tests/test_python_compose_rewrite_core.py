@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
+import stat
 import unittest
 from unittest import mock
 
@@ -14,30 +17,84 @@ from wudup.compose_rewrite import (
     _is_simple_exact_tag_include,
     exact_tags_regex,
 )
-from wudup.compose_source import _get_service_label_value, _yaml_scalar_boundary_matches
+from wudup.compose_source import (
+    _get_service_label_value,
+    _sequence_label_source_rewrites,
+    _set_service_label_value,
+    _yaml_scalar_boundary_matches,
+)
 from wudup.updater_models import ComposeTagRewriteError
 
 
 class ComposeSourceLookupTests(unittest.TestCase):
-    def test_sequence_label_lookup_preserves_first_match_and_value(self) -> None:
+    def test_sequence_label_lookup_returns_single_match_value(self) -> None:
         for labels, expected in (
             ([], ""),
             (["other=value", "target"], ""),
-            (["target", "target=value=tail"], "value=tail"),
-            (["target=", "target=later"], ""),
-            (["other=value", "target=first", "target=later"], "first"),
+            (["target=value=tail", "other=value"], "value=tail"),
+            (["target=", "other=value"], ""),
             (["target=first", 123], "first"),
         ):
             with self.subTest(labels=labels):
                 service = CommentedMap(labels=CommentedSeq(labels))
-                self.assertEqual(_get_service_label_value(service, "target"), expected)
+                self.assertEqual(
+                    _get_service_label_value(service, "target", service="app"), expected
+                )
+
+    def test_sequence_label_lookup_and_set_reject_duplicate_keys(self) -> None:
+        # Compose keeps the last duplicate, so neither entry is safe to read or edit.
+        for labels in (
+            ["target", "target=value=tail"],
+            ["target=", "target=later"],
+            ["other=value", "target=first", "target=later"],
+        ):
+            with self.subTest(labels=labels):
+                service = CommentedMap(labels=CommentedSeq(labels))
+                expected = (
+                    "Service app lists the target label more than once; Docker Compose "
+                    "uses only the last one, so WUDup will not change it. Remove the "
+                    "duplicate target entries from the service labels, then try again."
+                )
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    _get_service_label_value(service, "target", service="app")
+                self.assertEqual(str(caught.exception), expected)
+                with self.assertRaises(ComposeTagRewriteError) as caught:
+                    _set_service_label_value(service, "target", "new", service="app")
+                self.assertEqual(str(caught.exception), expected)
+                self.assertEqual(list(service["labels"]), labels)
+
+    def test_sequence_label_set_replaces_bare_declaration(self) -> None:
+        # A bare entry is the declaration; appending would create a duplicate.
+        service = CommentedMap(labels=CommentedSeq(["target", "other=value"]))
+
+        _set_service_label_value(service, "target", "new", service="app")
+
+        self.assertEqual(list(service["labels"]), ["target=new", "other=value"])
+        self.assertEqual(
+            _get_service_label_value(service, "target", service="app"), "new"
+        )
+
+    def test_sequence_label_source_rewrite_requires_label_location(self) -> None:
+        # Labels without parsed source positions cannot be rewritten in place.
+        labels = CommentedSeq(["other=value", "target=old"])
+        service = CommentedMap(labels=labels)
+
+        with self.assertRaises(ComposeTagRewriteError) as caught:
+            _sequence_label_source_rewrites(
+                service, labels, "target", "new", "", (0,), None, service="app"
+            )
+
+        self.assertEqual(
+            str(caught.exception), "Label target source location is unavailable."
+        )
+        self.assertEqual(list(labels), ["other=value", "target=old"])
 
     def test_sequence_label_lookup_rejects_non_strings_before_match(self) -> None:
         for labels in ([123, "target=value"], ["other=value", None], ["target", 123]):
             with self.subTest(labels=labels):
                 service = CommentedMap(labels=CommentedSeq(labels))
                 with self.assertRaises(ComposeTagRewriteError) as caught:
-                    _get_service_label_value(service, "target")
+                    _get_service_label_value(service, "target", service="app")
                 self.assertEqual(
                     str(caught.exception),
                     "Service labels use unsupported non-string list entries.",
@@ -145,13 +202,40 @@ class ComposeBackupTests(ComposeRewriteTestCase):
                 with self.assertRaisesRegex(RuntimeError, "copy failed"):
                     _backup_compose(compose_file)
 
+    def test_backup_syncs_copy_and_directory_before_returning(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        synced: list[str] = []
+        real_fsync = os.fsync
+
+        def record_fsync(fd: int) -> None:
+            synced.append("dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+            real_fsync(fd)
+
+        with mock.patch("wudup.compose_persistence.os.fsync", side_effect=record_fsync):
+            backup = _backup_compose(compose_file)
+
+        self.assertEqual(synced, ["file", "dir"])
+        self.assertEqual(backup.read_text(), "services: {}\n")
+
+    def test_backup_sync_failure_removes_backup(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+
+        with mock.patch(
+            "wudup.compose_persistence.os.fsync",
+            side_effect=OSError(errno.EIO, "I/O error"),
+        ):
+            with self.assertRaises(OSError):
+                _backup_compose(compose_file)
+
+        self.assertEqual(list(self.root.glob(".compose.yml.backup.*")), [])
+
 
 class ComposeAtomicWriteTests(ComposeRewriteTestCase):
     def test_filesystem_failures_preserve_source_and_clean_temporary_file(self) -> None:
         original = b"services:\r\n  app:\r\n    image: repo/app:1.0\r\n"
         compose_file = self.root / "compose.yml"
         compose_file.write_bytes(original)
-        for operation in ("chown", "chmod", "replace"):
+        for operation in ("chown", "chmod", "fsync", "replace"):
             with self.subTest(operation=operation):
                 error = OSError(f"{operation} failed")
                 written_hashes = ["previous write"]
@@ -204,3 +288,115 @@ class ComposeAtomicWriteTests(ComposeRewriteTestCase):
         self.assertEqual(written_hashes, [hashlib.sha256(compose_file.read_bytes()).hexdigest()])
         self.assertEqual(backup.read_bytes(), b"services: {}\n")
         self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
+
+    def test_write_syncs_file_before_replace_and_directory_after(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        events: list[str] = []
+        real_fsync = os.fsync
+        real_replace = os.replace
+
+        def record_fsync(fd: int) -> None:
+            events.append("sync-dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "sync-file")
+            real_fsync(fd)
+
+        def record_replace(src: object, dst: object) -> None:
+            events.append("replace")
+            real_replace(src, dst)
+
+        with (
+            mock.patch("wudup.compose_persistence.os.fsync", side_effect=record_fsync),
+            mock.patch("wudup.compose_persistence.os.replace", side_effect=record_replace),
+        ):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="tag")
+
+        self.assertEqual(events, ["sync-file", "replace", "sync-dir"])
+        self.assertEqual(compose_file.read_text(), "changed")
+
+    def test_directory_sync_failure_after_replace_reports_written_version(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        written_hashes: list[str] = []
+
+        with mock.patch(
+            "wudup.compose_persistence._fsync_directory",
+            side_effect=OSError(errno.EIO, "I/O error"),
+        ):
+            with self.assertRaises(ComposeTagRewriteError) as caught:
+                compose_rewrite._atomic_replace_compose(
+                    compose_file, "changed", prefix="tag",
+                    written_hashes=written_hashes,
+                )
+
+        self.assertIn("was replaced, but its folder could not be synced", str(caught.exception))
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(written_hashes, [hashlib.sha256(b"changed").hexdigest()])
+        self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
+
+    def test_directory_sync_failure_without_rollback_logs_warning(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+        ):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="exclude")
+
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(list(self.root.glob(".compose.yml.exclude.*")), [])
+
+    def test_restore_succeeds_when_directory_sync_fails_after_replace(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        backup = _backup_compose(compose_file)
+        written_hashes: list[str] = []
+        compose_rewrite._atomic_replace_compose(
+            compose_file, "changed", prefix="tag", written_hashes=written_hashes,
+        )
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+        ):
+            restored_on_disk = compose_rewrite.restore_compose_backup(
+                backup, compose_file, expected_source_hash=written_hashes[-1],
+            )
+
+        self.assertFalse(restored_on_disk)
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(), "services: {}\n")
+
+    def test_synced_restore_reports_it_is_on_disk(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        backup = _backup_compose(compose_file)
+        written_hashes: list[str] = []
+        compose_rewrite._atomic_replace_compose(
+            compose_file, "changed", prefix="tag", written_hashes=written_hashes,
+        )
+
+        self.assertTrue(
+            compose_rewrite.restore_compose_backup(
+                backup, compose_file, expected_source_hash=written_hashes[-1],
+            )
+        )
+        self.assertEqual(compose_file.read_text(), "services: {}\n")
+
+    def test_unsupported_directory_sync_is_not_an_error(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        real_fsync = os.fsync
+
+        def reject_directories(fd: int) -> None:
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "Invalid argument")
+            real_fsync(fd)
+
+        with mock.patch("wudup.compose_persistence.os.fsync", side_effect=reject_directories):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="tag")
+            backup = _backup_compose(compose_file)
+
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(backup.read_text(), "changed")

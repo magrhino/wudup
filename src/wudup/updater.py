@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from . import db, updater_audit, updater_logging, updater_preflight, wud_file
 from .command import CommandError, CommandRunner
-from .compose import ComposeCli, ComposeDiscoveryError
+from .compose import ComposeCli, ComposeDiscoveryError, ComposeStack
 from .digest_verifier import DigestVerifier
 from .docker_cli import DockerCli
 from .file_ops import OwnerConfig, OwnerConfigError
@@ -106,6 +106,12 @@ class UpdateFromWudRunner(
             int,
             tuple[tuple[str, ...], tuple[str, ...]],
         ] = {}
+        # Stacks whose Compose project name is shared with another file set;
+        # --remove-orphans would delete that file set's containers.
+        self.stacks_keeping_orphans: set[int] = set()
+        # Every discovered stack, so a project-name share can be told apart
+        # from containers started with a Compose file no stack uses.
+        self.discovered_stacks: tuple[ComposeStack, ...] = ()
         self.digest_pin_update_cache: dict[
             tuple[DigestPinCandidate, ...],
             tuple[DigestPinUpdate, ...],
@@ -165,6 +171,7 @@ class UpdateFromWudRunner(
                 project_base=opts.host_docker_base,
                 ignore_paths=opts.compose_ignore_paths,
             )
+            self.discovered_stacks = tuple(stacks)
             exclusion_matches, invalid_exclusions = self._build_tag_exclusion_matches(
                 excluded_tags,
                 stacks,

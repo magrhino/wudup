@@ -75,6 +75,7 @@ RESOLVED_TAG_MARKER_PREFIXES = (
 WUD_TAG_INCLUDE_LABEL = "wud.tag.include"
 WUD_TAG_TRANSFORM_LABEL = "wud.tag.transform"
 _JS_REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
+_COMPOSE_INTERPOLATION_RE = re.compile(r"\$[{A-Za-z_]")
 # WUD parses tags with loose semver, which misreads 4.0.19.2979-ls321 as
 # 4.0.1-9.2979-ls321 and ranks older 4.0.9.x tags above it.
 _FOUR_PART_VERSION_TAG_RE = re.compile(r"(v?)\d+\.\d+\.\d+\.\d+(-ls\d+)?", re.ASCII)
@@ -279,7 +280,7 @@ def plan_compose_tag_stream_update(
     _validate_service_image(service, service_config.get("image"), current_image)
     _prepare_service_labels(services, service, service_config)
     current_label_value = compose_unescape_dollars(
-        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL)
+        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL, service=service)
     )
     proposed_label_value = compose_escape_dollars(proposed_label_regex)
 
@@ -384,6 +385,7 @@ def render_compose_tag_stream_updates(
                         stream_update.proposed_label_value,
                         source,
                         line_offsets,
+                        service=service,
                     )
                 )
             counts[id(update)] += 1
@@ -427,7 +429,9 @@ def _rewrite_tag_stream_label(
         )
     _prepare_service_labels(services, service, service_config)
     current_label = compose_unescape_dollars(
-        _get_service_label_value(service_config, stream_update.label_key)
+        _get_service_label_value(
+            service_config, stream_update.label_key, service=service
+        )
     )
     if current_label != stream_update.current_label_value:
         raise ComposeTagRewriteError(
@@ -666,7 +670,7 @@ def _render_compose_retag_updates(
 
             _prepare_service_labels(services, service, service_config)
             current_include = compose_unescape_dollars(
-                _get_service_label_value(service_config, update.label_key)
+                _get_service_label_value(service_config, update.label_key, service=service)
             )
             stream_update = stream_by_service.get(service)
             next_label_value, label_rewrite, stream_rewritten = (
@@ -688,6 +692,7 @@ def _render_compose_retag_updates(
                 service_config,
                 update.label_key,
                 next_label_value,
+                service=service,
             )
             added_transforms[id(update)].extend(
                 _managed_transform_addition(
@@ -825,7 +830,9 @@ def render_compose_digest_unpins(
             )
 
             _prepare_service_labels(services, service, service_config)
-            current_include = _get_service_label_value(service_config, update.label_key)
+            current_include = _get_service_label_value(
+                service_config, update.label_key, service=service
+            )
             _validate_digest_unpin_include(
                 stack_name=stack_name,
                 service=service,
@@ -836,18 +843,16 @@ def render_compose_digest_unpins(
                 service_config,
                 update.label_key,
                 update.label_value,
+                service=service,
             )
             added_transforms[id(update)].extend(
                 _managed_transform_addition(
                     service_config, service, update.watch_tag, update.label_value, config_transforms
                 )
             )
-            _remove_service_resolved_tag_marker(
-                services,
-                service,
-                service_config,
-                update.marker,
-            )
+            # The marker tag was validated above, so clear marker lines the same
+            # way digest pins do, keeping any operator comments beside them.
+            _clear_service_resolved_tag_markers(services, service, service_config)
             service_config["image"] = update.tag_image
             counts[id(update)] += 1
 
@@ -912,7 +917,17 @@ def render_compose_tag_exclusions(
         _prepare_service_labels(services, service, service_config)
         existing_tags = set(existing_exact_tags.get(service, set()))
         new_tags = existing_tags | service_tags[service]
-        current_value = _get_service_label_value(service_config, "wud.tag.exclude")
+        current_value = _get_service_label_value(
+            service_config, "wud.tag.exclude", service=service
+        )
+        if compose_value_has_interpolation(current_value):
+            tags = ", ".join(sorted(service_tags[service]))
+            raise ComposeTagRewriteError(
+                f"Service {service} wud.tag.exclude label uses a Compose variable, "
+                "so WUDup cannot add to it without replacing the variable with "
+                f"literal text. Exclude tag {tags} by hand in that label or in "
+                "the variable's value."
+            )
         current_regex = compose_unescape_dollars(current_value)
         previous_managed = exact_tags_regex(existing_tags)
         next_managed = exact_tags_regex(new_tags)
@@ -927,6 +942,7 @@ def render_compose_tag_exclusions(
             service_config,
             "wud.tag.exclude",
             compose_escape_dollars(next_regex),
+            service=service,
         )
         applied.append(
             AppliedTagExclusion(
@@ -1105,27 +1121,6 @@ def _update_service_resolved_tag_marker(
         service_config.yaml_set_comment_before_after_key("image", before=marker)
 
 
-def _remove_service_resolved_tag_marker(
-    services: CommentedMap,
-    service: str,
-    service_config: CommentedMap,
-    marker: str,
-) -> None:
-    for token_list in _service_comment_token_lists(services, service, service_config):
-        kept = []
-        for token in token_list.tokens:
-            if _comment_token_matches_marker(token, marker):
-                continue
-            kept.append(token)
-        token_list.replace(kept)
-    _empty_detached_service_comment_lists(services, service, service_config)
-    remaining_marker = _service_resolved_tag_marker(services, service, service_config)
-    if remaining_marker:
-        raise ComposeTagRewriteError(
-            f"Service {service} resolved-tag marker is attached ambiguously."
-        )
-
-
 def _clear_service_resolved_tag_markers(
     services: CommentedMap,
     service: str,
@@ -1173,21 +1168,6 @@ def _comment_line_resolved_tag_marker(line: str) -> str | None:
         if text.startswith(prefix):
             return text.removeprefix(prefix).strip()
     return None
-
-
-def _comment_token_matches_marker(token: object, marker: str) -> bool:
-    text = str(getattr(token, "value", "")).strip()
-    cleaned = text[1:].strip() if text.startswith("#") else text
-    if cleaned == marker:
-        return True
-    for prefix in RESOLVED_TAG_MARKER_PREFIXES:
-        if marker.startswith(prefix):
-            marker_value = marker.removeprefix(prefix)
-            return any(
-                cleaned == f"{candidate_prefix}{marker_value}"
-                for candidate_prefix in RESOLVED_TAG_MARKER_PREFIXES
-            )
-    return False
 
 
 def _digest_pin_label_rewrite_approval_matches(
@@ -1267,7 +1247,7 @@ def render_compose_tracking_label(
             f"Service {service} has duplicate WUD tag filters; remove the duplicates before repair."
         )
     current = compose_unescape_dollars(
-        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL)
+        _get_service_label_value(service_config, WUD_TAG_INCLUDE_LABEL, service=service)
     )
     if current != expected_label:
         raise ComposeTagRewriteError(
@@ -1277,6 +1257,7 @@ def render_compose_tracking_label(
         service_config,
         WUD_TAG_INCLUDE_LABEL,
         compose_escape_dollars(proposed_regex),
+        service=service,
     )
     _add_managed_wud_tag_transform(
         service_config, service, image_tag(expected_image), proposed_regex, expected_transform
@@ -1293,6 +1274,7 @@ def apply_compose_tracking_label(
     *,
     expected_source_hash: str | None = None,
     expected_transform: str = "",
+    written_hashes: list[str] | None = None,
 ) -> None:
     rendered = render_compose_tracking_label(
         compose_path, service, expected_image, expected_label, proposed_regex,
@@ -1302,6 +1284,7 @@ def apply_compose_tracking_label(
     _atomic_replace_compose(
         compose_path, rendered, prefix="tracking-repair",
         expected_source_hash=expected_source_hash,
+        written_hashes=written_hashes,
     )
 
 
@@ -1361,7 +1344,10 @@ def _add_managed_wud_tag_transform(
             "then preview again."
         )
     _set_service_label_value(
-        service_config, WUD_TAG_TRANSFORM_LABEL, compose_escape_dollars(transform)
+        service_config,
+        WUD_TAG_TRANSFORM_LABEL,
+        compose_escape_dollars(transform),
+        service=service,
     )
     return transform
 
@@ -1406,6 +1392,12 @@ def compose_escape_dollars(value: str) -> str:
 
 def compose_unescape_dollars(value: str) -> str:
     return value.replace("$$", "$")
+
+
+def compose_value_has_interpolation(value: str) -> bool:
+    """Return whether a raw Compose value contains ``$VAR`` or ``${...}`` interpolation."""
+
+    return bool(_COMPOSE_INTERPOLATION_RE.search(value.replace("$$", "")))
 
 
 def merge_wud_exclude_regex(

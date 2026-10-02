@@ -26,7 +26,7 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
-from wudup import web_retag_apply, web_retag_audit, web_retags
+from wudup import compose_persistence, web_retag_apply, web_retag_audit, web_retags
 from wudup.command import CommandError, CommandResult
 from wudup.compose import ComposeCli, ComposeStack
 
@@ -315,6 +315,7 @@ class _RollbackCompose:
         stop_fails: bool = False,
     ) -> None:
         self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.remove_orphans: list[bool] = []
         self.stopped_up_fails = stopped_up_fails
         self.running_up_fails = running_up_fails
         self.ps_result = ps_result
@@ -327,6 +328,7 @@ class _RollbackCompose:
     def up(self, directory: Path, file: str, services: Any, **kwargs: Any) -> None:
         no_start = bool(kwargs.get("no_start"))
         self.calls.append(("up-no-start" if no_start else "up", tuple(services)))
+        self.remove_orphans.append(kwargs.get("remove_orphans", True))
         if no_start and self.stopped_up_fails:
             raise self._error("up-no-start")
         if not no_start and self.running_up_fails:
@@ -349,7 +351,12 @@ class _RollbackCompose:
             raise self._error("stop")
 
 
-def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
+def _restore_mixed_stack(
+    tmp_path: Path,
+    compose: _RollbackCompose,
+    *,
+    remove_orphans: bool = True,
+) -> str:
     """Roll back a stack where db was stopped and web was running before apply."""
     stack = ComposeStack(
         index=1,
@@ -374,13 +381,14 @@ def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
         "job",
         original_error="health failed",
         expected_source_hash="hash",
+        remove_orphans=remove_orphans,
     )
 
 
 @pytest.fixture
 def _no_compose_restore(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        web_retag_apply, "restore_compose_backup", lambda *args, **kwargs: None
+        web_retag_apply, "restore_compose_backup", lambda *args, **kwargs: True
     )
 
 
@@ -400,6 +408,23 @@ def test_retag_rollback_restores_mixed_stopped_and_running_services(
     assert "recreated and started web on the previous image" in summary
     assert "recreated db on the previous image without starting it" in summary
     assert not (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_keeps_orphans_when_project_name_is_shared(
+    tmp_path: Path,
+) -> None:
+    compose = _RollbackCompose()
+
+    _restore_mixed_stack(tmp_path, compose, remove_orphans=False)
+
+    # Both the stopped and the running service group must avoid --remove-orphans,
+    # or Compose would delete the other file set's containers.
+    assert [call[0] for call in compose.calls if call[0].startswith("up")] == [
+        "up-no-start",
+        "up",
+    ]
+    assert compose.remove_orphans == [False, False]
 
 
 @pytest.mark.usefixtures("_no_compose_restore")
@@ -504,11 +529,91 @@ def test_retag_rollback_reports_backup_cleanup_failure_after_services_restored(
 
 def test_retag_runtime_revalidation_without_updates_reports_no_stopped_services() -> None:
     # No approved updates means no Compose or runtime lookups are needed.
-    assert web_retag_apply._revalidate_retag_runtime_before_apply(
+    stopped, _remove_orphans = web_retag_apply._revalidate_retag_runtime_before_apply(
         None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         (),
-    ) == ()
+    )
+    assert stopped == ()
+
+
+def test_retag_restores_compose_when_directory_sync_fails_after_rewrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+    compose_file = fixture.compose_dir / "docker-compose.yml"
+    before = compose_file.read_bytes()
+    real_fsync_directory = compose_persistence._fsync_directory
+    calls = 0
+
+    def fail_after_rewrite(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 syncs the backup; call 2 follows the retag rewrite.
+        if calls == 2:
+            raise OSError(5, "I/O error")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(compose_persistence, "_fsync_directory", fail_after_rewrite)
+
+    response = _apply_retag_plan(fixture.client, headers, plan)
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    _wait_run_status(tmp_path / "state" / "wud.sqlite", job["run_id"], "failure")
+    assert compose_file.read_bytes() == before
+    assert not list(fixture.compose_dir.glob(".docker-compose.yml.backup.*"))
+
+
+def test_retag_keeps_backup_when_restore_directory_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+    compose_file = fixture.compose_dir / "docker-compose.yml"
+    before = compose_file.read_bytes()
+    real_fsync_directory = compose_persistence._fsync_directory
+    calls = 0
+
+    def fail_after_backup(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 syncs the backup; the retag rewrite and its restore both fail.
+        if calls >= 2:
+            raise OSError(5, "I/O error")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(compose_persistence, "_fsync_directory", fail_after_backup)
+
+    response = _apply_retag_plan(fixture.client, headers, plan)
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    _wait_run_status(tmp_path / "state" / "wud.sqlite", job["run_id"], "failure")
+    assert calls == 3
+    assert compose_file.read_bytes() == before
+    backups = list(fixture.compose_dir.glob(".docker-compose.yml.backup.*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == before
 
 
 def _retag_health_error(

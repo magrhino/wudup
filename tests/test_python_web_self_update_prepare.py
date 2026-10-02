@@ -16,6 +16,7 @@ from tests.web_test_helpers import (
     _write_fake_manifest,
 )
 
+from wudup import compose_persistence
 from wudup import web_self_update as self_update_module
 from wudup.db import (
     open_db,
@@ -530,4 +531,80 @@ def test_self_update_prepare_endpoint_keeps_backup_when_restore_fails(
     assert "image: ghcr.io/magrhino/wudup:v0.25.0" in compose_path.read_text(
         encoding="utf-8",
     )
+    assert client.app.state.web_self_update_running is False
+
+
+def _pinned_tag_prepare_client(tmp_path: Path, monkeypatch):
+    """Return a mutating client, fake Docker root, and a pinned wudup stack."""
+
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    release_patches = {
+        "current_tag": lambda: "v0.24.2",
+        "fetch_latest_release_tag": lambda: "v0.25.0",
+        "current_container_image": lambda _env: "ghcr.io/magrhino/wudup:v0.24.2",
+        "_fetch_self_update_release_notes": lambda *_args, **_kwargs: ([], False, []),
+    }
+    for name, replacement in release_patches.items():
+        monkeypatch.setattr(self_update_module, name, replacement)
+    env = {
+        "WUD_WEB_DEV_NO_AUTH": "true",
+        "WUD_WEB_MUTATIONS_ENABLED": "true",
+        "WUD_WEB_RESTART_CONTAINER": "wudup",
+    }
+    client = _client(tmp_path, {**env, **fake_env})
+    stack = [("wudup", "ghcr.io/magrhino/wudup:v0.24.2", "wudup")]
+    compose_dir = _make_fake_stack(tmp_path, fake_root, "wud", stack)
+    return client, fake_root, compose_dir
+
+
+def test_self_update_prepare_keeps_backup_when_restore_directory_sync_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, fake_root, compose_dir = _pinned_tag_prepare_client(
+        tmp_path, monkeypatch,
+    )
+    (fake_root / "stacks" / "wud" / "pull_fail").write_text(
+        "pull failed\n",
+        encoding="utf-8",
+    )
+    compose_path = compose_dir / "docker-compose.yml"
+    compose_before = compose_path.read_text(encoding="utf-8")
+    plan = client.post(
+        "/api/v1/self-update/plan",
+        headers=_csrf_headers(client),
+    ).json()
+    real_fsync_directory = compose_persistence._fsync_directory
+    calls = 0
+
+    def fail_during_restore(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 syncs the backup, call 2 the tag rewrite, call 3 the restore.
+        if calls == 3:
+            raise OSError(5, "I/O error")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(compose_persistence, "_fsync_directory", fail_during_restore)
+
+    response = client.post(
+        "/api/v1/self-update/prepare",
+        json={
+            "confirmation": "prepare_tag_update",
+            "plan_id": plan["plan"]["plan_id"],
+            "current_tag": "v0.24.2",
+            "latest_tag": "v0.25.0",
+            "target_image": "ghcr.io/magrhino/wudup:v0.25.0",
+            "restart_container": "wudup",
+        },
+        headers=_csrf_headers(client),
+    )
+
+    assert response.status_code == 500
+    assert calls == 3
+    assert "may not survive a crash" in response.json()["detail"]
+    assert compose_path.read_text(encoding="utf-8") == compose_before
+    backups = list(compose_dir.glob(".docker-compose.yml.backup.*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == compose_before
     assert client.app.state.web_self_update_running is False

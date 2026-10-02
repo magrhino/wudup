@@ -446,6 +446,131 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
 
+    def _write_override_runtime(self, stack_dir, services) -> None:
+        config_files = (
+            f"{stack_dir / 'docker-compose.yml'},"
+            f"{stack_dir / 'docker-compose.override.yml'}"
+        )
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            "".join(
+                f"{stack_dir}\t{config_files}\tapp\t{service}\tFalse\n"
+                for service in services
+            ),
+            encoding="utf-8",
+        )
+
+    def test_update_refuses_project_started_with_override_file(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        compose_text = (stack_dir / "docker-compose.yml").read_text(encoding="utf-8")
+        self._write_override_runtime(stack_dir, ("app", "sidecar"))
+        self.set_image_state("repo/app:1.0", "old", "sha256:old")
+
+        status, stdout, stderr = self.run_direct(allow_tag_updates=True)
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        self.assertEqual(
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+            compose_text,
+        )
+        calls = self.calls()
+        self.assertNotIn("compose -f docker-compose.yml pull", calls)
+        self.assertNotIn("compose -f docker-compose.yml stop", calls)
+        self.assertNotIn("compose -f docker-compose.yml up", calls)
+        output = stdout + stderr
+        self.assertIn("docker-compose.override.yml", output)
+        self.assertIn("update was not applied", output)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=compose-override-files", report)
+
+    def test_update_refuses_stopped_service_when_project_uses_override_file(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", None)])
+        self._write_override_runtime(stack_dir, ("sidecar",))
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+
+        status, stdout, stderr = self.run_direct()
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:latest\n",
+        )
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=compose-override-files", report)
+
+    def test_update_refuses_project_started_from_different_compose_file(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'compose.prod.yml'}\tapp\tapp\tFalse\n",
+            encoding="utf-8",
+        )
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+
+        status, stdout, stderr = self.run_direct()
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:latest\n",
+        )
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
+        self.assertIn("compose.prod.yml", stdout + stderr)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=compose-override-files", report)
+
+    def test_update_keeps_containers_of_stack_sharing_project_name(self) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        other_dir = self.make_project_sharing_stack("other", "app")
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\n"
+            f"{other_dir}\t{other_dir / 'docker-compose.yml'}\tapp\tdb\tFalse\n",
+            encoding="utf-8",
+        )
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
+
+        status, stdout, stderr = self.run_direct()
+
+        self.assertEqual(status, 0, stderr + stdout)
+        calls = self.calls()
+        self.assertIn("compose -f docker-compose.yml up -d --pull never", calls)
+        self.assertNotIn("--remove-orphans", calls)
+        self.assertIn("uses the same project name", stdout + stderr)
+
+    def test_update_refuses_leftover_container_from_unused_compose_file(
+        self,
+    ) -> None:
+        # A container from a file no discovered stack uses is not a shared
+        # project: recreating would drop or orphan it, so the stack is refused.
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\n"
+            f"{stack_dir}\t{stack_dir / 'compose.old.yml'}\tapp\tworker\tFalse\n",
+            encoding="utf-8",
+        )
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+
+        status, stdout, stderr = self.run_direct()
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
+        self.assertIn("compose.old.yml", stdout + stderr)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=compose-override-files", report)
+
     def test_stack_update_fails_closed_when_service_list_is_unavailable(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])

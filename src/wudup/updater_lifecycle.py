@@ -12,6 +12,10 @@ from .compose import (
     COMPOSE_RUNTIME_STATE_FORMAT,
     ComposeRuntimeServiceState,
     ComposeStack,
+    compose_override_files_message,
+    compose_project_file_sets,
+    compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
     compose_runtime_service_key,
     compose_runtime_service_key_matches,
     compose_runtime_service_states,
@@ -67,6 +71,16 @@ from .updater_models import (
 INACTIVE_CONTAINER_STATES = frozenset({"created", "dead", "exited"})
 
 
+
+def _service_state_is_unverifiable(service_states: Sequence[str]) -> bool:
+    """Return whether a service is scaled or in a state WUDup cannot preserve."""
+    state_values = set(service_states)
+    return len(service_states) > 1 or bool(
+        state_values
+        and state_values != {"running"}
+        and not state_values <= INACTIVE_CONTAINER_STATES
+    )
+
 class StackLifecycleExecutor(
     _LifecycleRewriteMixin,
     _LifecycleRecreateMixin,
@@ -90,6 +104,16 @@ class StackLifecycleExecutor(
             return state_or_status
 
         state = state_or_status
+        # An exception escaping the steps counts as a failure, so the backup
+        # is kept and its path logged when the Compose file was not restored.
+        status = StackStatus("failure", "unexpected-error")
+        try:
+            status = self._run_stack_update_steps(state)
+        finally:
+            self._discard_compose_backup(state, status)
+        return status
+
+    def _run_stack_update_steps(self, state: _StackUpdateState) -> StackStatus:
         for step in (
             self._apply_compose_tag_updates,
             self._apply_compose_digest_unpin_updates,
@@ -289,6 +313,11 @@ class StackLifecycleExecutor(
                     all_containers=True,
                 )
             )
+            status = self._compose_file_set_refusal(
+                stack, matches, services, runtime_states
+            )
+            if status is not None:
+                return status
             for service in services:
                 service_states = self._compose_service_runtime_states(
                     stack,
@@ -296,11 +325,7 @@ class StackLifecycleExecutor(
                     runtime_states,
                 )
                 state_values = set(service_states)
-                if len(service_states) > 1 or (
-                    state_values
-                    and state_values != {"running"}
-                    and not state_values <= INACTIVE_CONTAINER_STATES
-                ):
+                if _service_state_is_unverifiable(service_states):
                     self.log.error(
                         f"[{stack.name}] Compose service {service} has scaled or "
                         "unverified container state; the update was not applied."
@@ -420,6 +445,65 @@ class StackLifecycleExecutor(
             self.docker.container_state_error(container_id)
             for container_id in container_ids
         )
+
+    def _compose_file_set_refusal(
+        self,
+        stack: ComposeStack,
+        matches: Sequence[Match],
+        services: tuple[str, ...],
+        runtime_states: Sequence[ComposeRuntimeServiceState],
+    ) -> StackStatus | None:
+        """Refuse stacks started with Compose files WUDup does not load.
+
+        Also records stacks sharing their project name with another Compose
+        file set, so they are recreated without ``--remove-orphans``.
+        """
+        extra_files = compose_runtime_extra_config_files(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            (key for key, _state in runtime_states),
+            compose_project_file_sets(
+                self.runner.discovered_stacks, stack.project_name
+            ),
+        )
+        if extra_files:
+            message = compose_override_files_message(stack.file, extra_files)
+            self.log.error(
+                f"[{stack.name}] {message} The update was not applied."
+            )
+            self._record_failure(
+                stack,
+                matches,
+                phase="preflight",
+                reason="compose-override-files",
+                services=services,
+                note=message,
+            )
+            self._progress(
+                "preflight",
+                "failure",
+                f"[{stack.name}] Stack runs with Compose files that "
+                "WUDup does not load; the update was not applied.",
+                stack=stack.name,
+                services=services,
+                matches=matches,
+            )
+            return StackStatus("failure", "compose-override-files")
+        if compose_runtime_project_shared(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            (key for key, _state in runtime_states),
+        ):
+            self.runner.stacks_keeping_orphans.add(stack.index)
+            self.log.warning(
+                f"[{stack.name}] Another Compose stack uses the same project "
+                f"name ({stack.project_name}); recreating without "
+                "--remove-orphans so its containers are kept. Give each "
+                "stack a unique project name to avoid this."
+            )
+        return None
 
     @staticmethod
     def _compose_service_runtime_states(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import errno
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest import mock
@@ -83,6 +86,108 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.assertRegex(
             self.calls(),
             r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
+        )
+    def test_exclude_tag_recreate_keeps_stack_sharing_project_name(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        other_dir = self.make_project_sharing_stack("other", "app")
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\n"
+            f"{other_dir}\t{other_dir / 'docker-compose.yml'}\tapp\tdb\tFalse\n",
+            encoding="utf-8",
+        )
+
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
+        )
+
+        self.assertEqual(status, 0, stderr + stdout)
+        self.assertRegex(
+            self.calls(),
+            r"compose -f docker-compose.yml up -d --pull never --no-build --no-deps app",
+        )
+        self.assertNotIn("--remove-orphans", self.calls())
+    def test_exclude_tag_line_does_not_recreate_override_file_project(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        config_files = (
+            f"{stack_dir / 'docker-compose.yml'},"
+            f"{stack_dir / 'docker-compose.override.yml'}"
+        )
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{config_files}\tapp\tapp\tFalse\n",
+            encoding="utf-8",
+        )
+
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
+        )
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertNotIn(
+            "wud.tag.exclude",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertNotRegex(self.calls(), r"compose -f .* up -d")
+        self.assertIn(
+            "docker-compose.override.yml",
+            stdout + stderr,
+        )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "compose-override-files"),
+        )
+
+    def test_exclude_tag_line_does_not_write_label_when_runtime_unreadable(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        (self.fake_root / "ps_fail").write_text("", encoding="utf-8")
+
+        status, stdout, stderr = self.run_direct(
+            exclude_tag_lines="1",
+            recreate_excluded_services=True,
+        )
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        self.assertNotIn(
+            "wud.tag.exclude",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertNotRegex(self.calls(), r"compose -f .* up -d")
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "tag-exclusion-recreate-failed"),
+        )
+    def test_exclude_tag_line_reports_label_write_os_error(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+
+        with mock.patch(
+            "wudup.compose_rewrite.apply_compose_tag_exclusions",
+            side_effect=OSError("disk full"),
+        ):
+            status, stdout, stderr = self.run_direct(exclude_tag_lines="1")
+
+        self.assertEqual(status, 1, stderr + stdout)
+        self.assertIn("Could not write wud.tag.exclude: disk full", stdout + stderr)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(
+            (pending[0]["status"], pending[0]["status_reason"]),
+            ("failed", "tag-exclusion-label-failed"),
         )
     def test_exclude_tag_line_recreate_fails_when_service_has_no_container(
         self,
@@ -272,31 +377,42 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(captured["render_updates"], [update])
         self.assertEqual(captured["compose_path"], stack_dir / "docker-compose.yml")
         self.assertEqual(captured["existing_exact_tags"], {"app": {"2.0"}})
-    def test_exclude_tag_line_recreate_includes_missing_network_provider(self) -> None:
-        compose_file = self.prepare_network_mode_media_stack(
-            include_provider_cid=False,
-            write_provider_hook=True,
+    def test_plan_tag_exclusions_uses_service_scope_without_repo_updates(self) -> None:
+        stack = ComposeStack(
+            index=0,
+            directory=self.base / "app",
+            file="docker-compose.yml",
+            name="app",
+            images=("repo/app:1.0",),
+            service_images=(ServiceImage("app", "repo/app:1.0"),),
+            project_name="app",
         )
+        target = mock.Mock(line_no=1, desired_tag="2.0")
+        match = mock.Mock(
+            stack=stack,
+            service="app",
+            compose_image="repo/app:1.0",
+            target=target,
+        )
+        runner = mock.Mock()
+        runner._tag_exclusion_repo_updates.return_value = []
+        runner._existing_exact_tag_exclusions.return_value = {}
 
-        result = self.run_python(
-            "--yes",
-            "--exclude-tag-lines",
-            "1",
-            "--recreate-excluded-services",
-        )
+        with mock.patch(
+            "wudup.compose_rewrite.render_compose_tag_exclusions",
+            return_value=("", ()),
+        ):
+            updates, failures = updater_tag_exclusions.plan_tag_exclusions(
+                runner,
+                (match,),
+                (stack,),
+            )
 
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
-        self.assertIn(
-            "wud.tag.exclude=^5\\.2\\.0$$",
-            compose_file.read_text(encoding="utf-8"),
-        )
-        calls = self.calls()
-        self.assertRegex(
-            calls,
-            r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build gluetun qbittorrent",
-        )
-        self.assertNotRegex(calls, r"compose -f docker-compose.yml up -d .*--no-deps")
+        self.assertEqual(failures, [])
+        self.assertEqual([update.scope for update in updates], ["service"])
+        self.assertEqual(updates[0].service, "app")
+        self.assertEqual(updates[0].tag, "2.0")
+        runner.log.warning.assert_not_called()
     def test_exclude_tag_line_recreates_only_successful_label_writes(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         app_stack = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
@@ -368,6 +484,47 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(pending[0]["status"], "failed")
         self.assertEqual(pending[0]["status_reason"], "tag-exclusion-label-failed")
+    def test_exclude_tag_line_directory_sync_failure_still_records_rule(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        options = UpdaterOptions(
+            docker_base=self.base,
+            wud_file=self.wud_file,
+            log_dir=self.log_dir,
+            max_wait=0,
+            assume_yes=True,
+            no_color=True,
+            exclude_tag_lines="1",
+            db_path=self.db_path,
+        )
+        runner = UpdateFromWudRunner(
+            options,
+            environ=self.env,
+            command_runner=CommandRunner(env=self.env),
+        )
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+            redirect_stdout(StringIO()),
+        ):
+            result = runner.run()
+
+        self.assertEqual(result, 0)
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        rules = self.db_rows("SELECT * FROM tag_exclusion_rules")
+        self.assertEqual([(rule["image_repo"], rule["tag"]) for rule in rules], [("repo/app", "2.0")])
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(pending[0]["status_reason"], "tag-excluded")
+
     def test_exclude_tag_line_failure_leaves_line_pending(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
@@ -390,6 +547,74 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             pending[0]["status_reason"],
             "tag-exclusion-compose-label-unsupported",
         )
+    def test_exclude_tag_line_refuses_interpolated_exclude_label(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        compose_file = stack_dir / "docker-compose.yml"
+        original = (
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=${APP_TAG_EXCLUDE:-^.*-beta$$}\n"
+        )
+        compose_file.write_text(original, encoding="utf-8")
+
+        status, stdout, stderr = self.run_direct(exclude_tag_lines="1")
+
+        self.assertEqual(status, 1)
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            "repo/app:1.0 tag=2.0\n",
+        )
+        self.assertIn(
+            "Service app wud.tag.exclude label uses a Compose variable",
+            stdout + stderr,
+        )
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(pending[0]["status"], "failed")
+        self.assertEqual(
+            pending[0]["status_reason"],
+            "tag-exclusion-compose-label-unsupported",
+        )
+    def test_exclude_tag_line_warns_when_sibling_label_is_interpolated(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        app_stack = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        worker_stack = self.make_stack(
+            "worker",
+            [("worker", "repo/app:1.1", "cid-worker")],
+        )
+        worker_compose = worker_stack / "docker-compose.yml"
+        worker_original = (
+            "services:\n"
+            "  worker:\n"
+            "    image: repo/app:1.1\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=${WORKER_TAG_EXCLUDE}\n"
+        )
+        worker_compose.write_text(worker_original, encoding="utf-8")
+
+        status, stdout, stderr = self.run_direct(exclude_tag_lines="1")
+
+        self.assertEqual(status, 0, stderr + stdout)
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (app_stack / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(worker_compose.read_text(encoding="utf-8"), worker_original)
+        output = stdout + stderr
+        self.assertIn(
+            "cannot be written to every service using repo/app, so WUDup will "
+            "only try the service(s) on this line",
+            output,
+        )
+        self.assertIn(
+            "Service worker wud.tag.exclude label uses a Compose variable",
+            output,
+        )
+        rules = self.db_rows("SELECT * FROM tag_exclusion_rules")
+        self.assertEqual([rule["scope"] for rule in rules], ["service"])
     def test_exclude_tag_line_materializes_service_merged_labels(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])

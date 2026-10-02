@@ -149,7 +149,8 @@ against the planned digest, then writes the final image as
 an exact regex for the resolved tag. Dry-run remains non-mutating; Compose edits
 and final digest writes happen only during apply. Lines without a safe resolved
 tag, custom compound `wud.tag.include` regexes, YAML anchors/aliases,
-interpolation, and inherited image values fail closed.
+interpolation, inherited image values, and WUD labels listed more than once on
+a service (Compose uses only the last one) fail closed.
 
 ## Locking
 
@@ -202,13 +203,34 @@ in that state. Known limitation: if the updater is killed or the host crashes
 after it stops the services and before they run again, nothing starts them
 again. Check the stack and run the same start command.
 
+The updater runs Compose with the single discovered Compose file for each
+project. If any container in the project was started with other Compose files,
+such as an automatically loaded `docker-compose.override.yml`, extra `-f`
+files, or only a different file (or the same file reached through a different
+path) that uses the same project name, the updater and WebUI retag refuse to
+update or recreate that project instead of dropping those settings. Merge the
+extra settings into the discovered Compose file and recreate the stack from it,
+fix a mismatched `DOCKER_BASE` or `HOST_DOCKER_BASE` path, or update that
+stack manually. Tag exclusions that would need such a recreate are refused
+before the `wud.tag.exclude` label is written. When another discovered stack
+shares the project name while this stack still runs from its own file, the
+update goes ahead without `--remove-orphans`, so the other stack's containers
+are kept; give each stack a unique project name to avoid this. Containers from
+a Compose file that no discovered stack uses, such as leftovers from a file you
+no longer use, are refused like an override file; remove them first.
+
 When you exclude a tag, the updater writes WUD's native
 `wud.tag.exclude` label into the matched Compose service definition. If every
 service using the same image repository can be updated cleanly, the exclusion is
 applied repo-wide; otherwise it falls back to the selected service. Existing
 user-authored exclude regexes are preserved and the updater stores managed exact
-tag exclusions in SQLite. Add `--recreate-excluded-services` to recreate affected
-services immediately so WUD sees the new container labels before its next scan.
+tag exclusions in SQLite. An existing exclude label that uses a Compose variable
+is left unchanged and the line stays pending for a manual edit. Add
+`--recreate-excluded-services` to recreate affected services immediately so WUD
+sees the new container labels before its next scan; stopped services are
+recreated without being started. A running service that uses the network of a
+stopped `network_mode: service:...` provider is not recreated, because it could
+not start again; the line is marked failed so you can recreate it by hand.
 
 Override a WUD-proposed tag directly:
 
