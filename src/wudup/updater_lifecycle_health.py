@@ -22,8 +22,6 @@ class _ContainerImageCheck:
 
     behind: dict[str, tuple[str, str]]
     """Service -> (Compose image, image ID the container still uses)."""
-    failed_start: tuple[str, ...]
-    """Stopped services whose last container start attempt failed."""
     unverified: tuple[str, ...]
     error: CommandError | None = None
 
@@ -277,7 +275,6 @@ class _LifecycleHealthMixin:
         self,
         stack: ComposeStack,
         services: Sequence[str],
-        stopped_services: Sequence[str],
         after: Mapping[str, ImageState],
     ) -> _ContainerImageCheck:
         """Compare each service's containers with the image just pulled.
@@ -292,9 +289,7 @@ class _LifecycleHealthMixin:
             for item in stack.service_images
             if item.image in after and after[item.image].image_id
         }
-        stopped = set(stopped_services)
         behind: dict[str, tuple[str, str]] = {}
-        failed_start: list[str] = []
         unverified: list[str] = []
         error: CommandError | None = None
         for service in services:
@@ -316,18 +311,11 @@ class _LifecycleHealthMixin:
                         break
                     if container_image_id != pulled_id:
                         behind.setdefault(service, (image, container_image_id))
-                    if (
-                        service in stopped
-                        and service not in failed_start
-                        and self.docker.container_state_error(container_id)
-                    ):
-                        failed_start.append(service)
             except CommandError as exc:
                 unverified.append(service)
                 error = error or exc
         return _ContainerImageCheck(
             behind=behind,
-            failed_start=tuple(failed_start),
             unverified=tuple(unverified),
             error=error,
         )

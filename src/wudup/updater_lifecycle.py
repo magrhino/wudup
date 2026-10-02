@@ -177,7 +177,7 @@ class StackLifecycleExecutor(
         runtime_state = self._initial_service_runtime(stack, scope, matches)
         if isinstance(runtime_state, StackStatus):
             return runtime_state
-        running_services, stopped_services = runtime_state
+        running_services, stopped_services, start_failed_services = runtime_state
 
         images = tuple(stack.images)
         before = self._image_state(images)
@@ -244,6 +244,7 @@ class StackLifecycleExecutor(
             tag_stream_updates=tag_stream_updates,
             running_services=running_services,
             stopped_services=stopped_services,
+            start_failed_services=start_failed_services,
         )
 
     def _initial_service_runtime(
@@ -251,7 +252,7 @@ class StackLifecycleExecutor(
         stack: ComposeStack,
         scope: UpdateScope,
         matches: Sequence[Match],
-    ) -> tuple[tuple[str, ...], tuple[str, ...]] | StackStatus:
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | StackStatus:
         services = runtime_services_for_scope(scope)
         if not services:
             self.log.error(
@@ -277,6 +278,8 @@ class StackLifecycleExecutor(
             return StackStatus("failure", "runtime-state-unavailable")
         running: list[str] = []
         stopped: list[str] = []
+        start_failed: list[str] = []
+        targets = _update_services(matches)
         try:
             if not stack.project_name:
                 raise ValueError("Compose project identity is unavailable.")
@@ -324,6 +327,14 @@ class StackLifecycleExecutor(
                         matches=matches,
                     )
                     return StackStatus("failure", "runtime-state-unavailable")
+                if (
+                    state_values == {"created"}
+                    and (targets is None or service in targets)
+                    and self._container_start_failed(stack, service)
+                ):
+                    start_failed.append(service)
+                    running.append(service)
+                    continue
                 (running if state_values == {"running"} else stopped).append(service)
         except (CommandError, ValueError) as exc:
             self.log.error(
@@ -349,7 +360,12 @@ class StackLifecycleExecutor(
             )
             return StackStatus("failure", "runtime-state-unavailable")
 
-        runtime_state = tuple(running), tuple(stopped)
+        # History records services whose start failed as not running before
+        # the update; the update starts them.
+        runtime_state = (
+            tuple(service for service in running if service not in start_failed),
+            (*stopped, *start_failed),
+        )
         self.runner.stack_runtime_states[stack.index] = runtime_state
         self.runner.stack_runtime_states_after[stack.index] = runtime_state
         if stopped:
@@ -357,7 +373,34 @@ class StackLifecycleExecutor(
                 f"[{stack.name}] Selected service(s) already stopped and will remain "
                 f"stopped: {' '.join(stopped)}"
             )
-        return runtime_state
+        if start_failed:
+            self.log.warning(
+                f"[{stack.name}] Service(s) are not running because their container "
+                "was created but could not start, for example after an earlier "
+                "update failed. They will be started with this update: "
+                f"{' '.join(start_failed)}"
+            )
+        return tuple(running), tuple(stopped), tuple(start_failed)
+
+    def _container_start_failed(self, stack: ComposeStack, service: str) -> bool:
+        """Return whether the service's never-started container failed to start.
+
+        Only a created container whose first start failed counts: something
+        asked Docker to run it, such as an earlier update's compose up, so the
+        operator did not stop it on purpose. A container that ran before keeps
+        its stopped state even when a later start attempt failed.
+        """
+        container_ids = self.compose.ps_quiet_checked(
+            stack.directory,
+            stack.file,
+            (service,),
+            project_directory=stack.project_directory,
+            all_containers=True,
+        )
+        return any(
+            self.docker.container_state_error(container_id)
+            for container_id in container_ids
+        )
 
     @staticmethod
     def _compose_service_runtime_states(
@@ -545,8 +588,7 @@ class StackLifecycleExecutor(
 
         A retry of a same-tag update finds the image already pulled, so it must
         check the containers themselves: a container still on the older image
-        is recreated, and a stopped container whose last start failed is
-        started again because it was meant to be running.
+        is recreated.
         """
         stack = state.stack
         targets = _update_services(state.matches)
@@ -560,7 +602,6 @@ class StackLifecycleExecutor(
         check = self._check_container_images(
             state.current_stack,
             services,
-            state.stopped_services,
             state.after,
         )
         if check.unverified:
@@ -591,17 +632,6 @@ class StackLifecycleExecutor(
             )
             return StackStatus("failure", "runtime-image-unverified")
 
-        if check.failed_start:
-            self.log.info(
-                f"[{stack.name}] Service(s) failed to start during an earlier "
-                f"update attempt and will be started: {' '.join(check.failed_start)}"
-            )
-            state.running_services = (*state.running_services, *check.failed_start)
-            state.stopped_services = tuple(
-                service
-                for service in state.stopped_services
-                if service not in check.failed_start
-            )
         if check.behind:
             self.log.info(
                 f"[{stack.name}] Image is already pulled, but service(s) still "
@@ -617,7 +647,7 @@ class StackLifecycleExecutor(
                 dict(state.before),
                 dict(state.after),
             )
-        return bool(check.failed_start or check.behind)
+        return bool(check.behind)
 
     def _try_image_digest(self, image: str) -> str:
         try:
@@ -646,6 +676,7 @@ class StackLifecycleExecutor(
             or state.applied_digest_pins
             or state.applied_digest_unpins
             or changes
+            or state.start_failed_services
         )
         for image, image_state in changes:
             target = image_state.digest if image_state.digest else image_state.image_id

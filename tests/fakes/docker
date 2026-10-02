@@ -344,6 +344,29 @@ run_post_up_hook(){
   fi
 }
 
+# Mimic Docker after `compose up` created a service's new container but could
+# not start it (for example a port conflict): the container is left created on
+# the current image with its start error recorded.
+leave_created_containers(){
+  local id="$1" file="$2"
+  shift 2 || true
+  local arg cid image runtime="$ROOT/compose-runtime.tsv"
+  for arg in "$@"; do
+    [[ "$arg" == -* || ! -f "$ROOT/stacks/$id/cids-$arg.txt" ]] && continue
+    cid="$(head -n 1 "$ROOT/stacks/$id/cids-$arg.txt")"
+    image="$(service_images "$id" "$arg" "$file" | head -n 1)"
+    image_id "$image" > "$ROOT/containers/$cid.image-id"
+    printf 'driver failed programming external connectivity: port is already allocated\n' \
+      > "$ROOT/containers/$cid.state-error"
+    if [[ -f "$runtime" ]]; then
+      awk -v project="$id" -v service="$arg" 'BEGIN {FS=OFS="\t"}
+        $3 == project && $4 == service {print $1, $2, $3, $4, $5, "created"; next}
+        {print}' "$runtime" > "$runtime.tmp"
+      mv "$runtime.tmp" "$runtime"
+    fi
+  done
+}
+
 emit_failure_output(){
   local id="$1" phase="$2"
   local stdout_file="$ROOT/stacks/$id/${phase}_stdout"
@@ -451,7 +474,7 @@ compose_cmd(){
       return 0
       ;;
     start)
-      if [[ -f "$ROOT/stacks/$id/start_fail" ]]; then
+      if [[ -f "$ROOT/stacks/$id/start_fail" || -f "$ROOT/stacks/$id/up_start_fail" ]]; then
         emit_failure_output "$id" start
         return 25
       fi
@@ -479,6 +502,11 @@ compose_cmd(){
           no_start=1
         fi
       done
+      if [[ "$no_start" -eq 0 && -f "$ROOT/stacks/$id/up_start_fail" ]]; then
+        leave_created_containers "$id" "$file" "$@"
+        emit_failure_output "$id" up
+        return 19
+      fi
       if [[ -f "$ROOT/stacks/$id/up_fail" ||
             "$no_start" -eq 1 && -f "$ROOT/stacks/$id/up_no_start_fail" ]]; then
         emit_failure_output "$id" up

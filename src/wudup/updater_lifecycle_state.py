@@ -42,6 +42,8 @@ class _StackUpdateState:
     compose_written_hashes: list[str] = field(default_factory=list)
     running_services: tuple[str, ...] = ()
     stopped_services: tuple[str, ...] = ()
+    start_failed_services: tuple[str, ...] = ()
+    """Running services whose created container failed to start before."""
 
     @property
     def services(self) -> tuple[str, ...] | None:

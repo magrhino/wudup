@@ -345,6 +345,12 @@ class _LifecycleRecreateMixin:
                 )
                 return StackStatus("failure", "down-failed")
 
+            # Record the verified state so history shows services whose
+            # earlier start failed as running after this update.
+            self.runner.stack_runtime_states_after[stack.index] = (
+                state.running_services,
+                state.stopped_services,
+            )
             self._remember_applied_digest_changes(state)
             return StackStatus("success", "updated")
 

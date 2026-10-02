@@ -351,12 +351,11 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
 
     def test_retry_starts_container_whose_start_failed_in_stop_mode(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
-        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
         self.set_image_state("repo/app:latest", "old", "sha256:old")
         self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
-        stack_state = self.fake_root / "stacks" / "app"
-        (stack_state / "up_fail").write_text("", encoding="utf-8")
-        (stack_state / "start_fail").write_text("", encoding="utf-8")
+        start_fail = self.fake_root / "stacks" / "app" / "up_start_fail"
+        start_fail.write_text("", encoding="utf-8")
 
         first = self.run_python("--yes")
 
@@ -369,33 +368,15 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
             first_output,
         )
 
-        # What Docker leaves behind when the recreated container cannot start
-        # (for example a port conflict): a created, never-started container on
-        # the new image whose last start error is recorded.
-        (stack_state / "up_fail").unlink()
-        (stack_state / "start_fail").unlink()
-        (self.fake_root / "compose-runtime.tsv").write_text(
-            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\tcreated\n",
-            encoding="utf-8",
-        )
-        (self.fake_root / "containers" / "cid-app.image-id").write_text(
-            "new\n", encoding="utf-8"
-        )
-        (self.fake_root / "containers" / "cid-app.state-error").write_text(
-            "Bind for 0.0.0.0:8080 failed: port is already allocated\n",
-            encoding="utf-8",
-        )
+        start_fail.unlink()
         (self.fake_root / "calls.log").write_text("", encoding="utf-8")
-
         second = self.run_python("--yes")
 
         output = second.stderr + second.stdout
         self.assertEqual(second.returncode, 0, output)
         self.assertNotIn("All images up to date", output)
-        self.assertIn(
-            "failed to start during an earlier update attempt and will be started: app",
-            output,
-        )
+        self.assertNotIn("will remain stopped", output)
+        self.assertIn("They will be started with this update: app", output)
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
         calls = self.calls()
         self.assertIn(
@@ -403,6 +384,74 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
             calls,
         )
         self.assertNotIn("--no-start", calls)
+        event = self.db_rows(
+            "SELECT metadata_json FROM update_events ORDER BY id DESC LIMIT 1"
+        )[0]
+        metadata = json.loads(str(event["metadata_json"]))
+        self.assertEqual(metadata["runtime_state_before"], "not-running")
+        self.assertEqual(metadata["runtime_state_after"], "running")
+        self.assertEqual(metadata["stopped_services_after"], [])
+
+    def test_retry_with_newer_image_starts_container_whose_start_failed(self) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
+        start_fail = self.fake_root / "stacks" / "app" / "up_start_fail"
+        start_fail.write_text("", encoding="utf-8")
+
+        first = self.run_python("--yes", "--mode", "live")
+
+        self.assertEqual(first.returncode, 1, first.stderr + first.stdout)
+        self.assertNotIn("compose -f docker-compose.yml start app", self.calls())
+
+        # WUD published again before the retry, so the image changes too.
+        start_fail.unlink()
+        self.set_image_after_pull("repo/app:latest", "newer", "sha256:newer")
+        (self.fake_root / "calls.log").write_text("", encoding="utf-8")
+        second = self.run_python("--yes", "--mode", "live")
+
+        output = second.stderr + second.stdout
+        self.assertEqual(second.returncode, 0, output)
+        self.assertIn("Image updated: repo/app:latest", output)
+        self.assertIn("They will be started with this update: app", output)
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
+        calls = self.calls()
+        self.assertIn(
+            "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
+            calls,
+        )
+        self.assertNotIn("--no-start", calls)
+
+    def test_stopped_container_with_old_start_error_stays_stopped(self) -> None:
+        # A container that ran before and whose later start failed (for
+        # example at boot) may have been left stopped on purpose.
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", None)])
+        (self.fake_root / "stacks" / "app" / "cids-all-app.txt").write_text(
+            "cid-app\n", encoding="utf-8"
+        )
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\texited\n",
+            encoding="utf-8",
+        )
+        (self.fake_root / "containers" / "cid-app.state-error").write_text(
+            "error while creating mount source path: no such file or directory\n",
+            encoding="utf-8",
+        )
+        (self.fake_root / "containers" / "cid-app.image-id").write_text(
+            "new\n", encoding="utf-8"
+        )
+        self.set_image_state("repo/app:latest", "new", "sha256:new")
+
+        result = self.run_python("--yes")
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("already stopped and will remain stopped: app", output)
+        self.assertIn("All images up to date, skipping restart", output)
+        self.assertNotIn("will be started", output)
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
 
     def test_retry_keeps_wud_line_when_container_image_cannot_be_read(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
