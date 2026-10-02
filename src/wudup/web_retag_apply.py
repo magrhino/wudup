@@ -312,7 +312,14 @@ def _apply_retag_stack(
         )
         backup = _backup_compose(compose_path)
         backup_hash = _compose_source_hash(backup)
-        if not approved_source_hash or backup_hash != approved_source_hash:
+        if not approved_source_hash:
+            raise RuntimeError(
+                f"retag plan is stale: WUDup could not read the Compose file for "
+                f"{stack.name} when the plan was made, so it was not rewritten. "
+                "Check that the file is readable, preview the retag again and "
+                "apply the new plan"
+            )
+        if backup_hash != approved_source_hash:
             raise RuntimeError(
                 f"retag plan is stale: the Compose file for {stack.name} changed "
                 "after the plan was approved, so it was not rewritten. Preview "
@@ -852,16 +859,24 @@ def _recreate_retag_services_stopped(
     services: Sequence[str],
 ) -> None:
     """Recreate services from the restored Compose file and confirm they stay stopped."""
-    compose.up(
-        stack.directory,
-        stack.file,
-        services,
-        force_recreate=True,
-        no_deps=True,
-        no_start=True,
-        project_directory=stack.project_directory,
-    )
     names = ", ".join(services)
+    try:
+        compose.up(
+            stack.directory,
+            stack.file,
+            services,
+            force_recreate=True,
+            no_deps=True,
+            no_start=True,
+            project_directory=stack.project_directory,
+        )
+    except CommandError as exc:
+        # The apply may already have started it on the new image.
+        raise RuntimeError(
+            f"WUDup could not recreate {names} on the previous image without "
+            f"starting it, so {_stop_retag_services_after_rollback(compose, stack, services)}; "
+            f"check that it is stopped ({exc})"
+        ) from exc
     try:
         running = compose.ps_quiet_checked(
             stack.directory,

@@ -173,9 +173,18 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
     assert str(tmp_path) not in job["error"]
 
 
+@pytest.mark.parametrize(
+    ("unreadable_at_plan", "stale_error"),
+    [
+        (False, "Compose file for bravo changed after the plan was approved"),
+        (True, "could not read the Compose file for bravo when the plan was made"),
+    ],
+)
 def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    unreadable_at_plan: bool,
+    stale_error: str,
 ) -> None:
     fake_env, fake_root = _fake_docker_env(tmp_path)
     client = _client(
@@ -207,9 +216,21 @@ def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
         )
     _set_retag_digest_pins(tmp_path)
     bravo_file = dirs["bravo"] / "docker-compose.yml"
-    edited = bravo_file.read_bytes().replace(
-        b"    labels:\n", b"    labels:\n      - operator.edit=true\n"
-    )
+    if unreadable_at_plan:
+        # Planning stores an empty hash when it cannot read a Compose file.
+        original_hashes = web_retags._compose_hashes
+
+        def blank_bravo_hash(selected: Any) -> dict[str, str]:
+            hashes = original_hashes(selected)
+            hashes[str(bravo_file)] = ""
+            return hashes
+
+        monkeypatch.setattr(web_retags, "_compose_hashes", blank_bravo_hash)
+        edited = bravo_file.read_bytes()
+    else:
+        edited = bravo_file.read_bytes().replace(
+            b"    labels:\n", b"    labels:\n      - operator.edit=true\n"
+        )
     original_pull = ComposeCli.pull
 
     def edit_bravo_while_alpha_pulls(
@@ -230,7 +251,7 @@ def test_retag_apply_rejects_later_stack_changed_after_plan_approval(
     job = _wait_apply_job(client, response.json()["job_id"])
     assert job["status"] == "failure"
     assert "retag plan is stale" in job["error"]
-    assert "Compose file for bravo changed after the plan was approved" in job["error"]
+    assert stale_error in job["error"]
     assert bravo_file.read_bytes() == edited
     assert "wud.tag.include=^2\\.0$$" in (
         dirs["alpha"] / "docker-compose.yml"
@@ -408,7 +429,11 @@ def test_retag_rollback_restores_mixed_stopped_and_running_services(
 @pytest.mark.parametrize(
     ("compose_kwargs", "stopped_error", "stopped_again"),
     [
-        ({"stopped_up_fails": True}, "Command failed with exit code 1", False),
+        (
+            {"stopped_up_fails": True},
+            "WUDup could not recreate db on the previous image without starting",
+            True,
+        ),
         ({"ps_result": "cid-db"}, "db started during rollback", True),
         ({"ps_result": None}, "WUDup could not check that db stayed stopped", True),
     ],
