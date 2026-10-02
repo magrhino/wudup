@@ -366,7 +366,11 @@ class _LifecycleRecreateMixin:
             self._remember_applied_digest_changes(state)
             return StackStatus("success", "updated")
 
-        health_details = self._capture_health_details(stack, state.running_services)
+        health_details = self._capture_health_details(
+            stack,
+            state.running_services,
+            report_missing_services=True,
+        )
         if state.compose_rewrite_applied and state.compose_backup is not None:
             return self._handle_compose_rewrite_failure(
                 state,
