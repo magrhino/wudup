@@ -171,6 +171,11 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
             ),
             "exited or never started",
         ),
+        (
+            "all_exited",
+            "no running container for service(s): app, worker",
+            "returned no containers",
+        ),
     ],
 )
 def test_retag_health_wait_fails_when_selected_service_has_no_container(
@@ -179,7 +184,17 @@ def test_retag_health_wait_fails_when_selected_service_has_no_container(
     expected: str,
     unexpected: str,
 ) -> None:
+    # `compose ps -q` lists only running containers; worker exited.
+    running = {
+        "app": [] if worker_lookup == "all_exited" else ["cid-app"],
+        "worker": [],
+    }
+
     class FakeCompose:
+        def ps_quiet(self, directory, file, services=None, *, project_directory=None):
+            # A combined lookup hides the exited worker behind the running app.
+            return [cid for service in services or running for cid in running[service]]
+
         def ps_quiet_checked(
             self, directory, file, services=None, *, project_directory=None
         ):
@@ -187,9 +202,7 @@ def test_retag_health_wait_fails_when_selected_service_has_no_container(
                 raise CommandError(
                     CommandResult(("docker", "compose", "ps"), None, 1)
                 )
-            # `compose ps -q` lists only running containers; worker exited.
-            running = {"app": ["cid-app"], "worker": []}
-            return [cid for service in services or running for cid in running[service]]
+            return self.ps_quiet(directory, file, services)
 
     class FakeDocker:
         def try_inspect(self, cid: str, fmt: str) -> list[str]:

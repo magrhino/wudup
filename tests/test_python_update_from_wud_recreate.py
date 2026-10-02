@@ -869,6 +869,8 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(result.returncode, 1, output)
         self.assertIn("no running container for service(s): worker", output)
         self.assertNotIn("Healthy", output)
+        run_log = self.latest_run_log().read_text(encoding="utf-8")
+        self.assertIn("health: service=worker has no running container", run_log)
         report = self.latest_error_report().read_text(encoding="utf-8")
         self.assertIn("reason=health-failed", report)
         self.assertIn("health: service=worker has no running container", report)
@@ -876,6 +878,72 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
             self.wud_file.read_text(encoding="utf-8"),
             "repo/app:latest\nrepo/worker:latest\n",
         )
+
+    def test_health_wait_names_service_when_no_selected_container_runs(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
+        hook = self.fake_root / "post-up-hook"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            ': > "$FAKE_DOCKER_ROOT/stacks/app/cids-app.txt"\n',
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+
+        result = self.run_python("--yes")
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("no running container for service(s): app", output)
+        run_log = self.latest_run_log().read_text(encoding="utf-8")
+        self.assertIn("health: service=app has no running container", run_log)
+        self.assertNotIn("returned no containers", run_log)
+
+    def test_tag_rollback_health_fails_when_selected_service_has_no_container(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        self.make_stack(
+            "app",
+            [
+                ("app", "repo/app:1.0", "cid-app"),
+                ("worker", "repo/app:1.0", "cid-worker"),
+            ],
+        )
+        self.set_image_state("repo/app:1.0", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:2.0", "new", "sha256:new")
+        # The new tag is unhealthy; after rollback the app is healthy again but
+        # the worker exits at once, so the rollback health gate must fail.
+        hook = self.fake_root / "post-up-hook"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            'count="$FAKE_DOCKER_ROOT/up-count"\n'
+            'n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))\n'
+            'echo "$n" > "$count"\n'
+            'summary="$FAKE_DOCKER_ROOT/containers/cid-app.summary"\n'
+            'if [[ "$n" -eq 1 ]]; then\n'
+            '  echo "/cid-app|running|unhealthy|0|0" > "$summary"\n'
+            "else\n"
+            '  echo "/cid-app|running|healthy|0|0" > "$summary"\n'
+            '  : > "$FAKE_DOCKER_ROOT/stacks/app/cids-worker.txt"\n'
+            "fi\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+
+        result = self.run_python("--yes", "--allow-tag-updates")
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("no running container for service(s): worker", output)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("tag rollback=rollback-failed-manual-review-required", report)
+        self.assertNotIn("restored-and-healthy", report)
+
     def test_recreate_stop_failure_and_up_failure_without_rewrite(self) -> None:
         self.env["FAKE_COMPOSE_UP_WAIT"] = "1"
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")

@@ -179,7 +179,7 @@ class _LifecycleHealthMixin:
                 return True
             if elapsed >= self.options.max_wait:
                 self.log.error(f"[{stack.name}] Failed health gate after {elapsed}s")
-                if not cids and not failed:
+                if not cids and not failed and not missing:
                     self.log.plain(
                         "ERROR",
                         f"[{stack.name}] Health blocker: docker compose ps -q returned no containers",
@@ -197,7 +197,13 @@ class _LifecycleHealthMixin:
                         f"service(s): {', '.join(missing)}. The container exited or "
                         "never started; check `docker compose logs` for that service.",
                     )
-                self._log_health_details(stack, services)
+                self._log_health_details(
+                    stack,
+                    services,
+                    self._capture_health_details(
+                        stack, services, report_missing_services=True
+                    ),
+                )
                 self._progress(
                     "health",
                     "failure",

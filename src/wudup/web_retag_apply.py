@@ -802,7 +802,7 @@ def _retag_health_details(
 ) -> str:
     cids, missing, failed = running_service_containers(compose, stack, services)
     details: list[str] = []
-    if not cids and not failed:
+    if not cids and not failed and not missing:
         details.append("docker compose ps -q returned no containers")
     if failed:
         details.append(

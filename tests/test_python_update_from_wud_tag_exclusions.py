@@ -84,6 +84,37 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             self.calls(),
             r"compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app",
         )
+    def test_exclude_tag_line_recreate_fails_when_service_has_no_container(
+        self,
+    ) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        self.make_stack(
+            "app",
+            [
+                ("app", "repo/app:1.0", "cid-app"),
+                ("worker", "repo/app:1.0", "cid-worker"),
+            ],
+        )
+        # The recreated worker exits at once, so `compose ps -q` no longer lists it.
+        hook = self.fake_root / "post-up-hook"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            ': > "$FAKE_DOCKER_ROOT/stacks/app/cids-worker.txt"\n',
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+
+        result = self.run_python(
+            "--yes",
+            "--exclude-tag-lines",
+            "1",
+            "--recreate-excluded-services",
+        )
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("no running container for service(s): worker", output)
+
     def _run_stale_exclusion(self) -> CompletedProcess[str]:
         self.wud_file.write_text(
             "repo/excluded:1.0 tag=2.0\n"
