@@ -275,9 +275,12 @@ service_images(){
 }
 
 service_cids(){
-  local id="$1" service="${2:-}" file
+  local id="$1" service="${2:-}" include_all="${3:-0}" file
   if [[ -n "$service" ]]; then
     file="$ROOT/stacks/$id/cids-$service.txt"
+    if [[ "$include_all" -eq 1 && -f "$ROOT/stacks/$id/cids-all-$service.txt" ]]; then
+      file="$ROOT/stacks/$id/cids-all-$service.txt"
+    fi
     [[ -f "$file" ]] && cat "$file"
   else
     file="$ROOT/stacks/$id/cids.txt"
@@ -499,12 +502,17 @@ compose_cmd(){
         emit_failure_output "$id" ps
         return 22
       fi
+      local ps_all=0
+      if [[ "${1:-}" == "-a" ]]; then
+        ps_all=1
+        shift
+      fi
       if [[ "${1:-}" == "-q" ]]; then
         shift
         if (($#)); then
           local service
           for service in "$@"; do
-            service_cids "$id" "$service"
+            service_cids "$id" "$service" "$ps_all"
           done
         else
           service_cids "$id"

@@ -566,12 +566,14 @@ class ComposeCli:
         services: Sequence[str] | None = None,
         *,
         project_directory: str | Path | None = None,
+        all_containers: bool = False,
     ) -> list[str]:
         return _nonblank_lines(
             self.runner.capture_lines(
                 self._compose_args(
                     file,
                     "ps",
+                    *(("-a",) if all_containers else ()),
                     "-q",
                     *_service_args(services),
                     project_directory=project_directory,

@@ -260,6 +260,50 @@ class _LifecycleHealthMixin:
             if image
         }
 
+    def _services_behind_pulled_images(
+        self,
+        stack: ComposeStack,
+        services: Sequence[str],
+        after: Mapping[str, ImageState],
+    ) -> tuple[str, ...]:
+        """Return services whose containers do not use the pulled image.
+
+        An earlier run can pull a same-tag image and then fail to recreate the
+        container, so the local tag alone cannot show that the update applied.
+        """
+        pulled_ids = {
+            item.service: after[item.image].image_id
+            for item in stack.service_images
+            if item.image in after and after[item.image].image_id
+        }
+        behind: list[str] = []
+        for service in services:
+            pulled_id = pulled_ids.get(service)
+            if not pulled_id:
+                continue
+            try:
+                container_ids = self.compose.ps_quiet_checked(
+                    stack.directory,
+                    stack.file,
+                    (service,),
+                    project_directory=stack.project_directory,
+                    all_containers=True,
+                )
+            except CommandError as exc:
+                self.log.warning(
+                    f"[{stack.name}] Could not check which image service {service} "
+                    f"is using, so it was treated as current ({exc})"
+                )
+                continue
+            if any(
+                running_id and running_id != pulled_id
+                for running_id in (
+                    self.docker.try_container_image_id(cid) for cid in container_ids
+                )
+            ):
+                behind.append(service)
+        return tuple(behind)
+
 
 def _updated_images(
     before: Mapping[str, ImageState],

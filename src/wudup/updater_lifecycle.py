@@ -566,6 +566,19 @@ class StackLifecycleExecutor(
             self.log.info(f"[{stack.name}] Image updated: {image} -> {target}")
 
         if not update_needed:
+            behind = self._services_behind_pulled_images(
+                state.current_stack,
+                (*state.running_services, *state.stopped_services),
+                state.after,
+            )
+            if behind:
+                self.log.info(
+                    f"[{stack.name}] Image is already pulled, but service(s) still "
+                    f"use an older image and will be recreated: {' '.join(behind)}"
+                )
+                update_needed = True
+
+        if not update_needed:
             self.log.info(f"[{stack.name}] All images up to date, skipping restart")
             self._progress(
                 "recreate",
