@@ -712,7 +712,12 @@ def test_retag_apply_restores_compose_when_pull_fails(tmp_path: Path) -> None:
     assert (compose_dir / "docker-compose.yml").read_text(encoding="utf-8") == before
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
-    assert "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate --no-deps app" in calls
+    # The pull failed before any service was recreated, so rollback leaves services alone.
+    assert "compose -f docker-compose.yml up" not in calls
+    assert job["error"].endswith(
+        "rollback restored the Compose file for stack; "
+        "no services were recreated or started"
+    )
     run = _wait_run_status(
         tmp_path / "state" / "wud.sqlite",
         job["run_id"],
