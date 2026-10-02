@@ -620,8 +620,20 @@ def test_partial_x_forwarded_headers_disable_client_forwarded_fallback(
         headers={"forwarded": client_forwarded, "x-forwarded-host": "wud.test"},
     )
 
+    forwarded_for_only = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={
+            "forwarded": client_forwarded,
+            "x-forwarded-for": _DOC_FORWARDED_CLIENT_V4,
+        },
+    )
+
     assert web_auth_module._trusted_forwarded_origin(proto_only, settings) == ""
     assert web_auth_module._trusted_forwarded_origin(host_only, settings) == ""
+    assert web_auth_module._trusted_forwarded_origin(forwarded_for_only, settings) == ""
+    assert web_auth_module._request_client_address(proto_only, settings) == (
+        _DOC_PROXY_V4
+    )
     for value in ("unknown", "evil", f"{_DOC_FORWARDED_CLIENT_V4}, evil"):
         unusable_forwarded_for = SimpleNamespace(
             client=SimpleNamespace(host=_DOC_PROXY_V4),

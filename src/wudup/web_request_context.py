@@ -30,8 +30,8 @@ def effective_origin(request: Request, settings: WebSettings) -> str:
 def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     if not client_is_trusted_proxy(request, settings):
         return ""
-    # Proxies that only set X-Forwarded-* pass a client's own Forwarded header
-    # through unchanged, so Forwarded is used only without X-Forwarded-*.
+    if not has_x_forwarded_headers(request):
+        return origin_from_forwarded_header(request.headers.get("forwarded", ""))
     proto = last_forwarded_header_value(
         request.headers.get("x-forwarded-proto", "")
     )
@@ -40,9 +40,7 @@ def trusted_forwarded_origin(request: Request, settings: WebSettings) -> str:
     )
     if proto and host:
         return normalize_origin(f"{proto}://{host}")
-    if proto or host:
-        return ""
-    return origin_from_forwarded_header(request.headers.get("forwarded", ""))
+    return ""
 
 
 def request_client_address(request: Request, settings: WebSettings) -> str:
@@ -60,14 +58,25 @@ def trusted_forwarded_client_address(
 ) -> str:
     if not client_is_trusted_proxy(request, settings):
         return ""
-    # See trusted_forwarded_origin: X-Forwarded-For wins over Forwarded.
+    if not has_x_forwarded_headers(request):
+        return client_address_from_forwarded_header(
+            request.headers.get("forwarded", "")
+        )
     forwarded_for = last_forwarded_header_value(
         request.headers.get("x-forwarded-for", "")
     )
-    if forwarded_for:
-        return ip_address_or_empty(normalize_forwarded_client_address(forwarded_for))
-    return client_address_from_forwarded_header(
-        request.headers.get("forwarded", "")
+    return ip_address_or_empty(normalize_forwarded_client_address(forwarded_for))
+
+
+def has_x_forwarded_headers(request: Request) -> bool:
+    """Whether a trusted proxy uses the X-Forwarded-* convention.
+
+    Proxies that only set X-Forwarded-* pass a client's own Forwarded header
+    through unchanged, so Forwarded is used only without any X-Forwarded-*.
+    """
+    return any(
+        last_forwarded_header_value(request.headers.get(name, ""))
+        for name in ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host")
     )
 
 
