@@ -1,6 +1,7 @@
 """Characterization of Discord payload rendering and bounded HTTP delivery."""
 from __future__ import annotations
 
+import http.client
 import urllib.error
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -96,3 +97,30 @@ def test_digest_payload_preserves_exact_copy_escaping_and_suppression():
             ),
         },
     }]
+
+
+@pytest.mark.parametrize(
+    "webhook",
+    [
+        "discord.test/api/webhooks/123/webhook-secret",
+        "https://discord.test/api/webhooks/123/webhook secret",
+    ],
+)
+def test_delivery_hides_malformed_webhook_url_errors(webhook):
+    with pytest.raises(OSError) as caught:
+        discord._post_discord_payload(webhook, {})
+
+    assert "secret" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+
+
+def test_delivery_reports_malformed_responses_as_os_errors(monkeypatch):
+    failure = http.client.IncompleteRead(b"partial webhook-secret")
+    monkeypatch.setattr(discord.urllib.request, "urlopen", MagicMock(side_effect=failure))
+
+    with pytest.raises(OSError) as caught:
+        discord._post_discord_payload("https://discord.test/webhook-secret", {})
+
+    assert "IncompleteRead" in str(caught.value)
+    assert "webhook-secret" not in str(caught.value)

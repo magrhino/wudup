@@ -5,6 +5,7 @@ reservation, delivery history and audit state remain in web_release_notification
 """
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -678,28 +679,36 @@ def _discord_webhook(settings: WebSettings) -> _WebhookConfig:
 
 def _post_discord_payload(webhook_url: str, payload: Mapping[str, object]) -> None:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    request = urllib.request.Request(
-        webhook_url,
-        method="POST",
-        data=body,
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": DISCORD_WEBHOOK_USER_AGENT,
-        },
-    )
-    with urllib.request.urlopen(
-        request,
-        timeout=DISCORD_WEBHOOK_TIMEOUT_SECONDS,
-    ) as response:
-        if response.status < 200 or response.status >= 300:
-            raise urllib.error.HTTPError(
-                webhook_url,
-                response.status,
-                "Discord webhook request failed",
-                response.headers,
-                None,
-            )
+    try:
+        request = urllib.request.Request(
+            webhook_url,
+            method="POST",
+            data=body,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": DISCORD_WEBHOOK_USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(
+            request,
+            timeout=DISCORD_WEBHOOK_TIMEOUT_SECONDS,
+        ) as response:
+            if response.status < 200 or response.status >= 300:
+                raise urllib.error.HTTPError(
+                    webhook_url,
+                    response.status,
+                    "Discord webhook request failed",
+                    response.headers,
+                    None,
+                )
+    except (ValueError, http.client.HTTPException) as exc:
+        # These messages can contain the webhook URL and token. Report an
+        # OSError so callers redact, record history and finish the audit run.
+        raise OSError(
+            f"the Discord webhook request failed ({type(exc).__name__}). "
+            "Check that the webhook is a complete https:// URL without spaces"
+        ) from None
 
 
 def _test_discord_payload() -> dict[str, object]:

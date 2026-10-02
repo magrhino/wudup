@@ -11,6 +11,7 @@ import json
 import math
 import re
 import secrets
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -256,13 +257,37 @@ def _request_json_with_method(
     request = urllib.request.Request(
         url,
         method=method,
-        headers=_request_headers(client_config),
+        headers=_request_headers(),
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read()
+    credential_headers = () if client_config is None else client_config.header_items
+    # urllib copies only ordinary headers to a redirected request, so WUD API
+    # credentials and static secret headers never leave the configured URL.
+    for name, value in credential_headers:
+        request.add_unredirected_header(name, value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response_url = getattr(response, "url", None) or url
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        if credential_headers and exc.url not in {None, url}:
+            raise WudApiRedirectError() from None
+        raise
+    if credential_headers and response_url != url:
+        raise WudApiRedirectError()
     if not body:
         return {}
     return json.loads(body.decode("utf-8"))
+
+
+class WudApiRedirectError(OSError):
+    """The WUD API redirected a request that carries configured credentials."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the configured WUD API address answered with a redirect, and WUDup "
+            "does not send WUD API credentials to a redirected address. Set "
+            f"{WUD_API_BASE_URL_ENV} to the address that serves the WUD API directly"
+        )
 
 
 def _request_headers(

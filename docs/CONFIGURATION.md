@@ -56,7 +56,7 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WUD_API_BASE_URL` | `http://wud:3000` | Internal WUD API base URL the WebUI reads pending updates and container metadata from. |
+| `WUD_API_BASE_URL` | `http://wud:3000` | Internal WUD API base URL the WebUI reads pending updates and container metadata from. When WUD API auth or static headers are configured, they are never sent to a redirected address; a redirect is reported as a configuration error, so point this at the address that serves the WUD API directly. |
 | `WUD_API_STARTUP_WAIT_SECONDS` | `0`, `5` in Compose examples | Seconds to retry the initial WUD API health probe during WebUI startup before reporting degraded WUD API discovery. |
 | `WUD_API_AUTH_BEARER_TOKEN_FILE` / `WUD_API_AUTH_BEARER_TOKEN` | unset | Optional bearer token for WUDup's outbound WUD API calls. Prefer the `_FILE` form in containers; direct values are intended for local development. Do not combine bearer and basic auth. |
 | `WUD_API_AUTH_BASIC_USER` + `WUD_API_AUTH_BASIC_PASSWORD_FILE` / `WUD_API_AUTH_BASIC_PASSWORD` | unset | Optional basic auth credentials for WUDup's outbound WUD API calls. The user and one password source must be set together. Prefer the `_FILE` password form in containers. |
