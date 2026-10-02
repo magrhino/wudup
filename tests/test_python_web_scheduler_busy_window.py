@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from wudup import web_job_registry, web_jobs, web_pending_sources, web_scheduler
 from wudup.db import open_db
 
 SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+MAX_LATE_MINUTES = web_scheduler.AUTO_UPDATE_MAX_LATE_SECONDS // 60
+LATE_LOG = "Started scheduled auto-update"
 
 
 class _SchedulerHarness:
@@ -58,8 +61,13 @@ class _SchedulerHarness:
             )
             assert response.status_code == 200
         # Stop the app's real-clock scheduler thread so only this test's ticks
-        # record when the scheduler last checked every due slot.
+        # record when the scheduler last checked every due slot. Wait for its
+        # first tick to finish so it cannot overwrite that record later.
         web_scheduler.shutdown_auto_update_scheduler_state(self.client.app.state)
+        thread = self.client.app.state.web_auto_update_thread
+        if thread is not None:
+            thread.join(timeout=30)
+            assert not thread.is_alive()
         self.client.app.state.web_auto_update_evaluated_at = None
         self.client.app.state.web_auto_update_started_at = SCHEDULED - timedelta(
             minutes=30
@@ -239,10 +247,93 @@ def test_auto_update_scheduler_keeps_late_slot_after_submit_conflict(
     ]
 
 
+def _late_logs(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(LATE_LOG)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("late_minutes", "runs"),
+    [(MAX_LATE_MINUTES - 1, True), (MAX_LATE_MINUTES, False)],
+)
+def test_auto_update_scheduler_limits_how_late_unchecked_slot_runs(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+    late_minutes: int,
+    runs: bool,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "stop"})
+    harness.pending("app")
+
+    blocked = [harness.tick(minute, busy=True) for minute in range(-1, late_minutes)]
+    with caplog.at_level(logging.INFO, logger=web_scheduler.__name__):
+        late = harness.tick(late_minutes)
+        after = harness.tick(late_minutes + 1)
+        next_day = harness.tick(24 * 60 + 1)
+
+    assert blocked == [None] * (late_minutes + 1)
+    assert (late is not None) is runs
+    assert after is None
+    assert next_day is None
+    if runs:
+        assert harness.submitted == [("stop", ["stack/app"])]
+        assert harness.schedule_keys() == [
+            "stack/app|2026-05-30|09:30|America/Chicago",
+        ]
+        assert _late_logs(caplog) == [
+            (
+                f"{LATE_LOG} for stack/app {late_minutes} minutes after its "
+                "scheduled time (2026-05-30T09:30:00-05:00) because WUDup could "
+                "not check it during its 5-minute window: another job was "
+                "running or the check failed."
+            )
+        ]
+    else:
+        assert harness.submitted == []
+        assert harness.schedule_keys() == []
+        assert _late_logs(caplog) == []
+
+
+def test_auto_update_scheduler_drops_slot_when_checks_fail_past_late_limit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "stop"})
+    harness.pending("app")
+
+    resolve_pending_source = web_pending_sources.resolve_pending_source
+    wud_down = True
+
+    def flaky_resolve_pending_source(*args, **kwargs):
+        if wud_down:
+            raise RuntimeError("WUD API unreachable")
+        return resolve_pending_source(*args, **kwargs)
+
+    monkeypatch.setattr(
+        web_pending_sources,
+        "resolve_pending_source",
+        flaky_resolve_pending_source,
+    )
+    for minute in range(MAX_LATE_MINUTES):
+        with pytest.raises(RuntimeError, match="WUD API unreachable"):
+            harness.tick(minute)
+    wud_down = False
+    late = harness.tick(MAX_LATE_MINUTES)
+
+    assert late is None
+    assert harness.submitted == []
+    assert harness.schedule_keys() == []
+
+
 def test_auto_update_scheduler_keeps_late_slot_after_failed_check(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+
     harness = _SchedulerHarness(tmp_path, monkeypatch, {"app": "live"})
     harness.pending("app")
     resolve_pending_source = web_pending_sources.resolve_pending_source

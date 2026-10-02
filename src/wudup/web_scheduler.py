@@ -44,6 +44,10 @@ from .web_models import (
 
 AUTO_UPDATE_POLL_SECONDS = 60.0
 AUTO_UPDATE_GRACE_SECONDS = 300
+# A slot that no tick could check during its grace window, because a job was
+# running or the check failed, may still run late, but never more than this
+# long after its scheduled time.
+AUTO_UPDATE_MAX_LATE_SECONDS = 3600
 AUTO_UPDATE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 LOGGER = logging.getLogger(__name__)
 AutoUpdateCandidate = tuple[int, tuple[str, ...], tuple[AutoUpdatePolicy, ...]]
@@ -61,7 +65,8 @@ def initialize_auto_update_scheduler_state(state: Any) -> None:
     state.web_auto_update_started_at = datetime.now(timezone.utc)
     # When a tick last finished checking every due slot without submitting a
     # job or failing. A slot whose grace window closed with no such check
-    # since its scheduled time stays due until one runs.
+    # since its scheduled time stays due until one runs, for at most
+    # AUTO_UPDATE_MAX_LATE_SECONDS.
     state.web_auto_update_evaluated_at = None
     state.web_auto_update_stop = Event()
     state.web_auto_update_thread = None
@@ -210,6 +215,7 @@ def _auto_update_tick(
                     )
                 raise
             job_submitted = True
+            _log_late_auto_update(settings, selection, now_utc)
             with _immediate_transaction(conn):
                 _queue_auto_update_schedule_runs(
                     conn,
@@ -226,6 +232,27 @@ def _auto_update_tick(
         if job_submitted and start_event is not None:
             start_event.set()
         raise
+
+
+def _log_late_auto_update(
+    settings: WebSettings,
+    selection: AutoUpdateSelection,
+    now_utc: datetime,
+) -> None:
+    late_seconds = (now_utc - selection.scheduled_for).total_seconds()
+    if late_seconds < AUTO_UPDATE_GRACE_SECONDS:
+        return
+    LOGGER.info(
+        "Started scheduled auto-update for %s %d minutes after its scheduled "
+        "time (%s) because WUDup could not check it during its %d-minute "
+        "window: another job was running or the check failed.",
+        ", ".join(selection.service_keys),
+        int(late_seconds // 60),
+        selection.scheduled_for.astimezone(
+            ZoneInfo(settings.config.timezone_name)
+        ).isoformat(),
+        AUTO_UPDATE_GRACE_SECONDS // 60,
+    )
 
 
 def _auto_update_evaluated_at(state: Any) -> datetime | None:
@@ -383,17 +410,6 @@ def _due_auto_update_policies(
         )
         if _auto_update_schedule_recorded(conn, schedule_key):
             continue
-        if now_utc >= window_end:
-            LOGGER.info(
-                "Scheduled auto-update for %s at %s is still due after its "
-                "%s-second window because WUDup could not check it while the "
-                "window was open (another job was running or the check "
-                "failed); WUDup will apply it now if an update is still "
-                "pending.",
-                service_key,
-                scheduled_local.isoformat(),
-                AUTO_UPDATE_GRACE_SECONDS,
-            )
         policies[service_key] = AutoUpdatePolicy(
             service_key=service_key,
             update_mode=str(row["update_mode"] or settings.config.update_mode),
@@ -429,11 +445,12 @@ def _auto_update_due_occurrence(
             continue
         # A slot whose window closed before any tick finished checking it,
         # because a job was running or the check failed, stays due until one
-        # does. A slot already checked during its window is not run late.
-        if (
-            now_utc < window_end
-            or last_evaluated_at is None
-            or last_evaluated_at < scheduled_for
+        # does, up to AUTO_UPDATE_MAX_LATE_SECONDS. A slot already checked
+        # during its window is not run late.
+        late_limit = scheduled_for + timedelta(seconds=AUTO_UPDATE_MAX_LATE_SECONDS)
+        if now_utc < window_end or (
+            now_utc < late_limit
+            and (last_evaluated_at is None or last_evaluated_at < scheduled_for)
         ):
             return scheduled_local, scheduled_for, window_end
         return None
