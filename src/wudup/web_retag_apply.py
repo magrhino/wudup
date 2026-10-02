@@ -787,10 +787,21 @@ def _restore_retag_compose(
     running = tuple(
         service for service in recreated_services if service not in stopped_services
     )
-    try:
-        if stopped:
+    # Attempt every service group even when an earlier one fails, so one
+    # failure never leaves the other services on the new image.
+    failures: list[str] = []
+    first_exc: Exception | None = None
+    if stopped:
+        try:
             _recreate_retag_services_stopped(compose, stack, stopped)
-        if running:
+        except Exception as exc:  # noqa: BLE001 - reported with the other groups.
+            first_exc = exc
+            failures.append(
+                f"{', '.join(stopped)} (stopped before the apply) could not be "
+                f"rolled back: {exc}"
+            )
+    if running:
+        try:
             wait_handled = _compose_up_retag_services(compose, stack, running, config)
             if not wait_handled:
                 _wait_for_retag_health(
@@ -803,12 +814,23 @@ def _restore_retag_compose(
                     apply_condition,
                     job_id,
                 )
-        _delete_path(backup)
-    except Exception as rollback_exc:
+        except Exception as exc:  # noqa: BLE001 - reported with the other groups.
+            first_exc = first_exc or exc
+            failures.append(
+                f"{', '.join(running)} could not be rolled back to the previous "
+                f"image: {exc}"
+            )
+    if not failures:
+        try:
+            _delete_path(backup)
+        except Exception as exc:  # noqa: BLE001 - reported as a rollback failure.
+            first_exc = exc
+            failures.append(str(exc))
+    if failures:
         raise RuntimeError(
             f"{original_error}; compose rollback failed after the Compose file "
-            f"was restored: {rollback_exc}; backup retained at {backup}"
-        ) from rollback_exc
+            f"was restored: {'; '.join(failures)}; backup retained at {backup}"
+        ) from first_exc
     summary = [f"rollback restored the Compose file for {stack.name}"]
     if running:
         summary.append(
@@ -839,23 +861,45 @@ def _recreate_retag_services_stopped(
         no_start=True,
         project_directory=stack.project_directory,
     )
-    if not compose.ps_quiet_checked(
-        stack.directory,
-        stack.file,
-        services,
-        project_directory=stack.project_directory,
-    ):
+    names = ", ".join(services)
+    try:
+        running = compose.ps_quiet_checked(
+            stack.directory,
+            stack.file,
+            services,
+            project_directory=stack.project_directory,
+        )
+    except CommandError as exc:
+        raise RuntimeError(
+            f"WUDup could not check that {names} stayed stopped after rollback, "
+            f"so {_stop_retag_services_after_rollback(compose, stack, services)}; "
+            f"check that it is stopped ({exc})"
+        ) from exc
+    if not running:
         return
-    compose.stop(
-        stack.directory,
-        stack.file,
-        services,
-        project_directory=stack.project_directory,
-    )
     raise RuntimeError(
-        f"{', '.join(services)} started during rollback although it was stopped "
-        "before the apply, so WUDup stopped it again; check that it is stopped"
+        f"{names} started during rollback although it was stopped before the "
+        f"apply, so {_stop_retag_services_after_rollback(compose, stack, services)}; "
+        "check that it is stopped"
     )
+
+
+def _stop_retag_services_after_rollback(
+    compose: ComposeCli,
+    stack: ComposeStack,
+    services: Sequence[str],
+) -> str:
+    """Stop services that must stay stopped and describe what happened."""
+    try:
+        compose.stop(
+            stack.directory,
+            stack.file,
+            services,
+            project_directory=stack.project_directory,
+        )
+    except CommandError as exc:
+        return f"WUDup tried to stop it again but that failed: {exc}"
+    return "WUDup stopped it again"
 
 
 def _safe_retag_apply_error(settings: WebSettings, exc: BaseException) -> str:

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from threading import Condition
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from tests.web_retag_test_helpers import (
@@ -24,7 +27,8 @@ from tests.web_test_helpers import (
 )
 
 from wudup import web_retag_apply, web_retag_audit, web_retags
-from wudup.compose import ComposeCli
+from wudup.command import CommandError, CommandResult
+from wudup.compose import ComposeCli, ComposeStack
 
 
 @pytest.mark.parametrize("failure", [None, "rewrite", "pull", "health", "known"])
@@ -303,3 +307,149 @@ def test_retag_rollback_keeps_service_stopped_before_apply_stopped(
         assert "compose -f docker-compose.yml stop app" in calls
         assert "app started during rollback although it was stopped" in job["error"]
         assert "after the Compose file was restored" in job["error"]
+
+
+class _RollbackCompose:
+    """Fake Compose CLI that records rollback commands and injects failures."""
+
+    def __init__(
+        self,
+        *,
+        stopped_up_fails: bool = False,
+        running_up_fails: bool = False,
+        ps_result: str | None = "",
+    ) -> None:
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.stopped_up_fails = stopped_up_fails
+        self.running_up_fails = running_up_fails
+        self.ps_result = ps_result
+
+    @staticmethod
+    def _error(name: str) -> CommandError:
+        return CommandError(CommandResult(("docker", "compose", name), None, 1))
+
+    def up(self, directory: Path, file: str, services: Any, **kwargs: Any) -> None:
+        no_start = bool(kwargs.get("no_start"))
+        self.calls.append(("up-no-start" if no_start else "up", tuple(services)))
+        if no_start and self.stopped_up_fails:
+            raise self._error("up-no-start")
+        if not no_start and self.running_up_fails:
+            raise self._error("up")
+
+    def up_wait_supported(self, *args: Any, **kwargs: Any) -> bool:
+        return True
+
+    def ps_quiet_checked(
+        self, directory: Path, file: str, services: Any, **kwargs: Any
+    ) -> str:
+        self.calls.append(("ps", tuple(services)))
+        if self.ps_result is None:
+            raise self._error("ps")
+        return self.ps_result
+
+    def stop(self, directory: Path, file: str, services: Any, **kwargs: Any) -> None:
+        self.calls.append(("stop", tuple(services)))
+
+
+def _restore_mixed_stack(tmp_path: Path, compose: _RollbackCompose) -> str:
+    """Roll back a stack where db was stopped and web was running before apply."""
+    stack = ComposeStack(
+        index=1,
+        directory=tmp_path,
+        file="docker-compose.yml",
+        name="stack",
+        images=(),
+        service_images=(),
+    )
+    backup = tmp_path / "backup.yml"
+    backup.write_text("services: {}\n", encoding="utf-8")
+    return web_retag_apply._restore_retag_compose(
+        compose,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        SimpleNamespace(update_mode="live", max_wait=0),  # type: ignore[arg-type]
+        stack,
+        ("db", "web"),
+        ("db",),
+        backup,
+        {},
+        Condition(),
+        "job",
+        original_error="health failed",
+        expected_source_hash="hash",
+    )
+
+
+@pytest.fixture
+def _no_compose_restore(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        web_retag_apply, "restore_compose_backup", lambda *args, **kwargs: None
+    )
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_restores_mixed_stopped_and_running_services(
+    tmp_path: Path,
+) -> None:
+    compose = _RollbackCompose()
+
+    summary = _restore_mixed_stack(tmp_path, compose)
+
+    assert compose.calls == [
+        ("up-no-start", ("db",)),
+        ("ps", ("db",)),
+        ("up", ("web",)),
+    ]
+    assert "recreated and started web on the previous image" in summary
+    assert "recreated db on the previous image without starting it" in summary
+    assert not (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+@pytest.mark.parametrize(
+    ("compose_kwargs", "stopped_error", "stopped_again"),
+    [
+        ({"stopped_up_fails": True}, "Command failed with exit code 1", False),
+        ({"ps_result": "cid-db"}, "db started during rollback", True),
+        ({"ps_result": None}, "WUDup could not check that db stayed stopped", True),
+    ],
+)
+def test_retag_rollback_still_restores_running_services_after_stopped_failure(
+    tmp_path: Path,
+    compose_kwargs: dict[str, Any],
+    stopped_error: str,
+    stopped_again: bool,
+) -> None:
+    compose = _RollbackCompose(**compose_kwargs)
+
+    with pytest.raises(RuntimeError) as raised:
+        _restore_mixed_stack(tmp_path, compose)
+
+    # The running service is rolled back even though the stopped one failed.
+    assert ("up", ("web",)) in compose.calls
+    message = str(raised.value)
+    assert message.startswith(
+        "health failed; compose rollback failed after the Compose file was "
+        "restored: db (stopped before the apply) could not be rolled back: "
+    )
+    assert stopped_error in message
+    assert "web could not be rolled back" not in message
+    # Whenever db may be running, WUDup stops it again.
+    assert (("stop", ("db",)) in compose.calls) is stopped_again
+    assert ("WUDup stopped it again" in message) is stopped_again
+    assert (tmp_path / "backup.yml").exists()
+
+
+@pytest.mark.usefixtures("_no_compose_restore")
+def test_retag_rollback_reports_every_service_group_that_failed(
+    tmp_path: Path,
+) -> None:
+    compose = _RollbackCompose(stopped_up_fails=True, running_up_fails=True)
+
+    with pytest.raises(RuntimeError) as raised:
+        _restore_mixed_stack(tmp_path, compose)
+
+    message = str(raised.value)
+    assert "db (stopped before the apply) could not be rolled back" in message
+    assert "web could not be rolled back to the previous image" in message
+    assert message.endswith(f"backup retained at {tmp_path / 'backup.yml'}")
+    assert (tmp_path / "backup.yml").exists()
