@@ -223,34 +223,44 @@ def plan_tag_exclusions(
                 f"service(s) on this line: {repo_reason}"
             )
 
-        service_updates = [
-            TagExclusionUpdate(
-                stack=match.stack,
-                service=match.service,
-                image=match.compose_image,
-                image_repo=repo_key(match.compose_image),
-                tag=match.target.desired_tag,
-                source_line=line_no,
-                scope="service",
-            )
-            for match in line_matches
-            if match.service
-        ]
-        reason = (
-            tag_exclusion_rewrite_error(runner, service_updates)
-            if service_updates
-            else ""
-        )
-        if service_updates and not reason:
-            updates.extend(service_updates)
-        else:
-            if reason:
-                runner.log.warning(
-                    f"Tag exclusion for line {line_no} cannot be written: {reason}"
-                )
+        service_updates = _service_tag_exclusion_updates(runner, line_matches, line_no)
+        if service_updates is None:
             failures.append((first_match.target, "compose-label-unsupported"))
+        else:
+            updates.extend(service_updates)
 
     return _unique_tag_exclusion_updates(updates), failures
+
+
+def _service_tag_exclusion_updates(
+    runner: Any,
+    line_matches: Sequence[Match],
+    line_no: int,
+) -> list[TagExclusionUpdate] | None:
+    """Return service-scoped updates for a line, or None if they cannot be written.
+
+    Callers pass only matches whose Compose service is known.
+    """
+
+    service_updates = [
+        TagExclusionUpdate(
+            stack=match.stack,
+            service=match.service,
+            image=match.compose_image,
+            image_repo=repo_key(match.compose_image),
+            tag=match.target.desired_tag,
+            source_line=line_no,
+            scope="service",
+        )
+        for match in line_matches
+    ]
+    reason = tag_exclusion_rewrite_error(runner, service_updates)
+    if reason:
+        runner.log.warning(
+            f"Tag exclusion for line {line_no} cannot be written: {reason}"
+        )
+        return None
+    return service_updates
 
 
 def tag_exclusion_repo_updates(

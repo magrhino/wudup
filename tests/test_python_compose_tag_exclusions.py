@@ -275,6 +275,7 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
                     f"    - wud.tag.exclude={label}\n"
                 )
                 original = compose_file.read_text(encoding="utf-8")
+                updates = (self.tag_exclusion_update(tag="1.2"),)
 
                 with self.assertRaisesRegex(
                     ComposeTagRewriteError,
@@ -283,7 +284,7 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
                 ):
                     apply_compose_tag_exclusions(
                         compose_file,
-                        (self.tag_exclusion_update(tag="1.2"),),
+                        updates,
                         existing_exact_tags={},
                     )
 

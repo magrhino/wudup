@@ -75,7 +75,7 @@ RESOLVED_TAG_MARKER_PREFIXES = (
 WUD_TAG_INCLUDE_LABEL = "wud.tag.include"
 WUD_TAG_TRANSFORM_LABEL = "wud.tag.transform"
 _JS_REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
-_COMPOSE_INTERPOLATION_RE = re.compile(r"\$(?:\{|[A-Za-z_])")
+_COMPOSE_INTERPOLATION_RE = re.compile(r"\$[{A-Za-z_]")
 # WUD parses tags with loose semver, which misreads 4.0.19.2979-ls321 as
 # 4.0.1-9.2979-ls321 and ranks older 4.0.9.x tags above it.
 _FOUR_PART_VERSION_TAG_RE = re.compile(r"(v?)\d+\.\d+\.\d+\.\d+(-ls\d+)?", re.ASCII)
