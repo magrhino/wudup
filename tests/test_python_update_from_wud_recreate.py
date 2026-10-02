@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from io import StringIO
@@ -349,6 +350,43 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(event["old_image_id"], "old")
         self.assertEqual(event["new_image_id"], "new")
 
+    def test_failed_recovery_start_keeps_wud_line_and_gives_start_command(self) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
+        (self.fake_root / "containers" / "cid-app.image-id").write_text(
+            "old\n", encoding="utf-8"
+        )
+        stack_state = self.fake_root / "stacks" / "app"
+        (stack_state / "up_fail").write_text("", encoding="utf-8")
+        (stack_state / "start_fail").write_text("", encoding="utf-8")
+
+        result = self.run_python("--yes")
+
+        output = result.stderr + result.stdout
+        self.assertEqual(result.returncode, 1, output)
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "repo/app:latest\n")
+        calls = self.calls()
+        # Exactly one recovery attempt, after the stop.
+        self.assertEqual(calls.count("compose -f docker-compose.yml start app"), 1)
+        command = (
+            f"cd {shlex.quote(str(stack_dir))} && "
+            "docker compose -f docker-compose.yml start app"
+        )
+        self.assertIn(
+            "Service(s) app were stopped for the update, and starting them again "
+            "after the failed update also failed, so they are still stopped and "
+            f"not running the new image. Fix the error above, then start them with: "
+            f"{command}. The pending update was kept, so rerunning the update after "
+            "that is safe and retries it.",
+            output,
+        )
+        self.assertNotIn("rerun the update or start them", output)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=up-or-health-failed", report)
+        self.assertIn(command, report)
+
     def test_retry_starts_container_whose_start_failed_in_stop_mode(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
@@ -364,7 +402,7 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "repo/app:latest\n")
         self.assertIn("compose -f docker-compose.yml start app", self.calls())
         self.assertIn(
-            "Could not start service(s) app again after the failed update",
+            "starting them again after the failed update also failed",
             first_output,
         )
 

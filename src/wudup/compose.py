@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from .command import CommandError, CommandResult, CommandRunner
+from .command import CommandError, CommandResult, CommandRunner, display_command
 from .config import DEFAULT_COMPOSE_IGNORE_PATHS, format_compose_ignore_paths
 from .platforms import ImagePlatform, parse_platform
 
@@ -641,6 +642,23 @@ class ComposeCli:
             cwd=directory,
             check=True,
         )
+
+    def display_command(
+        self,
+        directory: str | Path,
+        file: str,
+        services: Sequence[str] | None,
+        *compose_args: str,
+        project_directory: str | Path | None = None,
+    ) -> str:
+        """Return the shell command an operator can run to repeat a Compose call."""
+        args = self._compose_args(
+            file,
+            *compose_args,
+            *_service_args(services),
+            project_directory=project_directory,
+        )
+        return f"cd {shlex.quote(str(directory))} && {display_command(args)}"
 
     def _compose_args(
         self,

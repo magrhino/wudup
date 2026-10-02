@@ -207,8 +207,10 @@ class _LifecycleRecreateMixin:
     def _restart_services_stopped_for_update(self, state: _StackUpdateState) -> str:
         """Start services that stop mode stopped before a failed recreate.
 
-        Leaving them stopped would make the next run treat them as
-        intentionally stopped and never start them again.
+        This is the only recovery attempt: leaving them stopped would make the
+        next run treat them as intentionally stopped and never start them
+        again. If it fails, the run stays failed, the pending entry is kept,
+        and the operator gets the exact command to start them by hand.
         """
         if self.options.mode != "stop":
             return ""
@@ -225,10 +227,20 @@ class _LifecycleRecreateMixin:
                 project_directory=stack.project_directory,
             )
         except CommandError as exc:
+            command = self.compose.display_command(
+                stack.directory,
+                stack.file,
+                services,
+                "start",
+                project_directory=stack.project_directory,
+            )
             message = (
-                f"Could not start service(s) {label} again after the failed "
-                "update, so they are still stopped. Fix the error above, then "
-                "rerun the update or start them with docker compose start."
+                f"Service(s) {label} were stopped for the update, and starting "
+                "them again after the failed update also failed, so they are "
+                "still stopped and not running the new image. Fix the error "
+                f"above, then start them with: {command}. The pending update "
+                "was kept, so rerunning the update after that is safe and "
+                "retries it."
             )
             self.log.error(f"[{stack.name}] {message} ({exc})")
             return message
