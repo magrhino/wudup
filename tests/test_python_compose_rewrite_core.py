@@ -277,6 +277,44 @@ class ComposeAtomicWriteTests(ComposeRewriteTestCase):
         self.assertEqual(written_hashes, [hashlib.sha256(b"changed").hexdigest()])
         self.assertEqual(list(self.root.glob(".compose.yml.tag.*")), [])
 
+    def test_directory_sync_failure_without_rollback_logs_warning(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+        ):
+            compose_rewrite._atomic_replace_compose(compose_file, "changed", prefix="exclude")
+
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(), "changed")
+        self.assertEqual(list(self.root.glob(".compose.yml.exclude.*")), [])
+
+    def test_restore_succeeds_when_directory_sync_fails_after_replace(self) -> None:
+        compose_file = self.write_compose("services: {}\n")
+        backup = _backup_compose(compose_file)
+        written_hashes: list[str] = []
+        compose_rewrite._atomic_replace_compose(
+            compose_file, "changed", prefix="tag", written_hashes=written_hashes,
+        )
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+        ):
+            compose_rewrite.restore_compose_backup(
+                backup, compose_file, expected_source_hash=written_hashes[-1],
+            )
+
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(), "services: {}\n")
+
     def test_unsupported_directory_sync_is_not_an_error(self) -> None:
         compose_file = self.write_compose("services: {}\n")
         real_fsync = os.fsync

@@ -89,8 +89,13 @@ class StackLifecycleExecutor(
             return state_or_status
 
         state = state_or_status
-        status = self._run_stack_update_steps(state)
-        self._discard_compose_backup(state, status)
+        # An exception escaping the steps counts as a failure, so the backup
+        # is kept and its path logged when the Compose file was not restored.
+        status = StackStatus("failure", "unexpected-error")
+        try:
+            status = self._run_stack_update_steps(state)
+        finally:
+            self._discard_compose_backup(state, status)
         return status
 
     def _run_stack_update_steps(self, state: _StackUpdateState) -> StackStatus:

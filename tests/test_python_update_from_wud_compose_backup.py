@@ -9,6 +9,7 @@ from unittest import mock
 from tests.update_from_wud_helpers import UpdateFromWudRunnerTestCase
 
 from wudup import compose_persistence
+from wudup.updater_lifecycle import StackLifecycleExecutor
 
 
 class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
@@ -103,3 +104,58 @@ class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
         )
         self.assertNotRegex(self.calls(), r"compose -f .* pull")
         self.assertEqual(self._backups(stack_dir), [])
+
+    def test_directory_sync_failure_during_restore_still_rolls_back_services(self) -> None:
+        stack_dir = self._tag_update_stack()
+        compose_file = stack_dir / "docker-compose.yml"
+        original = compose_file.read_text(encoding="utf-8")
+        (self.fake_root / "stacks" / "app" / "pull_fail").write_text("", encoding="utf-8")
+        real_fsync_directory = compose_persistence._fsync_directory
+        calls = 0
+
+        def fail_during_restore(directory: Path) -> None:
+            nonlocal calls
+            calls += 1
+            # Call 1 syncs the backup, call 2 the tag rewrite, call 3 the restore.
+            if calls == 3:
+                raise OSError(errno.EIO, "I/O error")
+            real_fsync_directory(directory)
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=fail_during_restore,
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+        ):
+            status, output = self._run()
+
+        self.assertEqual(status, 1, output)
+        self.assertEqual(calls, 3)
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+        self.assertIn("Rolled back to previous tag", output)
+        self.assertNotIn("Could not safely restore Compose", output)
+        self.assertEqual(self._backups(stack_dir), [])
+
+    def test_unexpected_error_keeps_written_backup_and_logs_its_path(self) -> None:
+        stack_dir = self._tag_update_stack()
+        original = (stack_dir / "docker-compose.yml").read_text(encoding="utf-8")
+        output = StringIO()
+
+        with (
+            mock.patch.object(
+                StackLifecycleExecutor,
+                "_pull_and_verify_images",
+                side_effect=RuntimeError("unexpected failure"),
+            ),
+            redirect_stdout(output),
+            redirect_stderr(output),
+            self.assertRaisesRegex(RuntimeError, "unexpected failure"),
+        ):
+            self.make_runner(allow_tag_updates=True).run()
+
+        backups = self._backups(stack_dir)
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), original)
+        self.assertIn(f"Kept the previous Compose file at {backups[0]}", output.getvalue())

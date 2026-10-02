@@ -7,10 +7,13 @@ stay inside this owner; rendering and update approval belong to callers.
 Durability: a rewrite syncs the temporary file (content, owner, and mode)
 before it replaces the Compose file, then syncs the directory so the new entry
 survives a crash or power loss. A backup is synced the same way before it is
-returned. A failure before replacement leaves the Compose file unchanged. A
+returned. A failure before replacement leaves the Compose file unchanged. When
+the caller tracks written hashes (it holds a backup to roll back to), a
 directory sync failure after replacement is raised only after the written
-version's hash has been recorded, so callers know the file changed and can
-restore it from their backup.
+version's hash has been recorded, so the caller knows the file changed and can
+restore it. Writers without written hashes, such as restores and tag
+exclusions, have nothing to roll back to; for them the failure is logged as a
+warning and the write counts as done, because the new content is in place.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import hashlib
+import logging
 import os
 import shutil
 import tempfile
@@ -26,6 +30,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .updater_models import ComposeTagRewriteError
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _compose_source_hash(compose_path: Path) -> str:
@@ -72,16 +78,20 @@ def _fsync_directory(directory: Path) -> None:
         os.close(fd)
 
 
-def _sync_replaced_compose(compose_path: Path) -> None:
+def _sync_replaced_compose(compose_path: Path, *, can_roll_back: bool) -> None:
     try:
         _fsync_directory(compose_path.parent)
     except OSError as exc:
-        raise ComposeTagRewriteError(
+        message = (
             f"The Compose file {compose_path.name} was replaced, but its folder "
             f"could not be synced to disk ({exc}). The new content is in place "
             "but may not survive a crash or power loss; check the storage for "
             "errors."
-        ) from exc
+        )
+        if not can_roll_back:
+            LOGGER.warning(message)
+            return
+        raise ComposeTagRewriteError(message) from exc
 
 
 def _atomic_replace_compose(
@@ -112,7 +122,9 @@ def _atomic_replace_compose(
             # sync failure still tells callers the Compose file changed.
             if written_hashes is not None:
                 written_hashes.append(hashlib.sha256(rendered.encode("utf-8")).hexdigest())
-            _sync_replaced_compose(compose_path)
+            _sync_replaced_compose(
+                compose_path, can_roll_back=written_hashes is not None,
+            )
     finally:
         if tmp_path is not None:
             try:
