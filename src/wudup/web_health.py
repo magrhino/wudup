@@ -57,6 +57,9 @@ from .web_redaction import redact_sensitive_text as _redact_sensitive_text
 from .web_request_context import effective_origin as _effective_origin
 from .web_request_context import host_from_origin as _host_from_origin
 from .web_request_context import raw_client_is_loopback as _raw_client_is_loopback
+from .web_request_context import (
+    request_has_forwarding_headers as _request_has_forwarding_headers,
+)
 from .web_request_context import request_settings as _settings
 from .web_request_context import trusted_forwarded_origin as _trusted_forwarded_origin
 
@@ -99,7 +102,10 @@ def api_healthz() -> HealthResponse:
 
 
 def api_readyz(request: Request, response: Response) -> ReadyResponse | Response:
-    if not _raw_client_is_loopback(request):
+    # A reverse proxy on loopback makes every proxied client look local.
+    if not _raw_client_is_loopback(request) or _request_has_forwarding_headers(
+        request
+    ):
         return Response(status_code=404)
     return ready_response(_settings(request), response)
 

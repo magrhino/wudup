@@ -107,6 +107,23 @@ def test_readyz_ignores_forwarded_loopback_from_trusted_proxy(
     assert response.status_code == 404
     assert response.content == b""
 
+def test_readyz_rejects_loopback_requests_forwarded_by_a_proxy(
+    tmp_path: Path,
+) -> None:
+    client = _doctor_client(tmp_path, client=("127.0.0.1", 50000))
+
+    for headers in (
+        {"X-Forwarded-For": "203.0.113.9"},
+        {"X-Forwarded-Proto": "https"},
+        {"X-Real-IP": "203.0.113.9"},
+        {"Forwarded": "for=203.0.113.9"},
+    ):
+        response = client.get("/readyz", headers=headers)
+
+        assert response.status_code == 404, headers
+        assert response.content == b""
+
+
 def test_ready_api_requires_auth_and_returns_local_readiness(
     tmp_path: Path,
 ) -> None:

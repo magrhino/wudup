@@ -539,6 +539,133 @@ def test_trusted_forwarded_headers_use_last_proxy_hop(tmp_path: Path) -> None:
     )
 
 
+def test_trusted_x_forwarded_headers_win_over_client_forwarded(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {
+                "WUD_WEB_ALLOWED_HOSTS": "internal.test,wud.example.test",
+                "WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32",
+            },
+        )
+    )
+    settings = app.state.web_settings
+    request = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={
+            "forwarded": (
+                f"for={_DOC_FORWARDED_CLIENT_ALT_V4};proto=http;host=evil.test"
+            ),
+            "x-forwarded-for": _DOC_FORWARDED_CLIENT_V4,
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "wud.example.test",
+        },
+    )
+
+    assert (
+        web_auth_module._trusted_forwarded_origin(request, settings)
+        == "https://wud.example.test"
+    )
+    assert (
+        web_auth_module._request_client_address(request, settings)
+        == _DOC_FORWARDED_CLIENT_V4
+    )
+
+
+def test_trusted_forwarded_for_must_be_an_ip_address(tmp_path: Path) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+
+    for value in ("_hidden", "not-an-ip", '"[not-an-ip]:80"'):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={"forwarded": f"for={value}"},
+        )
+        assert web_auth_module._request_client_address(request, settings) == (
+            _DOC_PROXY_V4
+        ), value
+    bracketed = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": 'for="[2001:db8::7]:4711"'},
+    )
+    assert web_auth_module._request_client_address(bracketed, settings) == (
+        "2001:db8::7"
+    )
+
+
+def test_partial_x_forwarded_headers_disable_client_forwarded_fallback(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+    client_forwarded = f"for={_DOC_FORWARDED_CLIENT_ALT_V4};proto=https;host=evil.test"
+    proto_only = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": client_forwarded, "x-forwarded-proto": "https"},
+    )
+    host_only = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={"forwarded": client_forwarded, "x-forwarded-host": "wud.test"},
+    )
+
+    forwarded_for_only = SimpleNamespace(
+        client=SimpleNamespace(host=_DOC_PROXY_V4),
+        headers={
+            "forwarded": client_forwarded,
+            "x-forwarded-for": _DOC_FORWARDED_CLIENT_V4,
+        },
+    )
+
+    assert web_auth_module._trusted_forwarded_origin(proto_only, settings) == ""
+    assert web_auth_module._trusted_forwarded_origin(host_only, settings) == ""
+    assert web_auth_module._trusted_forwarded_origin(forwarded_for_only, settings) == ""
+    assert web_auth_module._request_client_address(proto_only, settings) == (
+        _DOC_PROXY_V4
+    )
+    for value in ("unknown", "evil", f"{_DOC_FORWARDED_CLIENT_V4}, evil"):
+        unusable_forwarded_for = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={"forwarded": client_forwarded, "x-forwarded-for": value},
+        )
+        assert web_auth_module._request_client_address(
+            unusable_forwarded_for, settings
+        ) == _DOC_PROXY_V4, value
+
+
+def test_forwarded_client_address_keeps_bare_ipv6_suffix(tmp_path: Path) -> None:
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {"WUD_WEB_TRUSTED_PROXIES": f"{_DOC_PROXY_V4}/32"},
+        )
+    )
+    settings = app.state.web_settings
+
+    for header, value, expected in (
+        ("x-forwarded-for", "2001:db8::5:1234", "2001:db8::5:1234"),
+        ("x-forwarded-for", f"{_DOC_FORWARDED_CLIENT_V4}:4711", _DOC_FORWARDED_CLIENT_V4),
+        ("forwarded", 'for="2001:db8::5:1234"', "2001:db8::5:1234"),
+        ("forwarded", f"for={_DOC_FORWARDED_CLIENT_V4}:4711", _DOC_FORWARDED_CLIENT_V4),
+    ):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host=_DOC_PROXY_V4),
+            headers={header: value},
+        )
+        assert web_auth_module._request_client_address(request, settings) == expected
+
+
 def test_secure_cookie_auto_follows_effective_origin(tmp_path: Path) -> None:
     http_client = _client(tmp_path)
     https_client = _client(
