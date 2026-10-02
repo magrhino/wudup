@@ -352,6 +352,14 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
         reports = sorted(self.log_dir.glob("update-from-wud-v2-*.errors.log"))
         self.assertTrue(reports, "expected updater error report")
         return reports[-1]
+    def latest_run_log(self) -> Path:
+        logs = sorted(
+            path
+            for path in self.log_dir.glob("update-from-wud-v2-*.log")
+            if not path.name.endswith(".errors.log")
+        )
+        self.assertTrue(logs, "expected updater run log")
+        return logs[-1]
     def db_rows(self, query: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]:
         with db_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
