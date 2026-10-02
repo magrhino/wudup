@@ -11,6 +11,7 @@ from unittest import mock
 from tests import update_from_wud_helpers
 from tests.update_from_wud_helpers import UpdateFromWudRunnerTestCase
 
+from wudup import updater_audit, web_rollback, web_runs
 from wudup.command import CommandError, CommandResult
 from wudup.compose import ServiceImage
 from wudup.docker_cli import DockerCli
@@ -76,6 +77,68 @@ class UpdateFromWudRetryTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(event["status"], "success")
         self.assertEqual(event["old_image_id"], "old")
         self.assertEqual(event["new_image_id"], "new")
+
+    def test_retry_records_previous_image_per_service_sharing_a_tag(self) -> None:
+        # After a partial recreate, app already runs the pulled image while
+        # worker, on the same tag, still runs the old one. Only worker changed.
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        self.make_stack(
+            "app",
+            [
+                ("app", "repo/app:latest", "cid-app"),
+                ("worker", "repo/app:latest", "cid-worker"),
+            ],
+        )
+        self.set_image_state("repo/app:latest", "new", "sha256:" + "b" * 64)
+        self.set_image_state("old", "old", "sha256:" + "a" * 64)
+        for cid, image_id in (("cid-app", "new"), ("cid-worker", "old")):
+            (self.fake_root / "containers" / f"{cid}.image-id").write_text(
+                f"{image_id}\n", encoding="utf-8"
+            )
+
+        status, output = self.run_update()
+
+        self.assertEqual(status, 0, output)
+        self.assertIn("will be recreated: worker", output)
+        rows = {
+            row["service_name"]: row
+            for row in self.db_rows("SELECT * FROM update_events ORDER BY id")
+        }
+        self.assertEqual(
+            {name: (row["old_image_id"], row["new_image_id"]) for name, row in rows.items()},
+            {"app": ("new", "new"), "worker": ("old", "new")},
+        )
+        app_item = web_rollback._recorded_rollback_item(
+            web_runs._event_from_row(rows["app"]), None
+        )
+        worker_item = web_rollback._recorded_rollback_item(
+            web_runs._event_from_row(rows["worker"]), None
+        )
+        self.assertIsNotNone(app_item)
+        self.assertEqual(app_item.status, "not_needed")
+        # worker has a real old image, so it goes on to the live rollback checks.
+        self.assertIsNone(worker_item)
+
+    def test_retry_previous_image_for_match_without_service(self) -> None:
+        stack = SimpleNamespace(
+            index=0,
+            service_images=(
+                ServiceImage("app", "repo/app:latest"),
+                ServiceImage("worker", "repo/app:latest"),
+            ),
+        )
+        match = SimpleNamespace(stack=stack, service="", compose_image="repo/app:latest")
+        old = ImageState(image_id="old", digest="")
+        older = ImageState(image_id="older", digest="")
+
+        def previous_for(states: dict[str, ImageState]) -> ImageState | None:
+            runner = SimpleNamespace(retry_previous_images={0: states})
+            return updater_audit._retry_previous_image_state(runner, match)
+
+        self.assertEqual(previous_for({"worker": old}), old)
+        self.assertEqual(previous_for({"app": old, "worker": old}), old)
+        # Lagging services on different old images give no single answer.
+        self.assertIsNone(previous_for({"app": old, "worker": older}))
 
     def test_failed_recovery_start_keeps_wud_line_and_gives_start_command(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")

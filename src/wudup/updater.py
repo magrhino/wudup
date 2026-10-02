@@ -98,6 +98,10 @@ class UpdateFromWudRunner(
             int,
             tuple[dict[str, ImageState], dict[str, ImageState]],
         ] = {}
+        # Image each lagging service's container still ran when a retry found
+        # the update already pulled, keyed by stack index then service. A tag
+        # shared by services can be current for one and behind for another.
+        self.retry_previous_images: dict[int, dict[str, ImageState]] = {}
         self.stack_runtime_states: dict[
             int,
             tuple[tuple[str, ...], tuple[str, ...]],

@@ -737,15 +737,19 @@ class StackLifecycleExecutor(
                 "use an older image and will be recreated: "
                 f"{' '.join(check.behind)}"
             )
-            for image, container_image_id in check.behind.values():
-                state.before[image] = ImageState(
+            # Keep the old image per service: the shared before-state stays the
+            # tag's local image, so a sibling already on it records no change.
+            previous = self.runner.retry_previous_images.setdefault(stack.index, {})
+            digests: dict[str, str] = {}
+            for service, (_image, container_image_id) in check.behind.items():
+                if container_image_id not in digests:
+                    digests[container_image_id] = self._try_image_digest(
+                        container_image_id
+                    )
+                previous[service] = ImageState(
                     image_id=container_image_id,
-                    digest=self._try_image_digest(container_image_id),
+                    digest=digests[container_image_id],
                 )
-            self.runner.stack_image_states[stack.index] = (
-                dict(state.before),
-                dict(state.after),
-            )
         return bool(check.behind)
 
     def _try_image_digest(self, image: str) -> str:

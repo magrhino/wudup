@@ -387,22 +387,41 @@ class _LifecycleHealthMixin:
                 if not container_ids:
                     missing.append(service)
                     continue
-                for container_id in container_ids:
-                    container_image_id = self.docker.container_image_id(container_id)
-                    if not container_image_id:
-                        unverified.append(service)
-                        break
-                    if container_image_id != pulled_id:
-                        behind.setdefault(service, (image, container_image_id))
+                lagging_id, unreadable = _compare_container_images(
+                    (self.docker.container_image_id(cid) for cid in container_ids),
+                    pulled_id,
+                )
             except CommandError as exc:
                 unverified.append(service)
                 error = error or exc
+                continue
+            if lagging_id:
+                behind[service] = (image, lagging_id)
+            if unreadable:
+                unverified.append(service)
         return _ContainerImageCheck(
             behind=behind,
             unverified=tuple(unverified),
             error=error,
             missing=tuple(missing),
         )
+
+
+def _compare_container_images(
+    image_ids: Iterable[str],
+    pulled_id: str,
+) -> tuple[str, bool]:
+    """Return the first older image ID and whether a container image was unreadable.
+
+    Stops at the first unreadable container, like the lookup it replaces.
+    """
+    lagging_id = ""
+    for image_id in image_ids:
+        if not image_id:
+            return lagging_id, True
+        if image_id != pulled_id and not lagging_id:
+            lagging_id = image_id
+    return lagging_id, False
 
 
 def running_service_containers(
