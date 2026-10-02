@@ -9,6 +9,7 @@ from .compose import (
     COMPOSE_RUNTIME_FORMAT,
     ComposeStack,
     compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
     compose_runtime_service_key,
     compose_runtime_service_keys,
 )
@@ -33,22 +34,27 @@ def _running_retag_compose_service_keys(
     return compose_runtime_service_keys(rows)
 
 
-def _retag_project_extra_config_files(
+def _retag_project_config_files(
     settings: WebSettings,
     stack: ComposeStack,
     project_name: str,
-) -> tuple[Path, ...] | None:
-    """Return Compose files the project's containers loaded besides ``stack.file``."""
+) -> tuple[tuple[Path, ...], bool] | None:
+    """Return extra Compose files the project loaded besides ``stack.file``,
+    and whether another Compose file set shares the project name."""
     docker = DockerCli(runner=_command_runner(settings))
     try:
         rows = docker.ps_format(COMPOSE_RUNTIME_FORMAT, all_containers=True)
     except CommandError:
         return None
-    return compose_runtime_extra_config_files(
-        stack.project_directory or stack.directory,
-        stack.file,
-        project_name,
-        compose_runtime_service_keys(rows),
+    runtime_keys = compose_runtime_service_keys(rows)
+    project_directory = stack.project_directory or stack.directory
+    return (
+        compose_runtime_extra_config_files(
+            project_directory, stack.file, project_name, runtime_keys
+        ),
+        compose_runtime_project_shared(
+            project_directory, stack.file, project_name, runtime_keys
+        ),
     )
 
 

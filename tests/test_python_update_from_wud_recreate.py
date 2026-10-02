@@ -529,6 +529,26 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         report = self.latest_error_report().read_text(encoding="utf-8")
         self.assertIn("reason=compose-override-files", report)
 
+    def test_update_keeps_containers_of_stack_sharing_project_name(self) -> None:
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
+        other_dir = self.root / "elsewhere" / "app"
+        (self.fake_root / "compose-runtime.tsv").write_text(
+            f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\n"
+            f"{other_dir}\t{other_dir / 'docker-compose.yml'}\tapp\tdb\tFalse\n",
+            encoding="utf-8",
+        )
+        self.set_image_state("repo/app:latest", "old", "sha256:old")
+        self.set_image_after_pull("repo/app:latest", "new", "sha256:new")
+
+        result = self.run_python("--yes")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        calls = self.calls()
+        self.assertIn("compose -f docker-compose.yml up -d --pull never", calls)
+        self.assertNotIn("--remove-orphans", calls)
+        self.assertIn("uses the same project name", result.stdout + result.stderr)
+
     def test_stack_update_fails_closed_when_service_list_is_unavailable(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])

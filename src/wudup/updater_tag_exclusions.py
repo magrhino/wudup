@@ -13,6 +13,7 @@ from .compose import (
     ComposeStack,
     compose_override_files_message,
     compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
     compose_runtime_service_keys,
 )
 from .images import (
@@ -294,7 +295,23 @@ def apply_tag_exclusions(
         return statuses
 
     successful_updates: list[TagExclusionUpdate] = []
-    for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
+    updates_by_stack = _tag_exclusion_updates_by_stack(updates)
+    recreate = runner.options.recreate_excluded_services
+    runtime_keys = _compose_runtime_keys(runner) if recreate else None
+    for stack, stack_updates in updates_by_stack.items():
+        # Refuse before writing labels so a stack that cannot be recreated is
+        # not left with a wud.tag.exclude label its containers do not carry.
+        refusal_reason = (
+            _compose_file_refusal_reason(runner, stack, runtime_keys)
+            if recreate else ""
+        )
+        if refusal_reason:
+            for update in stack_updates:
+                statuses[(update.stack.index, update.source_line)] = StackStatus(
+                    "failure",
+                    refusal_reason,
+                )
+            continue
         existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
         try:
             applied = compose_rewrite.apply_compose_tag_exclusions(
@@ -331,7 +348,7 @@ def apply_tag_exclusions(
             _applied_tag_exclusion_updates(stack_updates, applied)
         )
 
-    if runner.options.recreate_excluded_services:
+    if recreate:
         runner._recreate_tag_exclusion_services(successful_updates, statuses)
     return statuses
 
@@ -363,17 +380,7 @@ def recreate_tag_exclusion_services(
     updates: Sequence[TagExclusionUpdate],
     statuses: dict[tuple[int, int], StackStatus],
 ) -> None:
-    updates_by_stack = _tag_exclusion_updates_by_stack(updates)
-    runtime_keys = _compose_runtime_keys(runner) if updates_by_stack else None
-    for stack, stack_updates in updates_by_stack.items():
-        refusal_reason = _compose_file_refusal_reason(runner, stack, runtime_keys)
-        if refusal_reason:
-            for update in stack_updates:
-                statuses[(update.stack.index, update.source_line)] = StackStatus(
-                    "failure",
-                    refusal_reason,
-                )
-            continue
+    for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
         services = tuple(sorted({update.service for update in stack_updates}))
         network_providers = _network_mode_providers(stack.service_images)
         up_services, uses_network_provider = _expand_network_mode_services(
@@ -411,9 +418,9 @@ def _compose_runtime_keys(runner: Any) -> set[ComposeRuntimeServiceKey] | None:
         )
     except CommandError as exc:
         runner.log.error(
-            "Could not check how Compose projects were started, so services with "
-            "new wud.tag.exclude labels were not recreated. Check that Docker is "
-            f"reachable and retry. ({exc})"
+            "Could not check how Compose projects were started, so "
+            "wud.tag.exclude labels were not written and services were not "
+            f"recreated. Check that Docker is reachable and retry. ({exc})"
         )
         return None
 
@@ -423,7 +430,11 @@ def _compose_file_refusal_reason(
     stack: ComposeStack,
     runtime_keys: set[ComposeRuntimeServiceKey] | None,
 ) -> str:
-    """Return a failure reason when the stack must not be recreated, else ``""``."""
+    """Return a failure reason when the stack must not be recreated, else ``""``.
+
+    Also records stacks that share their project name with another Compose
+    file set, so they are recreated without ``--remove-orphans``.
+    """
     if runtime_keys is None:
         return "tag-exclusion-recreate-failed"
     extra_files = compose_runtime_extra_config_files(
@@ -433,10 +444,18 @@ def _compose_file_refusal_reason(
         runtime_keys,
     )
     if not extra_files:
+        if compose_runtime_project_shared(
+            stack.project_directory or stack.directory,
+            stack.file,
+            stack.project_name,
+            runtime_keys,
+        ):
+            runner.stacks_keeping_orphans.add(stack.index)
         return ""
     runner.log.error(
         f"[{stack.name}] {compose_override_files_message(stack.file, extra_files)} "
-        "Services with new wud.tag.exclude labels were not recreated."
+        "The wud.tag.exclude label was not written and services were not "
+        "recreated."
     )
     return "compose-override-files"
 

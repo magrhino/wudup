@@ -14,6 +14,7 @@ from .compose import (
     ComposeStack,
     compose_override_files_message,
     compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
     compose_runtime_service_key,
     compose_runtime_service_key_matches,
     compose_runtime_service_states,
@@ -316,6 +317,19 @@ class StackLifecycleExecutor(
                     matches=matches,
                 )
                 return StackStatus("failure", "compose-override-files")
+            if compose_runtime_project_shared(
+                stack.project_directory or stack.directory,
+                stack.file,
+                stack.project_name,
+                (key for key, _state in runtime_states),
+            ):
+                self.runner.stacks_keeping_orphans.add(stack.index)
+                self.log.warning(
+                    f"[{stack.name}] Another Compose stack uses the same project "
+                    f"name ({stack.project_name}); recreating without "
+                    "--remove-orphans so its containers are kept. Give each "
+                    "stack a unique project name to avoid this."
+                )
             for service in services:
                 service_states = self._compose_service_runtime_states(
                     stack,

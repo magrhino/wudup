@@ -20,7 +20,9 @@ from wudup.compose import (
     _project_directory_for_stack,
     _service_bind_mounts_from_config_json,
     _service_runtime_port_issues_from_config_json,
+    compose_override_files_message,
     compose_runtime_extra_config_files,
+    compose_runtime_project_shared,
     compose_runtime_service_keys,
 )
 from wudup.docker_cli import ContainerImage, DockerCli
@@ -793,7 +795,7 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
             "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
             (
                 "/elsewhere\t/elsewhere/compose.yml,/elsewhere/extra.yml"
-                "\tapp\tapp\tFalse"
+                "\tapp\tworker\tFalse"
             ),
         ])
 
@@ -803,6 +805,52 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
             ),
             (),
         )
+        # --remove-orphans from /srv/app would delete the other stack's worker.
+        self.assertTrue(
+            compose_runtime_project_shared(
+                "/srv/app", "docker-compose.yml", "app", keys
+            )
+        )
+
+    def test_project_not_shared_by_override_or_other_projects(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            (
+                "/srv/app\t/srv/app/docker-compose.yml,override.yml"
+                "\tapp\tworker\tFalse"
+            ),
+            "/elsewhere\t/elsewhere/compose.yml\tother\tapp\tFalse",
+        ])
+
+        self.assertFalse(
+            compose_runtime_project_shared(
+                "/srv/app", "docker-compose.yml", "app", keys
+            )
+        )
+
+    def test_message_explains_same_file_name_at_another_path(self) -> None:
+        keys = compose_runtime_service_keys([
+            "/mnt/pool/app\t/mnt/pool/app/docker-compose.yml\tapp\tapp\tFalse",
+        ])
+        extra_files = compose_runtime_extra_config_files(
+            "/srv/app", "docker-compose.yml", "app", keys
+        )
+
+        message = compose_override_files_message("docker-compose.yml", extra_files)
+
+        self.assertEqual(extra_files, (Path("/mnt/pool/app/docker-compose.yml"),))
+        self.assertIn("HOST_DOCKER_BASE", message)
+        self.assertIn("same Compose project name", message)
+        self.assertNotIn("merge their settings", message)
+
+    def test_message_asks_to_merge_override_files(self) -> None:
+        message = compose_override_files_message(
+            "docker-compose.yml",
+            (Path("/srv/app/docker-compose.override.yml"),),
+        )
+
+        self.assertIn("merge their settings into docker-compose.yml", message)
+        self.assertNotIn("HOST_DOCKER_BASE", message)
 
     def test_reports_project_started_only_from_different_files(self) -> None:
         keys = compose_runtime_service_keys([

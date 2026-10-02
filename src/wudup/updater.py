@@ -106,6 +106,9 @@ class UpdateFromWudRunner(
             int,
             tuple[tuple[str, ...], tuple[str, ...]],
         ] = {}
+        # Stacks whose Compose project name is shared with another file set;
+        # --remove-orphans would delete that file set's containers.
+        self.stacks_keeping_orphans: set[int] = set()
         self.digest_pin_update_cache: dict[
             tuple[DigestPinCandidate, ...],
             tuple[DigestPinUpdate, ...],

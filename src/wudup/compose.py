@@ -147,12 +147,46 @@ def compose_runtime_extra_config_files(
     WUDup runs Compose with only the discovered file, so recreating a project
     started with override or extra ``-f`` files would drop their settings and
     let ``--remove-orphans`` delete the services they define. A project whose
-    containers all came from other files (for example ``compose.prod.yml``)
-    would also be treated as stopped and recreated from the wrong file.
-    Containers from a different file set are tolerated only while some
-    container still runs from exactly the discovered file, which is how
-    separately discovered stacks that share a project name are told apart.
+    containers all came from other files (for example ``compose.prod.yml``, or
+    the same file reached through another path) would also be treated as
+    stopped and recreated from the wrong file. Containers from a different
+    file set are tolerated only while some container still runs from exactly
+    the discovered file, which is how separately discovered stacks that share
+    a project name are told apart; see ``compose_runtime_project_shared``.
     """
+    started_from_discovered_file, superset_extra, other_files = (
+        _compose_runtime_file_sets(
+            project_directory, compose_file, project_name, runtime_keys
+        )
+    )
+    if not started_from_discovered_file:
+        superset_extra |= other_files
+    return tuple(sorted(superset_extra))
+
+
+def compose_runtime_project_shared(
+    project_directory: str | Path,
+    compose_file: str,
+    project_name: str,
+    runtime_keys: Iterable[ComposeRuntimeServiceKey],
+) -> bool:
+    """Return whether another Compose file set runs under the same project name.
+
+    ``--remove-orphans`` would delete that file set's containers, so callers
+    recreate such a project without it.
+    """
+    _started, _superset_extra, other_files = _compose_runtime_file_sets(
+        project_directory, compose_file, project_name, runtime_keys
+    )
+    return bool(other_files)
+
+
+def _compose_runtime_file_sets(
+    project_directory: str | Path,
+    compose_file: str,
+    project_name: str,
+    runtime_keys: Iterable[ComposeRuntimeServiceKey],
+) -> tuple[bool, set[Path], set[Path]]:
     expected_paths, _project, _service = compose_runtime_service_key(
         project_directory, compose_file, project_name, ""
     )
@@ -168,9 +202,7 @@ def compose_runtime_extra_config_files(
             superset_extra.update(runtime_paths - expected_paths)
         else:
             other_files.update(runtime_paths)
-    if not started_from_discovered_file:
-        superset_extra.update(other_files)
-    return tuple(sorted(superset_extra))
+    return started_from_discovered_file, superset_extra, other_files
 
 
 def compose_override_files_message(
@@ -178,13 +210,27 @@ def compose_override_files_message(
     extra_files: Sequence[Path],
 ) -> str:
     files = ", ".join(str(path) for path in extra_files)
-    return (
-        "This Compose project is running with Compose file(s) that WUDup "
-        f"does not load: {files}. Recreating it from {compose_file} alone would "
-        "drop their settings and could remove the services they add. Merge those "
-        f"settings into {compose_file} and recreate the stack from that file, or "
-        "update this stack manually."
+    compose_name = Path(compose_file).name
+    message = (
+        "This Compose project has containers that were started with Compose "
+        f"file(s) WUDup does not load: {files}. Recreating it from "
+        f"{compose_file} alone would drop their settings and could remove the "
+        "containers they define."
     )
+    if any(path.name != compose_name for path in extra_files):
+        message += (
+            f" If those are override or extra files, merge their settings into "
+            f"{compose_file} and recreate the stack from that file."
+        )
+    if any(path.name == compose_name for path in extra_files):
+        message += (
+            f" A {compose_name} at another path usually means another stack uses "
+            "the same Compose project name, or this stack was started through a "
+            "different path (for example a symlinked or moved DOCKER_BASE, or "
+            "a wrong HOST_DOCKER_BASE). Give each stack a unique project name, "
+            "or fix the path setting and recreate the stack once by hand."
+        )
+    return message + " Otherwise update this stack manually."
 
 
 def _compose_runtime_service_key_from_fields(
