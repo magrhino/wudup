@@ -39,6 +39,7 @@ def initialize_apply_job_state(state: Any) -> None:
     state.web_apply_condition = Condition(state.web_apply_lock)
     state.web_apply_jobs = {}
     state.web_self_update_running = False
+    state.web_container_restart_running = False
     state.web_self_update_plans = {}
 
 
@@ -113,6 +114,8 @@ def _active_mutation_error_unlocked(
         return "an apply job is already running"
     if bool(getattr(state, "web_self_update_running", False)):
         return "self-update is already running"
+    if bool(getattr(state, "web_container_restart_running", False)):
+        return "container restart is already running"
     if not include_security_scan_jobs:
         return ""
     security_scan_error = _active_security_scan_error_in_state(state)
@@ -167,6 +170,19 @@ def _release_self_update(state: Any) -> None:
     apply_lock: Lock = state.web_apply_lock
     with apply_lock:
         state.web_self_update_running = False
+
+
+def _reserve_container_restart(state: Any) -> str:
+    def reserve() -> None:
+        state.web_container_restart_running = True
+
+    return _reserve_mutation_state(state, reserve)
+
+
+def _release_container_restart(state: Any) -> None:
+    apply_lock: Lock = state.web_apply_lock
+    with apply_lock:
+        state.web_container_restart_running = False
 
 
 def _require_apply_job(job_id: str, request: Request) -> WebApplyJob:

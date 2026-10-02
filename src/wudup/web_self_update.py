@@ -468,9 +468,34 @@ def api_restart_container(
     settings = _settings(request)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
-    active_error = web_job_registry._active_mutation_error(request)
-    if active_error:
-        raise HTTPException(status_code=409, detail=active_error)
+    reservation_error = web_job_registry._reserve_container_restart(request.app.state)
+    if reservation_error:
+        raise HTTPException(status_code=409, detail=reservation_error)
+    try:
+        container, audit_run_id = _prepare_container_restart(settings, request)
+    except BaseException:
+        web_job_registry._release_container_restart(request.app.state)
+        raise
+    # The background task releases the reservation once Docker has handled
+    # the restart, so no other mutation starts while it is in flight.
+    background_tasks.add_task(
+        _restart_container_task,
+        settings,
+        container,
+        audit_run_id,
+        request.app.state,
+    )
+    return ContainerRestartResponse(
+        status="scheduled",
+        audit_run_id=audit_run_id,
+        container=container,
+    )
+
+
+def _prepare_container_restart(
+    settings: WebSettings,
+    request: Request,
+) -> tuple[str, int]:
     container = settings.restart_container.strip()
     if not container:
         raise HTTPException(
@@ -518,18 +543,7 @@ def api_restart_container(
                 exc,
             ),
         ) from exc
-
-    background_tasks.add_task(
-        _restart_container_task,
-        settings,
-        container,
-        audit_run_id,
-    )
-    return ContainerRestartResponse(
-        status="scheduled",
-        audit_run_id=audit_run_id,
-        container=container,
-    )
+    return container, audit_run_id
 
 
 def _effective_config(settings: WebSettings) -> UpdaterConfig:
@@ -1176,6 +1190,18 @@ def _normalize_self_update_tag(tag: str) -> str:
 
 
 def _restart_container_task(
+    settings: WebSettings,
+    container: str,
+    audit_run_id: int,
+    state: Any,
+) -> None:
+    try:
+        _run_container_restart(settings, container, audit_run_id)
+    finally:
+        web_job_registry._release_container_restart(state)
+
+
+def _run_container_restart(
     settings: WebSettings,
     container: str,
     audit_run_id: int,
