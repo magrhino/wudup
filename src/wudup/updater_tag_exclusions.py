@@ -212,9 +212,16 @@ def plan_tag_exclusions(
             tag=first_match.target.desired_tag,
             source_line=line_no,
         )
-        if repo_updates and runner._can_apply_tag_exclusions(repo_updates):
-            updates.extend(repo_updates)
-            continue
+        if repo_updates:
+            repo_reason = tag_exclusion_rewrite_error(runner, repo_updates)
+            if not repo_reason:
+                updates.extend(repo_updates)
+                continue
+            runner.log.warning(
+                f"Tag exclusion for line {line_no} cannot be written to every "
+                f"service using {image_repo}, so WUDup will only try the "
+                f"service(s) on this line: {repo_reason}"
+            )
 
         service_updates = [
             TagExclusionUpdate(
@@ -229,10 +236,14 @@ def plan_tag_exclusions(
             for match in line_matches
             if match.service
         ]
-        if service_updates and runner._can_apply_tag_exclusions(service_updates):
+        reason = (
+            tag_exclusion_rewrite_error(runner, service_updates)
+            if service_updates
+            else ""
+        )
+        if service_updates and not reason:
             updates.extend(service_updates)
         else:
-            reason = tag_exclusion_rewrite_error(runner, service_updates)
             if reason:
                 runner.log.warning(
                     f"Tag exclusion for line {line_no} cannot be written: {reason}"
@@ -394,6 +405,7 @@ def recreate_tag_exclusion_services(
             runner,
             stack,
             up_services,
+            network_providers,
             no_deps=not uses_network_provider,
         ):
             continue
@@ -408,6 +420,7 @@ def _recreate_preserving_runtime_state(
     runner: Any,
     stack: ComposeStack,
     services: Sequence[str],
+    network_providers: Mapping[str, str],
     *,
     no_deps: bool,
 ) -> bool:
@@ -417,6 +430,24 @@ def _recreate_preserving_runtime_state(
     if runtime is None:
         return False
     running, stopped = runtime
+    blocked = _running_consumers_of_stopped_providers(
+        running,
+        stopped,
+        network_providers,
+    )
+    if blocked:
+        providers = _ordered_unique(
+            tuple(network_providers[service] for service in blocked)
+        )
+        runner.log.error(
+            f"[{stack.name}] Service(s) {' '.join(blocked)} are running but use "
+            f"the network of {' '.join(providers)}, which is not running. A "
+            "recreated container could not start without it, so WUDup did not "
+            f"recreate service(s) {' '.join(services)}. The wud.tag.exclude label "
+            "was written; start the network service and recreate the service(s) "
+            "yourself so WUD sees the new label."
+        )
+        return False
     if stopped:
         runner.log.info(
             f"[{stack.name}] Recreating stopped service(s) without starting them: "
@@ -437,6 +468,28 @@ def _recreate_preserving_runtime_state(
     if stopped:
         return runner.lifecycle._verify_services_stopped(stack, stopped).ok
     return True
+
+
+def _running_consumers_of_stopped_providers(
+    running: Sequence[str],
+    stopped: Sequence[str],
+    network_providers: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Return running services whose network_mode provider will stay stopped."""
+
+    unavailable = set(stopped)
+    blocked: list[str] = []
+    changed = True
+    while changed:
+        changed = False
+        for service in running:
+            if service in unavailable:
+                continue
+            if network_providers.get(service) in unavailable:
+                unavailable.add(service)
+                blocked.append(service)
+                changed = True
+    return tuple(blocked)
 
 
 def _tag_exclusion_runtime_state(

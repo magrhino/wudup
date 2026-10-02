@@ -55,6 +55,9 @@ docker compose -f docs/examples/docker-compose.example.yml run --rm wudup docker
 Add `--recreate-excluded-services` when you want Compose to recreate affected
 services immediately so WUD sees the new labels before its next scan. Services
 that were stopped are recreated without being started, as in a normal update.
+If a running service shares the network (`network_mode: service:...`) of a
+service that is not running, the labels are still written but nothing in that
+stack is recreated; start the network service and recreate them yourself.
 
 Automatic Compose tag rewrites and exclusion labels only support direct service
 `image:` values; image values provided through interpolation or inherited YAML

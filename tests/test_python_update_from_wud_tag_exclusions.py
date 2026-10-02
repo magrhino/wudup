@@ -314,7 +314,7 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(captured["render_updates"], [update])
         self.assertEqual(captured["compose_path"], stack_dir / "docker-compose.yml")
         self.assertEqual(captured["existing_exact_tags"], {"app": {"2.0"}})
-    def test_exclude_tag_line_recreate_keeps_missing_network_provider_stopped(
+    def test_exclude_tag_line_recreate_skips_running_consumer_of_stopped_provider(
         self,
     ) -> None:
         compose_file = self.prepare_network_mode_media_stack(
@@ -328,24 +328,30 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             "--recreate-excluded-services",
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
         self.assertIn(
             "wud.tag.exclude=^5\\.2\\.0$$",
             compose_file.read_text(encoding="utf-8"),
         )
-        calls = self.calls()
+        self.assertNotRegex(self.calls(), r"compose -f docker-compose.yml up -d")
         self.assertIn(
-            "compose -f docker-compose.yml up -d --remove-orphans --pull never "
-            "--no-build --no-deps --no-start gluetun\n",
-            calls,
+            "Service(s) qbittorrent are running but use the network of gluetun, "
+            "which is not running.",
+            result.stdout + result.stderr,
         )
-        self.assertIn(
-            "compose -f docker-compose.yml up -d --remove-orphans --pull never "
-            "--no-build --no-deps qbittorrent\n",
-            calls,
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(pending[0]["status"], "failed")
+        self.assertEqual(pending[0]["status_reason"], "tag-exclusion-recreate-failed")
+    def test_running_consumers_of_stopped_providers_follows_provider_chain(
+        self,
+    ) -> None:
+        blocked = updater_tag_exclusions._running_consumers_of_stopped_providers(
+            ("vpn-client", "app", "other"),
+            ("gluetun",),
+            {"app": "vpn-client", "vpn-client": "gluetun", "other": "proxy"},
         )
-        self.assertNotIn("gluetun qbittorrent", calls)
+
+        self.assertEqual(blocked, ("vpn-client", "app"))
     def test_exclude_tag_line_recreates_only_successful_label_writes(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         app_stack = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
@@ -470,6 +476,43 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
             pending[0]["status_reason"],
             "tag-exclusion-compose-label-unsupported",
         )
+    def test_exclude_tag_line_warns_when_sibling_label_is_interpolated(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        app_stack = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        worker_stack = self.make_stack(
+            "worker",
+            [("worker", "repo/app:1.1", "cid-worker")],
+        )
+        worker_compose = worker_stack / "docker-compose.yml"
+        worker_original = (
+            "services:\n"
+            "  worker:\n"
+            "    image: repo/app:1.1\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=${WORKER_TAG_EXCLUDE}\n"
+        )
+        worker_compose.write_text(worker_original, encoding="utf-8")
+
+        result = self.run_python("--yes", "--exclude-tag-lines", "1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (app_stack / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(worker_compose.read_text(encoding="utf-8"), worker_original)
+        output = result.stdout + result.stderr
+        self.assertIn(
+            "cannot be written to every service using repo/app, so WUDup will "
+            "only try the service(s) on this line",
+            output,
+        )
+        self.assertIn(
+            "Service worker wud.tag.exclude label uses a Compose variable",
+            output,
+        )
+        rules = self.db_rows("SELECT * FROM tag_exclusion_rules")
+        self.assertEqual([rule["scope"] for rule in rules], ["service"])
     def test_exclude_tag_line_materializes_service_merged_labels(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])

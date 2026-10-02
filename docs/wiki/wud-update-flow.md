@@ -200,7 +200,9 @@ tag exclusions in SQLite. An existing exclude label that uses a Compose variable
 is left unchanged and the line stays pending for a manual edit. Add
 `--recreate-excluded-services` to recreate affected services immediately so WUD
 sees the new container labels before its next scan; stopped services are
-recreated without being started.
+recreated without being started. A running service that uses the network of a
+stopped `network_mode: service:...` provider is not recreated, because it could
+not start again; the line is marked failed so you can recreate it by hand.
 
 Override a WUD-proposed tag directly:
 
