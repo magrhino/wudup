@@ -7,6 +7,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.health_gate_test_helpers import (
+    FakeHealthCompose,
+    FakeHealthDocker,
+    health_stack,
+)
 from tests.web_retag_test_helpers import (
     _apply_retag_plan,
     _create_retag_plan,
@@ -504,3 +509,112 @@ def test_retag_runtime_revalidation_without_updates_reports_no_stopped_services(
         None,  # type: ignore[arg-type]
         (),
     ) == ()
+
+
+def _retag_health_error(
+    tmp_path: Path,
+    compose: FakeHealthCompose,
+    services: tuple[str, ...],
+    docker: FakeHealthDocker | None = None,
+) -> str:
+    args = (
+        compose,
+        docker or FakeHealthDocker(),
+        SimpleNamespace(max_wait=0),
+        health_stack(tmp_path),
+        services,
+        {},
+        Condition(),
+        "job",
+    )
+    with pytest.raises(RuntimeError) as raised:
+        web_retag_apply._wait_for_retag_health(*args)
+    return str(raised.value)
+
+
+# `compose ps -q` lists only running containers, so an exited worker has none;
+# a combined lookup would hide it behind the running app.
+@pytest.mark.parametrize(
+    ("compose", "expected", "unexpected"),
+    [
+        (
+            FakeHealthCompose({"app": ["cid-app"], "worker": []}),
+            "no running container for service(s): worker",
+            "could not list containers",
+        ),
+        (
+            FakeHealthCompose(
+                {"app": ["cid-app"], "worker": []}, failing=["worker"]
+            ),
+            (
+                "could not list containers for service(s): worker because docker "
+                "compose ps failed"
+            ),
+            "exited or never started",
+        ),
+        (
+            FakeHealthCompose({"app": [], "worker": []}),
+            "no running container for service(s): app, worker",
+            "returned no containers",
+        ),
+    ],
+    ids=["exited", "compose_error", "all_exited"],
+)
+def test_retag_health_wait_fails_when_selected_service_has_no_container(
+    tmp_path: Path,
+    compose: FakeHealthCompose,
+    expected: str,
+    unexpected: str,
+) -> None:
+    error = _retag_health_error(tmp_path, compose, ("app", "worker"))
+
+    assert expected in error
+    assert unexpected not in error
+
+
+@pytest.mark.parametrize(
+    ("compose", "expected", "unexpected"),
+    [
+        (
+            FakeHealthCompose({"app": ["cid-app"]}, fail_all=True),
+            (
+                "could not list containers for service(s): (all services) because "
+                "docker compose ps failed"
+            ),
+            "returned no containers",
+        ),
+        (
+            FakeHealthCompose({"app": []}),
+            "docker compose ps -q returned no containers",
+            "could not list containers",
+        ),
+    ],
+    ids=["compose_error", "no_containers"],
+)
+def test_retag_health_wait_reports_whole_stack_lookup(
+    tmp_path: Path,
+    compose: FakeHealthCompose,
+    expected: str,
+    unexpected: str,
+) -> None:
+    error = _retag_health_error(tmp_path, compose, ())
+
+    assert expected in error
+    assert unexpected not in error
+
+
+def test_retag_health_wait_reports_unhealthy_container_output(
+    tmp_path: Path,
+) -> None:
+    docker = FakeHealthDocker(
+        summaries={"cid-app": "/app|running|unhealthy|1|0"},
+        health_logs={"cid-app": ["", "probe failed: connection refused"]},
+    )
+
+    error = _retag_health_error(
+        tmp_path, FakeHealthCompose({"app": ["cid-app"]}), ("app",), docker
+    )
+
+    assert "/app|running|unhealthy|1|0" in error
+    assert "probe failed: connection refused" in error
+    assert "no running container" not in error
