@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from .compose import ComposeStack
 from .compose_rewrite import compose_config_wud_tag_transforms
@@ -43,6 +43,8 @@ class RetagPlanUpdate:
 class RetagPlanBuild:
     response: RetagPlanResponse
     updates: tuple[RetagPlanUpdate, ...]
+    # Compose file hashes approved by plan_id, keyed by Compose file path.
+    compose_hashes: Mapping[str, str] = field(default_factory=dict)
 
 
 def retag_update_identity(item: RetagPlanUpdate) -> str:

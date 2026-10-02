@@ -258,6 +258,9 @@ def _apply_retag_updates(
             apply_condition,
             job_id,
             successful_updates,
+            approved_source_hash=build.compose_hashes.get(
+                str(stack.directory / stack.file), ""
+            ),
         )
     return tuple(successful_updates)
 
@@ -273,6 +276,8 @@ def _apply_retag_stack(
     apply_condition: Condition,
     job_id: str,
     successful_updates: list[_RetagPlanUpdate],
+    *,
+    approved_source_hash: str,
 ) -> None:
     """Apply one stack, recording success only after persistence and cleanup."""
     services = tuple(
@@ -289,8 +294,12 @@ def _apply_retag_stack(
     backup_hash = ""
     written_hashes: list[str] = []
     known_image_changes: tuple[web_retag_audit.RetagKnownImageChange, ...] = ()
+    stopped_services: tuple[str, ...] = ()
+    services_recreated = False
     try:
-        _revalidate_retag_runtime_before_apply(settings, compose, stack_updates)
+        stopped_services = _revalidate_retag_runtime_before_apply(
+            settings, compose, stack_updates
+        )
         _progress(
             jobs,
             apply_condition,
@@ -303,13 +312,19 @@ def _apply_retag_stack(
         )
         backup = _backup_compose(compose_path)
         backup_hash = _compose_source_hash(backup)
+        if not approved_source_hash or backup_hash != approved_source_hash:
+            raise RuntimeError(
+                f"retag plan is stale: the Compose file for {stack.name} changed "
+                "after the plan was approved, so it was not rewritten. Preview "
+                "the retag again and apply the new plan"
+            )
         if stack_updates[0].digest_pin:
             applied = apply_compose_digest_pins(
                 compose_path,
                 tuple(item.update for item in stack_updates),
                 stack_name=stack.name,
                 written_hashes=written_hashes,
-                expected_source_hash=backup_hash,
+                expected_source_hash=approved_source_hash,
             )
         else:
             applied = apply_compose_retag_updates(
@@ -317,7 +332,7 @@ def _apply_retag_stack(
                 tuple(item.update for item in stack_updates),
                 stack_name=stack.name,
                 written_hashes=written_hashes,
-                expected_source_hash=backup_hash,
+                expected_source_hash=approved_source_hash,
                 config_transforms=retag_config_transforms(stack),
             )
         if not applied:
@@ -360,6 +375,7 @@ def _apply_retag_stack(
             services=services,
         )
 
+        services_recreated = True
         _recreate_retag_services(
             compose,
             docker,
@@ -378,15 +394,17 @@ def _apply_retag_stack(
             backup = None
         successful_updates.extend(stack_updates)
     except Exception as exc:
+        rollback_summary = ""
         if backup is not None:
             if written_hashes:
                 try:
-                    _restore_retag_compose(
+                    rollback_summary = _restore_retag_compose(
                         compose,
                         docker,
                         config,
                         stack,
-                        services,
+                        services if services_recreated else (),
+                        stopped_services,
                         backup,
                         jobs,
                         apply_condition,
@@ -424,6 +442,7 @@ def _apply_retag_stack(
             written_hashes,
             stack_updates,
             known_image_changes,
+            rollback_summary=rollback_summary,
         ) from exc
 
 
@@ -436,6 +455,8 @@ def _retag_stack_failure(
     written_hashes: Sequence[str],
     stack_updates: Sequence[_RetagPlanUpdate],
     known_image_changes: Sequence[web_retag_audit.RetagKnownImageChange],
+    *,
+    rollback_summary: str = "",
 ) -> _RetagApplyFailed:
     """Describe a failed stack after its known-image records match its Compose file."""
     retained: tuple[_RetagPlanUpdate, ...] = ()
@@ -450,7 +471,9 @@ def _retag_stack_failure(
             known_image_changes,
         )
     return _RetagApplyFailed(
-        str(failure) + known_image_error,
+        str(failure)
+        + (f"; {rollback_summary}" if rollback_summary else "")
+        + known_image_error,
         successful_updates,
         retained,
     )
@@ -506,9 +529,10 @@ def _revalidate_retag_runtime_before_apply(
     settings: WebSettings,
     compose: ComposeCli,
     updates: Sequence[_RetagPlanUpdate],
-) -> None:
+) -> tuple[str, ...]:
+    """Check runtime consent and return the approved services that are stopped."""
     if not updates:
-        return
+        return ()
     stack = updates[0].stack
     project_name = compose.try_config_project_name(
         stack.directory,
@@ -522,9 +546,8 @@ def _revalidate_retag_runtime_before_apply(
     running_service_keys = _running_retag_compose_service_keys(settings)
     if running_service_keys is None:
         raise RuntimeError("retag runtime state could not be revalidated")
+    stopped_services: set[str] = set()
     for item in updates:
-        if item.allow_start:
-            continue
         service = _retag_update_service(item)
         if (
             _retag_compose_service_key(
@@ -532,11 +555,15 @@ def _revalidate_retag_runtime_before_apply(
                 service,
                 project_name=project_name,
             )
-            not in running_service_keys
+            in running_service_keys
         ):
+            continue
+        if not item.allow_start:
             raise RuntimeError(
                 f"{item.service_key} is no longer running in the expected Compose project"
             )
+        stopped_services.add(service)
+    return tuple(sorted(stopped_services))
 
 
 def _recreate_retag_services(
@@ -728,7 +755,8 @@ def _restore_retag_compose(
     docker: DockerCli,
     config: UpdaterConfig,
     stack: ComposeStack,
-    services: Sequence[str],
+    recreated_services: Sequence[str],
+    stopped_services: Sequence[str],
     backup: Path,
     jobs: dict[str, WebApplyJob],
     apply_condition: Condition,
@@ -736,30 +764,98 @@ def _restore_retag_compose(
     *,
     original_error: str,
     expected_source_hash: str,
-) -> None:
+) -> str:
+    """Restore Compose and return services to their state before the apply.
+
+    Only services this apply already recreated are recreated again, and
+    services that were stopped before the apply are recreated without starting.
+    Returns a plain-language summary of what rollback did to the services.
+    """
     try:
         restore_compose_backup(
             backup, stack.directory / stack.file,
             expected_source_hash=expected_source_hash,
         )
-        wait_handled = _compose_up_retag_services(compose, stack, services, config)
-        if not wait_handled:
-            _wait_for_retag_health(
-                compose,
-                docker,
-                config,
-                stack,
-                services,
-                jobs,
-                apply_condition,
-                job_id,
-            )
-        _delete_path(backup)
     except Exception as rollback_exc:
         raise RuntimeError(
             f"{original_error}; compose rollback failed: {rollback_exc}; "
             f"backup retained at {backup}"
         ) from rollback_exc
+    stopped = tuple(
+        service for service in recreated_services if service in stopped_services
+    )
+    running = tuple(
+        service for service in recreated_services if service not in stopped_services
+    )
+    try:
+        if stopped:
+            _recreate_retag_services_stopped(compose, stack, stopped)
+        if running:
+            wait_handled = _compose_up_retag_services(compose, stack, running, config)
+            if not wait_handled:
+                _wait_for_retag_health(
+                    compose,
+                    docker,
+                    config,
+                    stack,
+                    running,
+                    jobs,
+                    apply_condition,
+                    job_id,
+                )
+        _delete_path(backup)
+    except Exception as rollback_exc:
+        raise RuntimeError(
+            f"{original_error}; compose rollback failed after the Compose file "
+            f"was restored: {rollback_exc}; backup retained at {backup}"
+        ) from rollback_exc
+    summary = [f"rollback restored the Compose file for {stack.name}"]
+    if running:
+        summary.append(
+            f"recreated and started {', '.join(running)} on the previous image"
+        )
+    if stopped:
+        summary.append(
+            f"recreated {', '.join(stopped)} on the previous image without "
+            "starting it, because it was stopped before the apply"
+        )
+    if not recreated_services:
+        summary.append("no services were recreated or started")
+    return "; ".join(summary)
+
+
+def _recreate_retag_services_stopped(
+    compose: ComposeCli,
+    stack: ComposeStack,
+    services: Sequence[str],
+) -> None:
+    """Recreate services from the restored Compose file and confirm they stay stopped."""
+    compose.up(
+        stack.directory,
+        stack.file,
+        services,
+        force_recreate=True,
+        no_deps=True,
+        no_start=True,
+        project_directory=stack.project_directory,
+    )
+    if not compose.ps_quiet_checked(
+        stack.directory,
+        stack.file,
+        services,
+        project_directory=stack.project_directory,
+    ):
+        return
+    compose.stop(
+        stack.directory,
+        stack.file,
+        services,
+        project_directory=stack.project_directory,
+    )
+    raise RuntimeError(
+        f"{', '.join(services)} started during rollback although it was stopped "
+        "before the apply, so WUDup stopped it again; check that it is stopped"
+    )
 
 
 def _safe_retag_apply_error(settings: WebSettings, exc: BaseException) -> str:
