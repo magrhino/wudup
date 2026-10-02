@@ -204,7 +204,9 @@ stack manually. Tag exclusions that would need such a recreate are refused
 before the `wud.tag.exclude` label is written. When another discovered stack
 shares the project name while this stack still runs from its own file, the
 update goes ahead without `--remove-orphans`, so the other stack's containers
-are kept; give each stack a unique project name to avoid this.
+are kept; give each stack a unique project name to avoid this. Containers from
+a Compose file that no discovered stack uses, such as leftovers from a file you
+no longer use, are refused like an override file; remove them first.
 
 When you exclude a tag, the updater writes WUD's native
 `wud.tag.exclude` label into the matched Compose service definition. If every

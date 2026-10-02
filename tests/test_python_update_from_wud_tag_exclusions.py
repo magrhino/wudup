@@ -90,7 +90,7 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
     def test_exclude_tag_recreate_keeps_stack_sharing_project_name(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
-        other_dir = self.root / "elsewhere" / "app"
+        other_dir = self.make_project_sharing_stack("other", "app")
         (self.fake_root / "compose-runtime.tsv").write_text(
             f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\tapp\tapp\tFalse\n"
             f"{other_dir}\t{other_dir / 'docker-compose.yml'}\tapp\tdb\tFalse\n",

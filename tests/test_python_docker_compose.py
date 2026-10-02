@@ -16,11 +16,13 @@ from wudup.compose import (
     ComposeCli,
     ComposeDiscoveryError,
     ComposeRuntimePortIssue,
+    ComposeStack,
     ServiceImage,
     _project_directory_for_stack,
     _service_bind_mounts_from_config_json,
     _service_runtime_port_issues_from_config_json,
     compose_override_files_message,
+    compose_project_file_sets,
     compose_runtime_extra_config_files,
     compose_runtime_project_shared,
     compose_runtime_service_keys,
@@ -799,9 +801,23 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
             ),
         ])
 
+        other_stack = ComposeStack(
+            index=1,
+            directory=Path("/elsewhere"),
+            file="compose.yml",
+            name="elsewhere",
+            images=(),
+            service_images=(),
+            project_name="app",
+        )
+
         self.assertEqual(
             compose_runtime_extra_config_files(
-                "/srv/app", "docker-compose.yml", "app", keys
+                "/srv/app",
+                "docker-compose.yml",
+                "app",
+                keys,
+                compose_project_file_sets([other_stack], "app"),
             ),
             (),
         )
@@ -810,6 +826,34 @@ class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
             compose_runtime_project_shared(
                 "/srv/app", "docker-compose.yml", "app", keys
             )
+        )
+
+    def test_reports_same_named_file_set_no_discovered_stack_uses(self) -> None:
+        # A leftover container from another file still shares the project, but
+        # no discovered stack owns it, so it is not a known shared project.
+        keys = compose_runtime_service_keys([
+            "/srv/app\t/srv/app/docker-compose.yml\tapp\tapp\tFalse",
+            "/srv/app\t/srv/app/compose.old.yml\tapp\tworker\tFalse",
+        ])
+        this_stack = ComposeStack(
+            index=0,
+            directory=Path("/srv/app"),
+            file="docker-compose.yml",
+            name="app",
+            images=(),
+            service_images=(),
+            project_name="app",
+        )
+
+        self.assertEqual(
+            compose_runtime_extra_config_files(
+                "/srv/app",
+                "docker-compose.yml",
+                "app",
+                keys,
+                compose_project_file_sets([this_stack], "app"),
+            ),
+            (Path("/srv/app/compose.old.yml"),),
         )
 
     def test_project_not_shared_by_override_or_other_projects(self) -> None:

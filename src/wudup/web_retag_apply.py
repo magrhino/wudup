@@ -304,7 +304,7 @@ def _apply_retag_stack(
     services_recreated = False
     try:
         stopped_services, remove_orphans = _revalidate_retag_runtime_before_apply(
-            settings, compose, stack_updates
+            settings, compose, stack_updates, config=config
         )
         _progress(
             jobs,
@@ -544,6 +544,8 @@ def _revalidate_retag_runtime_before_apply(
     settings: WebSettings,
     compose: ComposeCli,
     updates: Sequence[_RetagPlanUpdate],
+    *,
+    config: UpdaterConfig | None = None,
 ) -> tuple[tuple[str, ...], bool]:
     """Revalidate runtime state before the apply.
 
@@ -564,7 +566,18 @@ def _revalidate_retag_runtime_before_apply(
         raise RuntimeError("retag Compose project could not be revalidated")
     if project_name != stack.project_name:
         raise RuntimeError("retag Compose project changed before apply")
-    config_files = _retag_project_config_files(settings, stack, project_name)
+    def discover_stacks() -> Sequence[ComposeStack]:
+        if config is None:
+            return ()
+        return compose.discover_stacks(
+            config.docker_base,
+            project_base=settings.host_docker_base,
+            ignore_paths=config.compose_ignore_paths,
+        )
+
+    config_files = _retag_project_config_files(
+        settings, stack, project_name, discover_stacks
+    )
     if config_files is None:
         raise RuntimeError("retag runtime state could not be revalidated")
     extra_files, project_shared = config_files

@@ -13,6 +13,7 @@ from .compose import (
     ComposeRuntimeServiceState,
     ComposeStack,
     compose_override_files_message,
+    compose_project_file_sets,
     compose_runtime_extra_config_files,
     compose_runtime_project_shared,
     compose_runtime_service_key,
@@ -399,6 +400,9 @@ class StackLifecycleExecutor(
             stack.file,
             stack.project_name,
             (key for key, _state in runtime_states),
+            compose_project_file_sets(
+                self.runner.discovered_stacks, stack.project_name
+            ),
         )
         if extra_files:
             message = compose_override_files_message(stack.file, extra_files)

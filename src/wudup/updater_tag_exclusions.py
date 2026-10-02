@@ -13,6 +13,7 @@ from .compose import (
     ComposeRuntimeServiceKey,
     ComposeStack,
     compose_override_files_message,
+    compose_project_file_sets,
     compose_runtime_extra_config_files,
     compose_runtime_project_shared,
     compose_runtime_service_keys,
@@ -487,6 +488,7 @@ def _compose_file_refusal_reason(
         stack.file,
         stack.project_name,
         runtime_keys,
+        compose_project_file_sets(runner.discovered_stacks, stack.project_name),
     )
     if not extra_files:
         if compose_runtime_project_shared(

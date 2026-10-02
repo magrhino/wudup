@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from tests.web_retag_test_helpers import (
@@ -27,9 +28,9 @@ from tests.web_test_helpers import (
     _wait_apply_job,
 )
 
-from wudup import web_retag_apply, web_retag_audit
+from wudup import web_retag_apply, web_retag_audit, web_retag_runtime
 from wudup import web_retags as web_retags_module
-from wudup.compose import ComposeStack, ServiceImage
+from wudup.compose import ComposeDiscoveryError, ComposeStack, ServiceImage
 from wudup.db import open_db
 from wudup.digest_provenance import DigestTagProvenance
 from wudup.updater_digest_pin import digest_pin_update_from_values
@@ -489,6 +490,77 @@ def test_retag_apply_refuses_project_started_with_override_file(
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull" not in calls
     assert "compose -f docker-compose.yml up" not in calls
+
+
+def test_retag_apply_refuses_leftover_container_from_unused_compose_file(
+    tmp_path: Path,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            "WUD_UPDATE_MODE": "live",
+            "WUD_MAX_WAIT": "0",
+        },
+    )
+    stack_dir = fixture.compose_dir
+    (fixture.fake_root / "compose-runtime.tsv").write_text(
+        f"{stack_dir}\t{stack_dir / 'docker-compose.yml'}\t{stack_dir.name}\tapp\tFalse\n"
+        f"{stack_dir}\t{stack_dir / 'compose.old.yml'}\t{stack_dir.name}\tworker\tFalse\n",
+        encoding="utf-8",
+    )
+    compose_file = stack_dir / "docker-compose.yml"
+    before = compose_file.read_text(encoding="utf-8")
+    headers = _csrf_headers(fixture.client)
+    plan = _create_retag_plan(fixture.client, headers)
+
+    response = _apply_retag_plan(fixture.client, headers, plan)
+
+    assert response.status_code == 202
+    job = _wait_apply_job(fixture.client, response.json()["job_id"])
+    assert job["status"] == "failure"
+    # No discovered stack uses compose.old.yml, so it is not a shared project.
+    assert "compose.old.yml" in job["error"]
+    assert compose_file.read_text(encoding="utf-8") == before
+    assert "compose -f docker-compose.yml up" not in _fake_docker_calls(fixture.fake_root)
+
+
+def test_retag_project_config_files_fails_closed_when_discovery_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = ComposeStack(
+        index=0,
+        directory=tmp_path,
+        file="docker-compose.yml",
+        name="app",
+        images=(),
+        service_images=(),
+        project_name="app",
+    )
+    rows = [
+        f"{tmp_path}\t{tmp_path / 'docker-compose.yml'}\tapp\tapp\tFalse",
+        f"{tmp_path}\t{tmp_path / 'compose.old.yml'}\tapp\tworker\tFalse",
+    ]
+    monkeypatch.setattr(
+        web_retag_runtime,
+        "DockerCli",
+        lambda **_kwargs: SimpleNamespace(ps_format=lambda *_a, **_k: rows),
+    )
+    monkeypatch.setattr(web_retag_runtime, "_command_runner", lambda _settings: None)
+
+    def discovery_fails() -> tuple[ComposeStack, ...]:
+        raise ComposeDiscoveryError("discovery failed")
+
+    assert (
+        web_retag_runtime._retag_project_config_files(
+            None,  # type: ignore[arg-type]
+            stack,
+            "app",
+            discovery_fails,
+        )
+        is None
+    )
 
 
 def test_retag_apply_worker_rechecks_runtime_before_mutation(
