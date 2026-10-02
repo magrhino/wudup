@@ -995,14 +995,16 @@ def _sequence_label_value(labels: CommentedSeq, key: str, service: str) -> str:
 
 
 def _sequence_label_index(labels: CommentedSeq, key: str, service: str) -> int | None:
-    """Return the index of the ``key=value`` entry, refusing duplicate declarations.
+    """Return the index of the entry declaring ``key``, refusing duplicate declarations.
 
-    Docker Compose keeps the last entry for a repeated list-form label, so reading or
-    editing any single entry of a duplicated key can disagree with what WUD sees.
+    A bare ``key`` entry counts as the declaration (Compose reads it as an empty
+    value), so writers replace it instead of appending a second entry. Docker Compose
+    keeps the last entry for a repeated list-form label, so reading or editing any
+    single entry of a duplicated key can disagree with what WUD sees.
     """
 
     match: int | None = None
-    declared = False
+    declared: int | None = None
     for index, item in enumerate(labels):
         if not isinstance(item, str):
             if match is None:
@@ -1011,16 +1013,16 @@ def _sequence_label_index(labels: CommentedSeq, key: str, service: str) -> int |
         label_key, sep, _label_value = item.partition("=")
         if label_key != key:
             continue
-        if declared:
+        if declared is not None:
             raise ComposeTagRewriteError(
                 f"Service {service} lists the {key} label more than once; Docker Compose "
                 "uses only the last one, so WUDup will not change it. Remove the "
                 f"duplicate {key} entries from the service labels, then try again."
             )
-        declared = True
+        declared = index
         if sep:
             match = index
-    return match
+    return declared
 
 
 def _service_comment_tokens(

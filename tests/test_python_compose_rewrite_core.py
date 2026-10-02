@@ -59,6 +59,17 @@ class ComposeSourceLookupTests(unittest.TestCase):
                 self.assertEqual(str(caught.exception), expected)
                 self.assertEqual(list(service["labels"]), labels)
 
+    def test_sequence_label_set_replaces_bare_declaration(self) -> None:
+        # A bare entry is the declaration; appending would create a duplicate.
+        service = CommentedMap(labels=CommentedSeq(["target", "other=value"]))
+
+        _set_service_label_value(service, "target", "new", service="app")
+
+        self.assertEqual(list(service["labels"]), ["target=new", "other=value"])
+        self.assertEqual(
+            _get_service_label_value(service, "target", service="app"), "new"
+        )
+
     def test_sequence_label_lookup_rejects_non_strings_before_match(self) -> None:
         for labels in ([123, "target=value"], ["other=value", None], ["target", 123]):
             with self.subTest(labels=labels):
