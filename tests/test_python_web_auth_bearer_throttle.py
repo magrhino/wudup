@@ -50,6 +50,27 @@ def test_wrong_bearer_tokens_lock_out_bearer_auth_from_that_address(
     assert after_cooldown.status_code == 200
 
 
+def test_correct_bearer_token_does_not_reset_failed_attempts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app, _now = _token_app(tmp_path, monkeypatch)
+    client = TestClient(app, client=("198.51.100.20", 50000))
+
+    for index in range(web_auth_module.LOGIN_THROTTLE_MAX_FAILURES - 1):
+        _assert_generic_auth_failed(
+            client.get("/api/v1/status", headers=_bearer(f"guess-{index}"))
+        )
+    accepted = client.get("/api/v1/status", headers=_bearer(WEB_TOKEN))
+    _assert_generic_auth_failed(
+        client.get("/api/v1/status", headers=_bearer("guess-last"))
+    )
+    locked = client.get("/api/v1/status", headers=_bearer(WEB_TOKEN))
+
+    assert accepted.status_code == 200
+    _assert_generic_auth_failed(locked)
+
+
 def test_bearer_lockout_applies_to_auth_status_endpoints(
     tmp_path: Path,
     monkeypatch,
