@@ -69,6 +69,16 @@ from .updater_models import (
 INACTIVE_CONTAINER_STATES = frozenset({"created", "dead", "exited"})
 
 
+
+def _service_state_is_unverifiable(service_states: Sequence[str]) -> bool:
+    """Return whether a service is scaled or in a state WUDup cannot preserve."""
+    state_values = set(service_states)
+    return len(service_states) > 1 or bool(
+        state_values
+        and state_values != {"running"}
+        and not state_values <= INACTIVE_CONTAINER_STATES
+    )
+
 class StackLifecycleExecutor(
     _LifecycleRewriteMixin,
     _LifecycleRecreateMixin,
@@ -300,11 +310,7 @@ class StackLifecycleExecutor(
                     runtime_states,
                 )
                 state_values = set(service_states)
-                if len(service_states) > 1 or (
-                    state_values
-                    and state_values != {"running"}
-                    and not state_values <= INACTIVE_CONTAINER_STATES
-                ):
+                if _service_state_is_unverifiable(service_states):
                     self.log.error(
                         f"[{stack.name}] Compose service {service} has scaled or "
                         "unverified container state; the update was not applied."
