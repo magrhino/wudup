@@ -623,20 +623,16 @@ class StackLifecycleExecutor(
             services,
             state.after,
         )
-        if check.unverified:
-            message = (
-                "Could not confirm which image service(s) "
-                f"{' '.join(check.unverified)} are using, so the update was not "
-                "marked as applied and the WUD entry was kept. Check that Docker "
-                "is responding, then rerun the update."
-            )
+        unverified = (*check.unverified, *check.missing)
+        if unverified:
+            message = check.failure_message()
             self.log.error(f"[{stack.name}] {message}")
             self._record_failure(
                 stack,
                 state.matches,
                 phase="recreate",
                 reason="runtime-image-unverified",
-                services=check.unverified,
+                services=unverified,
                 command_error=check.error,
                 note=message,
             )
@@ -646,7 +642,7 @@ class StackLifecycleExecutor(
                 f"[{stack.name}] Could not confirm the image used by the selected "
                 "containers.",
                 stack=stack.name,
-                services=check.unverified,
+                services=unverified,
                 matches=state.matches,
             )
             return StackStatus("failure", "runtime-image-unverified")

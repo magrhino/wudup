@@ -26,6 +26,34 @@ class _ContainerImageCheck:
     """Service -> (Compose image, image ID the container still uses)."""
     unverified: tuple[str, ...]
     error: CommandError | None = None
+    missing: tuple[str, ...] = ()
+    """Selected services with no container, as a failed recreate can leave."""
+
+    def failure_message(self) -> str:
+        """Explain why the retry could not confirm the pulled image is in use."""
+        parts: list[str] = []
+        if self.unverified:
+            parts.append(
+                "Could not confirm which image service(s) "
+                f"{' '.join(self.unverified)} are using."
+            )
+        if self.missing:
+            parts.append(
+                f"Service(s) {' '.join(self.missing)} have no container, which "
+                "an earlier failed recreate can leave behind."
+            )
+        parts.append(
+            "The update was not marked as applied and the WUD entry was kept."
+        )
+        if self.unverified:
+            parts.append("Check that Docker is responding, then rerun the update.")
+        if self.missing:
+            parts.append(
+                "Create the missing container(s) with docker compose up -d (or "
+                "up --no-start for a service you keep stopped), then rerun the "
+                "update."
+            )
+        return " ".join(parts)
 
 
 class _LifecycleHealthMixin:
@@ -336,6 +364,7 @@ class _LifecycleHealthMixin:
         }
         behind: dict[str, tuple[str, str]] = {}
         unverified: list[str] = []
+        missing: list[str] = []
         error: CommandError | None = None
         for service in services:
             image, pulled_id = pulled_ids.get(service, ("", ""))
@@ -349,6 +378,9 @@ class _LifecycleHealthMixin:
                     project_directory=stack.project_directory,
                     all_containers=True,
                 )
+                if not container_ids:
+                    missing.append(service)
+                    continue
                 for container_id in container_ids:
                     container_image_id = self.docker.container_image_id(container_id)
                     if not container_image_id:
@@ -363,6 +395,7 @@ class _LifecycleHealthMixin:
             behind=behind,
             unverified=tuple(unverified),
             error=error,
+            missing=tuple(missing),
         )
 
 

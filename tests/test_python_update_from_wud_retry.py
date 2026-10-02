@@ -227,6 +227,23 @@ class UpdateFromWudRetryTests(UpdateFromWudRunnerTestCase):
         report = self.latest_error_report().read_text(encoding="utf-8")
         self.assertIn("reason=runtime-image-unverified", report)
 
+    def test_retry_keeps_wud_line_when_service_has_no_container(self) -> None:
+        # A failed recreate can remove the old container without creating the
+        # new one; with nothing to compare, the retry must not report current.
+        self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+        self.make_stack("app", [("app", "repo/app:latest", None)])
+        self.set_image_state("repo/app:latest", "new", "sha256:new")
+
+        status, output = self.run_update()
+
+        self.assertEqual(status, 1, output)
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "repo/app:latest\n")
+        self.assertIn("Service(s) app have no container", output)
+        self.assertNotIn("Check that Docker is responding", output)
+        self.assertNotIn("compose -f docker-compose.yml up", self.calls())
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("reason=runtime-image-unverified", report)
+
     def test_retry_keeps_wud_line_when_container_lookup_fails(self) -> None:
         self.wud_file.write_text("repo/app:latest\n", encoding="utf-8")
         self.make_stack("app", [("app", "repo/app:latest", "cid-app")])
