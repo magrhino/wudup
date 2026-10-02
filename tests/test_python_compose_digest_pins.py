@@ -18,6 +18,28 @@ from wudup.updater_models import (
 
 
 class ComposeDigestPinTests(ComposeRewriteTestCase):
+    def test_digest_pin_rejects_duplicate_include_labels(self) -> None:
+        source = (
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.include=^1\\.0$$\n"
+            "    - wud.watch=true\n"
+            "    - wud.tag.include=^1\\.0$$\n"
+        )
+        compose_file = self.write_compose(source)
+        updates = (self.digest_pin_update(),)
+
+        with self.assertRaisesRegex(
+            ComposeTagRewriteError,
+            "Service app lists the wud.tag.include label more than once; "
+            "Docker Compose uses only the last one",
+        ):
+            apply_compose_digest_pins(compose_file, updates)
+
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), source)
+
     def test_retag_sequence_replaces_then_clears_resolved_tag_marker(
         self,
     ) -> None:
