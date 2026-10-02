@@ -49,6 +49,12 @@ class _LifecycleRewriteMixin:
             self.log.error(
                 f"[{stack.name}] Could not safely rewrite compose image tag(s): {exc}"
             )
+            if state.compose_rewrite_applied:
+                return self._handle_compose_rewrite_failure(
+                    state,
+                    "compose-tag-rewrite-failed",
+                    phase="compose-tag-rewrite",
+                )
             self._record_failure(
                 stack,
                 state.matches,
@@ -60,6 +66,12 @@ class _LifecycleRewriteMixin:
             return StackStatus("failure", "compose-tag-rewrite-failed")
         except OSError as exc:
             self.log.error(f"[{stack.name}] Could not rewrite compose image tag(s): {exc}")
+            if state.compose_rewrite_applied:
+                return self._handle_compose_rewrite_failure(
+                    state,
+                    "compose-tag-rewrite-failed",
+                    phase="compose-tag-rewrite",
+                )
             self._record_failure(
                 stack,
                 state.matches,
@@ -362,6 +374,39 @@ class _LifecycleRewriteMixin:
             return StackStatus("failure", "compose-backup-failed")
         return None
 
+    def _discard_compose_backup(
+        self,
+        state: _StackUpdateState,
+        status: StackStatus,
+    ) -> None:
+        """Remove the backup unless it holds the only copy of the old Compose file."""
+
+        backup = state.compose_backup
+        if backup is None:
+            return
+        stack = state.stack
+        if (
+            status.status != "success"
+            and state.compose_written_hashes
+            and not state.compose_restored
+        ):
+            self.log.error(
+                f"[{stack.name}] Kept the previous Compose file at {backup} because "
+                f"{stack.file} could not be restored automatically, or the restored "
+                "file may not survive a crash; compare the two and restore the "
+                "backup by hand if needed."
+            )
+            return
+        try:
+            backup.unlink(missing_ok=True)
+        except OSError as exc:
+            self.log.warning(
+                f"[{stack.name}] Could not remove the Compose backup {backup}: {exc}. "
+                "It is no longer needed and can be deleted."
+            )
+            return
+        state.compose_backup = None
+
     @staticmethod
     def _expected_compose_hash(state: _StackUpdateState) -> str:
         if state.compose_written_hashes:
@@ -436,7 +481,8 @@ class _LifecycleRewriteMixin:
         rollback_error: CommandError | None = None
         try:
             if state.compose_written_hashes:
-                compose_rewrite.restore_compose_backup(
+                # An unsynced restore keeps the backup until it is on disk.
+                state.compose_restored = compose_rewrite.restore_compose_backup(
                     compose_backup, stack.directory / stack.file,
                     expected_source_hash=state.compose_written_hashes[-1],
                 )

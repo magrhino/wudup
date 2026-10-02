@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import errno
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest import mock
@@ -379,6 +382,47 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         pending = self.db_rows("SELECT * FROM pending_updates")
         self.assertEqual(pending[0]["status"], "failed")
         self.assertEqual(pending[0]["status_reason"], "tag-exclusion-label-failed")
+    def test_exclude_tag_line_directory_sync_failure_still_records_rule(self) -> None:
+        self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+        stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
+        options = UpdaterOptions(
+            docker_base=self.base,
+            wud_file=self.wud_file,
+            log_dir=self.log_dir,
+            max_wait=0,
+            assume_yes=True,
+            no_color=True,
+            exclude_tag_lines="1",
+            db_path=self.db_path,
+        )
+        runner = UpdateFromWudRunner(
+            options,
+            environ=self.env,
+            command_runner=CommandRunner(env=self.env),
+        )
+
+        with (
+            mock.patch(
+                "wudup.compose_persistence._fsync_directory",
+                side_effect=OSError(errno.EIO, "I/O error"),
+            ),
+            self.assertLogs("wudup.compose_persistence", "WARNING") as logs,
+            redirect_stdout(StringIO()),
+        ):
+            result = runner.run()
+
+        self.assertEqual(result, 0)
+        self.assertIn("could not be synced to disk", logs.output[0])
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
+        self.assertIn(
+            "wud.tag.exclude=^2\\.0$$",
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+        )
+        rules = self.db_rows("SELECT * FROM tag_exclusion_rules")
+        self.assertEqual([(rule["image_repo"], rule["tag"]) for rule in rules], [("repo/app", "2.0")])
+        pending = self.db_rows("SELECT * FROM pending_updates")
+        self.assertEqual(pending[0]["status_reason"], "tag-excluded")
+
     def test_exclude_tag_line_failure_leaves_line_pending(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])
