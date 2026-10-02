@@ -15,6 +15,7 @@ from tests.web_retag_test_helpers import (
 from tests.web_test_helpers import _csrf_headers, _wait_apply_job
 
 from wudup import web_retag_apply, web_retag_audit, web_retags
+from wudup.command import CommandError, CommandResult
 from wudup.compose import ComposeCli, ComposeStack
 
 
@@ -154,11 +155,38 @@ def test_retag_recovery_retains_backup_when_compose_changed_after_rewrite(
     assert str(tmp_path) not in job["error"]
 
 
+@pytest.mark.parametrize(
+    ("worker_lookup", "expected", "unexpected"),
+    [
+        (
+            "exited",
+            "no running container for service(s): worker",
+            "could not list containers",
+        ),
+        (
+            "compose_error",
+            (
+                "could not list containers for service(s): worker because docker "
+                "compose ps failed"
+            ),
+            "exited or never started",
+        ),
+    ],
+)
 def test_retag_health_wait_fails_when_selected_service_has_no_container(
     tmp_path: Path,
+    worker_lookup: str,
+    expected: str,
+    unexpected: str,
 ) -> None:
     class FakeCompose:
-        def ps_quiet(self, directory, file, services=None, *, project_directory=None):
+        def ps_quiet_checked(
+            self, directory, file, services=None, *, project_directory=None
+        ):
+            if worker_lookup == "compose_error" and "worker" in (services or ()):
+                raise CommandError(
+                    CommandResult(("docker", "compose", "ps"), None, 1)
+                )
             # `compose ps -q` lists only running containers; worker exited.
             running = {"app": ["cid-app"], "worker": []}
             return [cid for service in services or running for cid in running[service]]
@@ -190,4 +218,5 @@ def test_retag_health_wait_fails_when_selected_service_has_no_container(
             "job",
         )
 
-    assert "no running container for service(s): worker" in str(raised.value)
+    assert expected in str(raised.value)
+    assert unexpected not in str(raised.value)

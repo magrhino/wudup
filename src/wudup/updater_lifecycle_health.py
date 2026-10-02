@@ -156,8 +156,10 @@ class _LifecycleHealthMixin:
             time.sleep(2)
 
         while True:
-            cids, missing = running_service_containers(self.compose, stack, services)
-            ok = bool(cids) and not missing
+            cids, missing, failed = running_service_containers(
+                self.compose, stack, services
+            )
+            ok = bool(cids) and not missing and not failed
             for cid in cids:
                 summary = self._cid_summary(cid)
                 if not summary or not _cid_is_ok(summary):
@@ -177,10 +179,17 @@ class _LifecycleHealthMixin:
                 return True
             if elapsed >= self.options.max_wait:
                 self.log.error(f"[{stack.name}] Failed health gate after {elapsed}s")
-                if not cids:
+                if not cids and not failed:
                     self.log.plain(
                         "ERROR",
                         f"[{stack.name}] Health blocker: docker compose ps -q returned no containers",
+                    )
+                if failed:
+                    self.log.error(
+                        f"[{stack.name}] Health blocker: could not list containers for "
+                        f"service(s): {', '.join(failed)} because `docker compose ps` "
+                        "failed. Check that the Compose file is valid and Docker is "
+                        "reachable.",
                     )
                 if missing:
                     self.log.error(
@@ -204,15 +213,39 @@ class _LifecycleHealthMixin:
         self,
         stack: ComposeStack,
         services: Sequence[str] | None,
+        *,
+        report_missing_services: bool = False,
     ) -> str:
-        cids, missing = running_service_containers(self.compose, stack, services)
-        if not cids:
+        """Describe container health for a failure report.
+
+        Only a health-gate failure passes ``report_missing_services``: the
+        other failure paths may include services that are stopped on purpose.
+        """
+        missing: list[str] = []
+        failed: list[str] = []
+        if report_missing_services:
+            cids, missing, failed = running_service_containers(
+                self.compose, stack, services
+            )
+        else:
+            cids = self.compose.ps_quiet(
+                stack.directory,
+                stack.file,
+                services,
+                project_directory=stack.project_directory,
+            )
+        if not cids and not missing and not failed:
             return "health: docker compose ps -q returned no containers\n"
 
         lines = [
+            f"health: service={service} container lookup failed "
+            "(docker compose ps returned an error)"
+            for service in failed
+        ]
+        lines.extend(
             f"health: service={service} has no running container"
             for service in missing
-        ]
+        )
         for cid in cids:
             summary = self._cid_summary(cid)
             if not summary:
@@ -264,12 +297,14 @@ def running_service_containers(
     compose: ComposeCli,
     stack: ComposeStack,
     services: Sequence[str] | None,
-) -> tuple[list[str], list[str]]:
-    """Return running container IDs and the selected services that have none.
+) -> tuple[list[str], list[str], list[str]]:
+    """Return running container IDs, services with none, and failed lookups.
 
     ``docker compose ps -q`` lists only running containers, so a combined
     lookup lets a service whose container exited or never started hide behind
-    a running sibling. Look up each selected service on its own instead.
+    a running sibling. Look up each selected service on its own instead, and
+    keep a failed lookup apart from a missing container so the operator sees
+    the real cause.
     """
     if not services:
         return compose.ps_quiet(
@@ -277,21 +312,26 @@ def running_service_containers(
             stack.file,
             services,
             project_directory=stack.project_directory,
-        ), []
+        ), [], []
 
     cids: list[str] = []
     missing: list[str] = []
+    failed: list[str] = []
     for service in dict.fromkeys(services):
-        service_cids = compose.ps_quiet(
-            stack.directory,
-            stack.file,
-            [service],
-            project_directory=stack.project_directory,
-        )
+        try:
+            service_cids = compose.ps_quiet_checked(
+                stack.directory,
+                stack.file,
+                [service],
+                project_directory=stack.project_directory,
+            )
+        except CommandError:
+            failed.append(service)
+            continue
         if not service_cids:
             missing.append(service)
         cids.extend(cid for cid in service_cids if cid not in cids)
-    return cids, missing
+    return cids, missing, failed
 
 
 def _updated_images(

@@ -689,8 +689,8 @@ def _wait_for_retag_health(
     if config.max_wait > 0:
         time.sleep(2)
     while True:
-        cids, missing = running_service_containers(compose, stack, services)
-        ok = bool(cids) and not missing
+        cids, missing, failed = running_service_containers(compose, stack, services)
+        ok = bool(cids) and not missing and not failed
         for cid in cids:
             summary = _first_nonblank(
                 docker.try_inspect(cid, CONTAINER_SUMMARY_FORMAT)
@@ -800,10 +800,16 @@ def _retag_health_details(
     stack: ComposeStack,
     services: Sequence[str],
 ) -> str:
-    cids, missing = running_service_containers(compose, stack, services)
+    cids, missing, failed = running_service_containers(compose, stack, services)
     details: list[str] = []
-    if not cids:
+    if not cids and not failed:
         details.append("docker compose ps -q returned no containers")
+    if failed:
+        details.append(
+            f"could not list containers for service(s): {', '.join(failed)} "
+            "because docker compose ps failed (check that the Compose file is "
+            "valid and Docker is reachable)"
+        )
     if missing:
         details.append(
             f"no running container for service(s): {', '.join(missing)} "

@@ -531,6 +531,36 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(metadata["stopped_services_before"], ["worker"])
         self.assertNotIn("stopped_services_after", metadata)
 
+    def test_pull_failure_report_does_not_flag_intentionally_stopped_service(
+        self,
+    ) -> None:
+        self.wud_file.write_text(
+            "repo/app:latest\nrepo/worker:latest\n",
+            encoding="utf-8",
+        )
+        self.make_stack(
+            "app",
+            [
+                ("app", "repo/app:latest", "cid-app"),
+                ("worker", "repo/worker:latest", None),
+            ],
+        )
+        for image in ("repo/app:latest", "repo/worker:latest"):
+            self.set_image_state(image, f"old-{image}", "sha256:old")
+        (self.fake_root / "stacks" / "app" / "pull_fail").write_text(
+            "",
+            encoding="utf-8",
+        )
+
+        result = self.run_python("--yes")
+
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        report = self.latest_error_report().read_text(encoding="utf-8")
+        self.assertIn("phase=pull", report)
+        self.assertIn("health: container=cid-app", report)
+        # The worker was stopped before the update and is meant to stay stopped.
+        self.assertNotIn("service=worker has no running container", report)
+
     def test_tag_rollback_recovers_running_sibling_when_no_start_fails(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack(
