@@ -9,12 +9,14 @@ from . import compose_rewrite, updater_audit
 from .command import CommandError
 from .compose import (
     COMPOSE_RUNTIME_FORMAT,
+    COMPOSE_RUNTIME_STATE_FORMAT,
     ComposeRuntimeServiceKey,
     ComposeStack,
     compose_override_files_message,
     compose_runtime_extra_config_files,
     compose_runtime_project_shared,
     compose_runtime_service_keys,
+    compose_runtime_service_states,
 )
 from .images import (
     image_has_tag,
@@ -22,6 +24,7 @@ from .images import (
     image_with_tag,
     repo_key,
 )
+from .updater_lifecycle import INACTIVE_CONTAINER_STATES
 from .updater_matching import (
     _expand_network_mode_services,
     _first_match_by_line,
@@ -215,29 +218,55 @@ def plan_tag_exclusions(
             tag=first_match.target.desired_tag,
             source_line=line_no,
         )
-        if repo_updates and runner._can_apply_tag_exclusions(repo_updates):
-            updates.extend(repo_updates)
-            continue
-
-        service_updates = [
-            TagExclusionUpdate(
-                stack=match.stack,
-                service=match.service,
-                image=match.compose_image,
-                image_repo=repo_key(match.compose_image),
-                tag=match.target.desired_tag,
-                source_line=line_no,
-                scope="service",
+        if repo_updates:
+            repo_reason = tag_exclusion_rewrite_error(runner, repo_updates)
+            if not repo_reason:
+                updates.extend(repo_updates)
+                continue
+            runner.log.warning(
+                f"Tag exclusion for line {line_no} cannot be written to every "
+                f"service using {image_repo}, so WUDup will only try the "
+                f"service(s) on this line: {repo_reason}"
             )
-            for match in line_matches
-            if match.service
-        ]
-        if service_updates and runner._can_apply_tag_exclusions(service_updates):
-            updates.extend(service_updates)
-        else:
+
+        service_updates = _service_tag_exclusion_updates(runner, line_matches, line_no)
+        if service_updates is None:
             failures.append((first_match.target, "compose-label-unsupported"))
+        else:
+            updates.extend(service_updates)
 
     return _unique_tag_exclusion_updates(updates), failures
+
+
+def _service_tag_exclusion_updates(
+    runner: Any,
+    line_matches: Sequence[Match],
+    line_no: int,
+) -> list[TagExclusionUpdate] | None:
+    """Return service-scoped updates for a line, or None if they cannot be written.
+
+    Callers pass only matches whose Compose service is known.
+    """
+
+    service_updates = [
+        TagExclusionUpdate(
+            stack=match.stack,
+            service=match.service,
+            image=match.compose_image,
+            image_repo=repo_key(match.compose_image),
+            tag=match.target.desired_tag,
+            source_line=line_no,
+            scope="service",
+        )
+        for match in line_matches
+    ]
+    reason = tag_exclusion_rewrite_error(runner, service_updates)
+    if reason:
+        runner.log.warning(
+            f"Tag exclusion for line {line_no} cannot be written: {reason}"
+        )
+        return None
+    return service_updates
 
 
 def tag_exclusion_repo_updates(
@@ -270,6 +299,15 @@ def can_apply_tag_exclusions(
     runner: Any,
     updates: Sequence[TagExclusionUpdate],
 ) -> bool:
+    return not tag_exclusion_rewrite_error(runner, updates)
+
+
+def tag_exclusion_rewrite_error(
+    runner: Any,
+    updates: Sequence[TagExclusionUpdate],
+) -> str:
+    """Return why the exclusion labels cannot be rendered, or an empty string."""
+
     try:
         for stack, stack_updates in _tag_exclusion_updates_by_stack(updates).items():
             existing_exact_tags = runner._existing_exact_tag_exclusions(stack_updates)
@@ -278,9 +316,9 @@ def can_apply_tag_exclusions(
                 stack_updates,
                 existing_exact_tags=existing_exact_tags,
             )
-    except ComposeTagRewriteError:
-        return False
-    return True
+    except ComposeTagRewriteError as exc:
+        return str(exc) or "the Compose labels cannot be rewritten safely."
+    return ""
 
 
 def apply_tag_exclusions(
@@ -403,13 +441,12 @@ def recreate_tag_exclusion_services(
         if missing_providers:
             up_services = _ordered_unique((*missing_providers, *up_services))
             uses_network_provider = True
-        result = runner._run_compose_up(
+        if _recreate_preserving_runtime_state(
+            runner,
             stack,
             up_services,
+            network_providers,
             no_deps=not uses_network_provider,
-        )
-        if result.ok and (
-            result.wait_handled or runner._wait_for_health(stack, up_services)
         ):
             continue
         for update in stack_updates:
@@ -466,6 +503,129 @@ def _compose_file_refusal_reason(
         "recreated."
     )
     return "compose-override-files"
+
+
+def _recreate_preserving_runtime_state(
+    runner: Any,
+    stack: ComposeStack,
+    services: Sequence[str],
+    network_providers: Mapping[str, str],
+    *,
+    no_deps: bool,
+) -> bool:
+    """Recreate services so WUD sees new labels without starting stopped ones."""
+
+    runtime = _tag_exclusion_runtime_state(runner, stack, services)
+    if runtime is None:
+        return False
+    running, stopped = runtime
+    blocked = _running_consumers_of_stopped_providers(
+        running,
+        stopped,
+        network_providers,
+    )
+    if blocked:
+        providers = _ordered_unique(
+            tuple(network_providers[service] for service in blocked)
+        )
+        runner.log.error(
+            f"[{stack.name}] Service(s) {' '.join(blocked)} are running but use "
+            f"the network of {' '.join(providers)}, which is not running. A "
+            "recreated container could not start without it, so WUDup did not "
+            f"recreate service(s) {' '.join(services)}. The wud.tag.exclude label "
+            "was written; start the network service and recreate the service(s) "
+            "yourself so WUD sees the new label."
+        )
+        return False
+    if stopped:
+        runner.log.info(
+            f"[{stack.name}] Recreating stopped service(s) without starting them: "
+            f"{' '.join(stopped)}"
+        )
+        if not runner.lifecycle._run_compose_up_no_start(stack, stopped).ok:
+            return False
+    if running:
+        result = runner._run_compose_up(
+            stack,
+            running,
+            no_deps=no_deps or bool(stopped),
+        )
+        if not result.ok or not (
+            result.wait_handled or runner._wait_for_health(stack, running)
+        ):
+            return False
+    if stopped:
+        return runner.lifecycle._verify_services_stopped(stack, stopped).ok
+    return True
+
+
+def _running_consumers_of_stopped_providers(
+    running: Sequence[str],
+    stopped: Sequence[str],
+    network_providers: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Return running services whose network_mode provider will stay stopped."""
+
+    unavailable = set(stopped)
+    blocked: list[str] = []
+    changed = True
+    while changed:
+        changed = False
+        for service in running:
+            if service in unavailable:
+                continue
+            if network_providers.get(service) in unavailable:
+                unavailable.add(service)
+                blocked.append(service)
+                changed = True
+    return tuple(blocked)
+
+
+def _tag_exclusion_runtime_state(
+    runner: Any,
+    stack: ComposeStack,
+    services: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Split services into running and stopped, or log why that is unknown."""
+
+    service_list = " ".join(services)
+    try:
+        if not stack.project_name:
+            raise ValueError("Compose project identity is unavailable.")
+        runtime_states = compose_runtime_service_states(
+            runner.docker.ps_format(COMPOSE_RUNTIME_STATE_FORMAT, all_containers=True)
+        )
+    except (CommandError, ValueError) as exc:
+        runner.log.error(
+            f"[{stack.name}] Could not check the running state of service(s) "
+            f"{service_list}, so WUDup did not recreate them. The wud.tag.exclude "
+            "label was written; recreate them yourself so WUD sees the new label. "
+            f"Details: {exc}"
+        )
+        return None
+    running: list[str] = []
+    stopped: list[str] = []
+    for service in services:
+        states = runner.lifecycle._compose_service_runtime_states(
+            stack,
+            service,
+            runtime_states,
+        )
+        state_values = set(states)
+        if len(states) > 1 or (
+            state_values
+            and state_values != {"running"}
+            and not state_values <= INACTIVE_CONTAINER_STATES
+        ):
+            runner.log.error(
+                f"[{stack.name}] Service {service} has more than one container or "
+                "an unexpected state, so WUDup did not recreate it. The "
+                "wud.tag.exclude label was written; recreate the service yourself "
+                "so WUD sees the new label."
+            )
+            return None
+        (running if state_values == {"running"} else stopped).append(service)
+    return tuple(running), tuple(stopped)
 
 
 def mark_tag_exclusions_pending(

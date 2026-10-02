@@ -89,6 +89,57 @@ class ComposeTagUpdateTests(ComposeRewriteTestCase):
         )
         assert stat.S_IMODE(compose_file.stat().st_mode) == 0o640
 
+    def test_stream_rewrite_rejects_duplicate_include_labels(self) -> None:
+        original = (
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.2.3-distroless\n"
+            "    labels:\n"
+            "      - wud.tag.include=^old$$\n"
+            "      - wud.tag.include=^old$$\n"
+        )
+        compose_file = self.write_compose(original)
+        updates = (
+            TagUpdate(
+                old_image="repo/app:1.2.3-distroless",
+                desired_tag="1.3.0-distroless",
+                new_image="repo/app:1.3.0-distroless",
+                services=("app",),
+            ),
+        )
+        stream_updates = (
+            TagStreamUpdate(
+                line_no=1,
+                stack="stack",
+                stack_directory=str(compose_file.parent.resolve(strict=False)),
+                compose_file=compose_file.name,
+                service="app",
+                current_tag="1.2.3-distroless",
+                reported_tag="1.3.0",
+                selected_tag="1.3.0-distroless",
+                decision="preserve",
+                label_key="wud.tag.include",
+                current_label_value="^old$",
+                proposed_label_value=r"^\d+\.\d+\.\d+-distroless$$",
+                proposed_label_regex=r"^\d+\.\d+\.\d+-distroless$",
+                approved=True,
+                reason="approved",
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            ComposeTagRewriteError,
+            "Service app lists the wud.tag.include label more than once",
+        ):
+            apply_compose_tag_updates(
+                compose_file,
+                updates,
+                tag_stream_updates=stream_updates,
+                stack_name="stack",
+            )
+
+        self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+
     def test_stream_rewrite_preserves_unrelated_compose_text(self) -> None:
         original = (
             'name: "jarvis"\n'

@@ -149,7 +149,8 @@ against the planned digest, then writes the final image as
 an exact regex for the resolved tag. Dry-run remains non-mutating; Compose edits
 and final digest writes happen only during apply. Lines without a safe resolved
 tag, custom compound `wud.tag.include` regexes, YAML anchors/aliases,
-interpolation, and inherited image values fail closed.
+interpolation, inherited image values, and WUD labels listed more than once on
+a service (Compose uses only the last one) fail closed.
 
 ## Locking
 
@@ -210,8 +211,13 @@ When you exclude a tag, the updater writes WUD's native
 service using the same image repository can be updated cleanly, the exclusion is
 applied repo-wide; otherwise it falls back to the selected service. Existing
 user-authored exclude regexes are preserved and the updater stores managed exact
-tag exclusions in SQLite. Add `--recreate-excluded-services` to recreate affected
-services immediately so WUD sees the new container labels before its next scan.
+tag exclusions in SQLite. An existing exclude label that uses a Compose variable
+is left unchanged and the line stays pending for a manual edit. Add
+`--recreate-excluded-services` to recreate affected services immediately so WUD
+sees the new container labels before its next scan; stopped services are
+recreated without being started. A running service that uses the network of a
+stopped `network_mode: service:...` provider is not recreated, because it could
+not start again; the line is marked failed so you can recreate it by hand.
 
 Override a WUD-proposed tag directly:
 

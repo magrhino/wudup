@@ -260,12 +260,104 @@ class ComposeTagExclusionTests(ComposeRewriteTestCase):
         replace.assert_not_called()
         self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
 
+    def test_render_refuses_interpolated_exclude_label(self) -> None:
+        for label in (
+            "${APP_TAG_EXCLUDE:-^.*-beta$$}",
+            "$APP_TAG_EXCLUDE",
+            "^rc$$|${APP_TAG_EXCLUDE}",
+        ):
+            with self.subTest(label=label):
+                compose_file = self.write_compose(
+                    "services:\n"
+                    "  app:\n"
+                    "    image: repo/app:1.0\n"
+                    "    labels:\n"
+                    f"    - wud.tag.exclude={label}\n"
+                )
+                original = compose_file.read_text(encoding="utf-8")
+                updates = (self.tag_exclusion_update(tag="1.2"),)
+
+                with self.assertRaisesRegex(
+                    ComposeTagRewriteError,
+                    r"wud\.tag\.exclude label uses a Compose variable.*"
+                    r"Exclude tag 1\.2 by hand",
+                ):
+                    apply_compose_tag_exclusions(
+                        compose_file,
+                        updates,
+                        existing_exact_tags={},
+                    )
+
+                self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
+
+    def test_render_keeps_escaped_dollar_brace_as_literal_regex(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=^beta$${x}\n"
+        )
+
+        rendered, applied = render_compose_tag_exclusions(
+            compose_file,
+            (self.tag_exclusion_update(tag="1.2"),),
+            existing_exact_tags={},
+        )
+
+        self.assertEqual(applied[0].tags, ("1.2",))
+        self.assertIn("- wud.tag.exclude=(?:^beta$${x})|(?:^1\\.2$$)\n", rendered)
+
     def test_render_compose_tag_exclusions_service_not_map(self) -> None:
         compose_file = self.write_compose("services:\n  app: repo/app:1.0\n")
         with self.assertRaisesRegex(ComposeTagRewriteError, "is not a mapping"):
             render_compose_tag_exclusions(
                 compose_file, (self.tag_exclusion_update(),), existing_exact_tags={}
             )
+
+    def test_render_rejects_duplicate_exclude_labels(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=^beta\n"
+            "    - wud.tag.exclude=^rc\n"
+        )
+        updates = (self.tag_exclusion_update(),)
+
+        with self.assertRaisesRegex(
+            ComposeTagRewriteError,
+            "Service app lists the wud.tag.exclude label more than once",
+        ):
+            render_compose_tag_exclusions(compose_file, updates, existing_exact_tags={})
+
+    def test_render_replaces_bare_exclude_label(self) -> None:
+        compose_file = self.write_compose(
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude\n"
+            "    - keep=value\n"
+        )
+
+        rendered, applied = render_compose_tag_exclusions(
+            compose_file,
+            (self.tag_exclusion_update(tag="2.0"),),
+            existing_exact_tags={},
+        )
+
+        self.assertEqual(len(applied), 1)
+        self.assertEqual(
+            rendered,
+            "services:\n"
+            "  app:\n"
+            "    image: repo/app:1.0\n"
+            "    labels:\n"
+            "    - wud.tag.exclude=^2\\.0$$\n"
+            "    - keep=value\n",
+        )
 
     def test_get_service_label_value_none(self) -> None:
         compose_file = self.write_compose(

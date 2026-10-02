@@ -169,6 +169,8 @@ def _service_label_source_rewrite(
     value: str,
     source: str,
     line_offsets: Sequence[int],
+    *,
+    service: str,
 ) -> tuple[tuple[int, int, str], ...]:
     labels = service_config.get("labels")
     if labels is None:
@@ -212,6 +214,7 @@ def _service_label_source_rewrite(
             source,
             line_offsets,
             flow_start,
+            service=service,
         )
 
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
@@ -298,31 +301,30 @@ def _sequence_label_source_rewrites(
     source: str,
     line_offsets: Sequence[int],
     flow_start: int | None,
+    *,
+    service: str,
 ) -> tuple[tuple[int, int, str], ...]:
     replacement = f"{key}={value}"
     flow = flow_start is not None
-    for index, item in enumerate(labels):
-        if not isinstance(item, str):
-            raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
-        label_key, sep, _label_value = item.partition("=")
-        if sep and label_key == key:
-            try:
-                line_no, col = labels.lc.item(index)
-            except (AttributeError, KeyError, TypeError, ValueError) as exc:
-                raise ComposeTagRewriteError(
-                    f"Label {key} source location is unavailable."
-                ) from exc
-            return (
-                _yaml_scalar_source_rewrite(
-                    source,
-                    line_offsets,
-                    line_no,
-                    col,
-                    item,
-                    replacement,
-                    flow=flow,
-                ),
-            )
+    index = _sequence_label_index(labels, key, service)
+    if index is not None:
+        try:
+            line_no, col = labels.lc.item(index)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ComposeTagRewriteError(
+                f"Label {key} source location is unavailable."
+            ) from exc
+        return (
+            _yaml_scalar_source_rewrite(
+                source,
+                line_offsets,
+                line_no,
+                col,
+                labels[index],
+                replacement,
+                flow=flow,
+            ),
+        )
     inserted_replacement = _render_yaml_scalar_like("", replacement, flow=flow)
     if flow_start is not None:
         return _flow_label_addition_rewrites(
@@ -949,7 +951,12 @@ def _reject_yaml_anchor_or_alias_image_value(
             )
 
 
-def _get_service_label_value(service_config: CommentedMap, key: str) -> str:
+def _get_service_label_value(
+    service_config: CommentedMap,
+    key: str,
+    *,
+    service: str,
+) -> str:
     labels = service_config.get("labels")
     if labels is None:
         return ""
@@ -961,7 +968,7 @@ def _get_service_label_value(service_config: CommentedMap, key: str) -> str:
             raise ComposeTagRewriteError(f"Label {key} is not a string value.")
         return value
     if isinstance(labels, CommentedSeq):
-        return _sequence_label_value(labels, key)
+        return _sequence_label_value(labels, key, service)
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
 
 
@@ -980,14 +987,42 @@ def _service_label_present(service_config: CommentedMap, key: str) -> bool:
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)
 
 
-def _sequence_label_value(labels: CommentedSeq, key: str) -> str:
-    for item in labels:
+def _sequence_label_value(labels: CommentedSeq, key: str, service: str) -> str:
+    index = _sequence_label_index(labels, key, service)
+    if index is None:
+        return ""
+    return labels[index].partition("=")[2]
+
+
+def _sequence_label_index(labels: CommentedSeq, key: str, service: str) -> int | None:
+    """Return the index of the entry declaring ``key``, refusing duplicate declarations.
+
+    A bare ``key`` entry counts as the declaration (Compose reads it as an empty
+    value), so writers replace it instead of appending a second entry. Docker Compose
+    keeps the last entry for a repeated list-form label, so reading or editing any
+    single entry of a duplicated key can disagree with what WUD sees.
+    """
+
+    match: int | None = None
+    declared: int | None = None
+    for index, item in enumerate(labels):
         if not isinstance(item, str):
-            raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
-        label_key, sep, label_value = item.partition("=")
-        if sep and label_key == key:
-            return label_value
-    return ""
+            if match is None:
+                raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
+            continue
+        label_key, sep, _label_value = item.partition("=")
+        if label_key != key:
+            continue
+        if declared is not None:
+            raise ComposeTagRewriteError(
+                f"Service {service} lists the {key} label more than once; Docker Compose "
+                "uses only the last one, so WUDup will not change it. Remove the "
+                f"duplicate {key} entries from the service labels, then try again."
+            )
+        declared = index
+        if sep:
+            match = index
+    return declared
 
 
 def _service_comment_tokens(
@@ -1144,6 +1179,8 @@ def _set_service_label_value(
     service_config: CommentedMap,
     key: str,
     value: str,
+    *,
+    service: str,
 ) -> None:
     labels = service_config.get("labels")
     if labels is None:
@@ -1154,13 +1191,10 @@ def _set_service_label_value(
         return
     if isinstance(labels, CommentedSeq):
         replacement = f"{key}={value}"
-        for index, item in enumerate(labels):
-            if not isinstance(item, str):
-                raise ComposeTagRewriteError(_UNSUPPORTED_NON_STRING_LABEL_ENTRY)
-            label_key, sep, _label_value = item.partition("=")
-            if sep and label_key == key:
-                labels[index] = replacement
-                return
-        labels.append(replacement)
+        index = _sequence_label_index(labels, key, service)
+        if index is None:
+            labels.append(replacement)
+        else:
+            labels[index] = replacement
         return
     raise ComposeTagRewriteError(_UNSUPPORTED_SERVICE_LABELS_YAML)

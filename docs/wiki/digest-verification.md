@@ -109,7 +109,8 @@ resolved, cannot be verified locally, or the Compose metadata cannot be written
 safely, the update fails closed and the pending line is restored.
 
 With digest-pin updates turned off, the next update for a pinned service unpins
-it: Compose goes back to `repo/app:<tag>`, the marker is removed, and
+it: Compose goes back to `repo/app:<tag>`, the marker line is removed (your
+own comments beside it are kept), and
 `wud.tag.include` changes from the exact rule to the tag's release line (for
 example `^v\d+(?:\.\d+)+$` for `v1.14.1`), so WUD reports newer releases again.
 Four-part tags such as `4.0.19.2979-ls321` also get the managed
