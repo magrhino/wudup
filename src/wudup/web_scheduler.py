@@ -44,6 +44,24 @@ from .web_models import (
 
 AUTO_UPDATE_POLL_SECONDS = 60.0
 AUTO_UPDATE_GRACE_SECONDS = 300
+# A slot that no tick could check during its grace window, because a job was
+# running or the check failed (including WUD or Compose discovery being
+# unavailable), may still run late, but never more than this
+# long after its scheduled time. Past that it is recorded as missed.
+AUTO_UPDATE_MAX_LATE_SECONDS = 3600
+AUTO_UPDATE_MISSED_IDLE_REASON = (
+    "WUDup checked this scheduled update but found no pending update it could "
+    "apply automatically, so nothing ran. If you expected an update, check "
+    "that WUD reports one for this service and that the service is not "
+    "snoozed, waiting on another service, or blocked in the update plan."
+)
+AUTO_UPDATE_MISSED_LATE_REASON = (
+    "WUDup could not start this scheduled update within "
+    f"{AUTO_UPDATE_MAX_LATE_SECONDS // 60} minutes of its scheduled time "
+    "because another update job was running or the update check kept "
+    "failing, so it was skipped. It will run at its next scheduled time; "
+    "apply the update from the WebUI to install it sooner."
+)
 AUTO_UPDATE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 LOGGER = logging.getLogger(__name__)
 AutoUpdateCandidate = tuple[int, tuple[str, ...], tuple[AutoUpdatePolicy, ...]]
@@ -53,12 +71,22 @@ class AutoUpdateScheduleReservationError(RuntimeError):
     """Raised when an automatic update schedule slot was already claimed."""
 
 
+class _AutoUpdateCheckIncomplete(RuntimeError):
+    """Raised when WUD or Compose discovery was unavailable for a check."""
+
+
 class EffectiveConfigLoader(Protocol):
     def __call__(self, settings: WebSettings) -> UpdaterConfig: ...
 
 
 def initialize_auto_update_scheduler_state(state: Any) -> None:
     state.web_auto_update_started_at = datetime.now(timezone.utc)
+    # When a tick last finished checking every due slot without submitting a
+    # job or failing. A slot whose grace window closed with no such check
+    # since its scheduled time stays due until one runs, for at most
+    # AUTO_UPDATE_MAX_LATE_SECONDS. A slot that will no longer run is recorded
+    # as missed in auto_update_schedule_runs.
+    state.web_auto_update_evaluated_at = None
     state.web_auto_update_stop = Event()
     state.web_auto_update_thread = None
 
@@ -151,8 +179,10 @@ def _auto_update_tick(
                 effective_config_loader=effective_config_loader,
                 now_utc=now_utc,
                 started_at=started_at_utc,
+                last_evaluated_at=_auto_update_evaluated_at(app.state),
             )
             if candidate is None:
+                app.state.web_auto_update_evaluated_at = now_utc
                 return None
             selection, plan, pending_source = candidate
             with _immediate_transaction(conn):
@@ -216,10 +246,18 @@ def _auto_update_tick(
         return response
     except AutoUpdateScheduleReservationError:
         return None
+    except _AutoUpdateCheckIncomplete:
+        # Leave the evaluated time unchanged so the slot stays due.
+        return None
     except Exception:
         if job_submitted and start_event is not None:
             start_event.set()
         raise
+
+
+def _auto_update_evaluated_at(state: Any) -> datetime | None:
+    evaluated_at = getattr(state, "web_auto_update_evaluated_at", None)
+    return evaluated_at if isinstance(evaluated_at, datetime) else None
 
 
 def _auto_update_candidate(
@@ -229,6 +267,7 @@ def _auto_update_candidate(
     effective_config_loader: EffectiveConfigLoader,
     now_utc: datetime,
     started_at: datetime,
+    last_evaluated_at: datetime | None = None,
 ) -> tuple[
     AutoUpdateSelection,
     DryRunPlan,
@@ -239,6 +278,7 @@ def _auto_update_candidate(
         settings,
         now_utc=now_utc,
         started_at=started_at,
+        last_evaluated_at=last_evaluated_at,
     )
     if not policies:
         return None
@@ -260,7 +300,7 @@ def _auto_update_candidate(
         known_digest_provenance_by_service=known_digest_provenance_by_service,
     )
     if grouping.status != "ready":
-        return None
+        raise _AutoUpdateCheckIncomplete
 
     pending_service_keys = _pending_service_keys(grouping)
     dependency_snoozes = active_dependency_snooze_rows(
@@ -274,6 +314,12 @@ def _auto_update_candidate(
         dependency_snoozes=dependency_snoozes,
     )
     if selection is None:
+        if pending_source.degraded and not pending_source.exists:
+            # WUD's container metadata was unavailable, so the source is empty
+            # and nothing was checked. A source degraded only by individual
+            # containers still counts as a full check, so one container WUD
+            # cannot scan does not hold every idle slot for the late limit.
+            raise _AutoUpdateCheckIncomplete
         return None
 
     plan = _build_auto_update_plan(
@@ -324,6 +370,7 @@ def _due_auto_update_policies(
     *,
     now_utc: datetime,
     started_at: datetime,
+    last_evaluated_at: datetime | None = None,
 ) -> dict[str, AutoUpdatePolicy]:
     tz = ZoneInfo(settings.config.timezone_name)
     local_now = now_utc.astimezone(tz)
@@ -345,7 +392,7 @@ def _due_auto_update_policies(
             parsed_time = datetime_time.fromisoformat(update_time)
         except ValueError:
             continue
-        occurrence = _auto_update_due_occurrence(
+        occurrence = _auto_update_latest_occurrence(
             local_now=local_now,
             parsed_time=parsed_time,
             days=days,
@@ -354,12 +401,11 @@ def _due_auto_update_policies(
         )
         if occurrence is None:
             continue
-        scheduled_local, scheduled_for, window_end = occurrence
+        scheduled_local, scheduled_for = occurrence
+        window_end = scheduled_for + timedelta(seconds=AUTO_UPDATE_GRACE_SECONDS)
         if started_at >= window_end:
             continue
         service_key = str(row["service_key"])
-        if active_snooze(conn, service_key=service_key, now=now_text) is not None:
-            continue
         schedule_key = _auto_update_schedule_key(
             service_key,
             local_date=scheduled_local.date().isoformat(),
@@ -368,7 +414,15 @@ def _due_auto_update_policies(
         )
         if _auto_update_schedule_recorded(conn, schedule_key):
             continue
-        policies[service_key] = AutoUpdatePolicy(
+        saved_after_slot = str(row["updated_at"]) > scheduled_for.isoformat()
+        if saved_after_slot and now_utc >= window_end:
+            # A policy saved after the slot's time may not have scheduled that
+            # slot, so it may run only inside the slot's grace window. Any
+            # policy edit updates updated_at, so an edit while a slot is held
+            # late also drops that slot here without a missed row; it fails
+            # closed and the next scheduled slot runs normally.
+            continue
+        policy = AutoUpdatePolicy(
             service_key=service_key,
             update_mode=str(row["update_mode"] or settings.config.update_mode),
             auto_update_time=update_time,
@@ -376,17 +430,29 @@ def _due_auto_update_policies(
             schedule_key=schedule_key,
             scheduled_for=scheduled_for,
         )
+        missed_reason = _auto_update_missed_reason(
+            scheduled_for,
+            now_utc=now_utc,
+            last_evaluated_at=last_evaluated_at,
+        )
+        if missed_reason is not None:
+            _record_missed_auto_update_slot(conn, settings, policy, missed_reason)
+            continue
+        if active_snooze(conn, service_key=service_key, now=now_text) is not None:
+            continue
+        policies[service_key] = policy
     return policies
 
 
-def _auto_update_due_occurrence(
+def _auto_update_latest_occurrence(
     *,
     local_now: datetime,
     parsed_time: datetime_time,
     days: Sequence[str],
     now_utc: datetime,
     tz: ZoneInfo,
-) -> tuple[datetime, datetime, datetime] | None:
+) -> tuple[datetime, datetime] | None:
+    """Return the most recent slot at or before now, from today or yesterday."""
     candidate_dates = (
         local_now.date(),
         (local_now - timedelta(days=1)).date(),
@@ -397,10 +463,74 @@ def _auto_update_due_occurrence(
         if day not in days:
             continue
         scheduled_for = scheduled_local.astimezone(timezone.utc)
-        window_end = scheduled_for + timedelta(seconds=AUTO_UPDATE_GRACE_SECONDS)
-        if scheduled_for <= now_utc < window_end:
-            return scheduled_local, scheduled_for, window_end
+        if scheduled_for > now_utc:
+            continue
+        return scheduled_local, scheduled_for
     return None
+
+
+def _auto_update_missed_reason(
+    scheduled_for: datetime,
+    *,
+    now_utc: datetime,
+    last_evaluated_at: datetime | None,
+) -> str | None:
+    """Return why a past slot will no longer run, or None while it is due.
+
+    A slot is due during its grace window. After that it stays due only while
+    no tick has finished checking it since its scheduled time, because a job
+    was running or the check failed, and for at most
+    AUTO_UPDATE_MAX_LATE_SECONDS.
+    """
+    if now_utc < scheduled_for + timedelta(seconds=AUTO_UPDATE_GRACE_SECONDS):
+        return None
+    if last_evaluated_at is not None and last_evaluated_at >= scheduled_for:
+        return AUTO_UPDATE_MISSED_IDLE_REASON
+    if now_utc >= scheduled_for + timedelta(seconds=AUTO_UPDATE_MAX_LATE_SECONDS):
+        return AUTO_UPDATE_MISSED_LATE_REASON
+    return None
+
+
+def _record_missed_auto_update_slot(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    policy: AutoUpdatePolicy,
+    reason: str,
+) -> None:
+    now = utc_timestamp()
+    metadata = {
+        "source": "webui-auto",
+        "service_keys": [policy.service_key],
+        "scheduled_for": policy.scheduled_for.isoformat(),
+        "timezone": settings.config.timezone_name,
+        "update_mode": policy.update_mode,
+        "status": "missed",
+        "reason": reason,
+    }
+    with _immediate_transaction(conn):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO auto_update_schedule_runs (
+                schedule_key,
+                service_key,
+                scheduled_for,
+                run_id,
+                status,
+                created_at,
+                updated_at,
+                metadata_json
+            )
+            VALUES (?, ?, ?, NULL, 'missed', ?, ?, ?)
+            """,
+            (
+                policy.schedule_key,
+                policy.service_key,
+                policy.scheduled_for.isoformat(),
+                now,
+                now,
+                _json_object(metadata),
+            ),
+        )
 
 
 def _auto_update_selection(
