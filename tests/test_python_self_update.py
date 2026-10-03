@@ -12,6 +12,7 @@ from wudup.self_update import (
     _inspected_container_image,
     _is_release_image_tag,
     current_container_image,
+    edge_build_version,
     github_release_self_update,
     is_edge_image,
     is_self_update_target,
@@ -414,6 +415,18 @@ class IsEdgeImageTests(unittest.TestCase):
         ):
             with self.subTest(image=image):
                 self.assertFalse(is_edge_image(image))
+
+    def test_edge_build_version_reads_only_valid_edge_tags(self) -> None:
+        self.assertEqual(
+            edge_build_version({"WUDUP_BUILD_VERSION": "edge-0123abc"}),
+            "edge-0123abc",
+        )
+        for value in ("", "v1.2.3", "edge", "edge-XYZ1234", "edge-0123abc-trivy"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    edge_build_version({"WUDUP_BUILD_VERSION": value}), ""
+                )
+        self.assertEqual(edge_build_version({}), "")
 
     def test_github_release_self_update_skips_edge_image(self) -> None:
         with (

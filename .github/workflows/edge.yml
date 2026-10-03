@@ -30,7 +30,9 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
-      packages: write
+      packages: write # push staged and edge images to GHCR
+    outputs:
+      sha: ${{ steps.edge-commit.outputs.sha }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -83,3 +85,36 @@ jobs:
           set -euo pipefail
 
           bash .github/scripts/publish-release-image.sh all
+
+  catch-up-main:
+    name: build the head of main if edge missed it
+    needs:
+      - publish-edge-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # start an edge run for an unbuilt head of main
+      contents: read
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Start an edge run for the head of main when needed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILT_SHA: ${{ needs.publish-edge-image.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          bash .github/scripts/edge-catch-up.sh

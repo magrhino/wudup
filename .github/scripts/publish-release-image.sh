@@ -72,6 +72,9 @@ stage_and_verify() {
     --label "org.opencontainers.image.version=$RELEASE_TAG"
   )
   build_args=(--build-arg "APT_REFRESH=$APT_REFRESH")
+  if [[ "$release_channel" == edge ]]; then
+    build_args+=(--build-arg "WUDUP_BUILD_VERSION=$RELEASE_TAG")
+  fi
   tag_args=(-t "$staging_ref")
 
   build_image() {

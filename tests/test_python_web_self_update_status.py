@@ -154,6 +154,19 @@ def test_self_update_get_skips_edge_images_without_offering_a_downgrade(
         assert "edge test image" in applied.json()["detail"]
 
 
+def test_status_reports_edge_build_version(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
+
+    monkeypatch.delenv("WUDUP_BUILD_VERSION", raising=False)
+    assert client.get("/api/v1/status").json()["build_version"] == ""
+
+    monkeypatch.setenv("WUDUP_BUILD_VERSION", "edge-0123abc")
+    assert client.get("/api/v1/status").json()["build_version"] == "edge-0123abc"
+
+    monkeypatch.setenv("WUDUP_BUILD_VERSION", "not-a-build")
+    assert client.get("/api/v1/status").json()["build_version"] == ""
+
+
 def test_self_update_get_can_use_local_demo_fixture(tmp_path: Path) -> None:
     client = _client(
         tmp_path,

@@ -76,7 +76,9 @@ EOF
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
+    tests/test-edge-catch-up.sh \
     .github/scripts/publish-release-image.sh \
+    .github/scripts/edge-catch-up.sh \
     tests/fakes/docker
 
   run shellcheck \
@@ -90,7 +92,9 @@ EOF
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
+    tests/test-edge-catch-up.sh \
     .github/scripts/publish-release-image.sh \
+    .github/scripts/edge-catch-up.sh \
     tests/fakes/docker
 
   for test_script in tests/test-*.sh; do

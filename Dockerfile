@@ -90,6 +90,11 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh /app/bin/docker-update-from-wud \
     && mkdir -p /host/docker /out /logs
 
+# Edge builds record their edge-<sha> tag so the WebUI can show the running
+# commit; release and local builds leave it empty.
+ARG WUDUP_BUILD_VERSION=""
+ENV WUDUP_BUILD_VERSION=$WUDUP_BUILD_VERSION
+
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
   CMD curl -fsS -o /dev/null "http://127.0.0.1:${WUD_WEB_PORT:-7417}/readyz" || exit 1
 

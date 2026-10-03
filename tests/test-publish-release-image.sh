@@ -182,6 +182,12 @@ if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
   exit 1
 fi
 
+# Stable releases never bake an edge build version into the image.
+if grep -Fq -- "WUDUP_BUILD_VERSION" "$FAKE_DOCKER_LOG"; then
+  printf 'stable release build unexpectedly set WUDUP_BUILD_VERSION\n' >&2
+  exit 1
+fi
+
 # Stable releases never look up the head of main.
 if [[ -s "$FAKE_GH_LOG" ]]; then
   printf 'stable release publish unexpectedly called gh\n' >&2
@@ -197,6 +203,7 @@ edge_staging_ref="ghcr.io/magrhino/wudup:staging-edge-${RELEASE_SHA}"
 grep -Fq -- "-t ${edge_staging_ref} " "$FAKE_DOCKER_LOG"
 grep -Fq -- "-t ${edge_staging_ref}-trivy " "$FAKE_DOCKER_LOG"
 grep -Fq -- "--label org.opencontainers.image.version=edge-0123456" "$FAKE_DOCKER_LOG"
+grep -Fq -- "--build-arg WUDUP_BUILD_VERSION=edge-0123456" "$FAKE_DOCKER_LOG"
 [[ "$(grep -c -- '--scanners vuln' "$FAKE_DOCKER_LOG")" == 4 ]]
 expected_edge_tags="$(printf '%s\n' \
   ghcr.io/magrhino/wudup:edge \

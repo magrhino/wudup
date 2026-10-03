@@ -95,6 +95,7 @@ deployments can only read cached scan metadata.
 | `PYTHON_BIN` | `python3`, with repo `.venv` fallback when unset | Python interpreter used by Python entrypoint wrappers. Set this to bypass automatic `.venv` fallback. |
 | `WUDUP_VENV` | Repo-local `.venv` | Optional venv path used by the `docker-update-from-wud` wrapper for runtime dependencies. |
 | `WUD_APP_DIR` | `/app` | Application root inside the helper container. |
+| `WUDUP_BUILD_VERSION` | Empty; `edge-<sha>` in edge images | Set by the image build, not by operators. Edge images record their commit here; the WebUI shows it and `/api/v1/status` returns it as `build_version`. |
 
 ## Release Notes And Notifications
 

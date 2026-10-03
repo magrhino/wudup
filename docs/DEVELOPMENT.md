@@ -424,13 +424,21 @@ so re-running an older run publishes its `edge-<sha>` tags without moving
 `edge` backwards; if the head of `main` cannot be checked, no edge tags move.
 Re-running rebuilds `edge-<sha>`, so pin a digest when exact bytes matter.
 A run still waiting to start is replaced by a newer one, so a commit pushed
-during a run may get no `edge-<sha>` tag. If a re-run of an older commit
-replaces the newest waiting run, `edge` stays behind `main` until the next push.
-Start a fresh run for the current `main` to catch `edge` up:
+during a run may get no `edge-<sha>` tag. After each successful run, a
+catch-up job starts a fresh run for `main` when the head moved on and has no
+successful edge build yet. That covers a re-run of an older commit that
+replaced the newest waiting run, and a `[skip ci]` push that lands while an
+edge run is active or waiting. A `[skip ci]` push made while no edge run is
+active starts nothing, so `edge` stays behind until the next push to `main`.
+In that case, or if the catch-up job cannot reach GitHub, start a run by hand:
 
 ```bash
 gh workflow run edge.yml --ref main
 ```
+
+Edge images carry their `edge-<sha>` tag in `WUDUP_BUILD_VERSION`, and the
+WebUI sidebar shows `edge <sha>` linked to that commit instead of the release
+version.
 
 Soak `edge` on production before merging the open Release Please PR; the PR
 keeps collecting commits until then. WebUI self-update is skipped on `edge`

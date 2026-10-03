@@ -1042,6 +1042,7 @@ export interface ApplyJobLogResponse {
 export interface StatusResponse {
   ok: boolean;
   version: string;
+  build_version: string;
   wud_file: string;
   wud_file_exists: boolean;
   pending_count: number;
