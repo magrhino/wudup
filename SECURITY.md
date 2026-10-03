@@ -326,7 +326,8 @@ The blocking policy is:
   is moved. Fix the reported dependency or scan failure and retry the release.
 
 The `edge` workflow applies the same staged scan and promotion barrier to
-builds of `main` before moving the `edge` and `edge-<sha>` tags. Edge images are
+builds of `main` before moving the `edge-<sha>` tags, and moves `edge` only while
+that commit is still the head of `main`. Edge images are
 for maintainer testing; they are not releases and carry no release sign-off.
 
 Scan findings, target digests, and scanner errors are recorded in the release

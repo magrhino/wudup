@@ -6,8 +6,9 @@ on:
       - main
   workflow_dispatch:
 
-# Queue runs instead of cancelling them so edge never moves back to an older
-# commit and a half-promoted run is never interrupted.
+# Never cancel a running publish mid-promotion. GitHub still replaces a waiting
+# run with a newer one; the publish script keeps re-runs of older commits from
+# moving edge backwards.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -73,6 +74,7 @@ jobs:
       - name: Scan all staged images and publish edge tags
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: edge
           RELEASE_TAG: ${{ steps.edge-commit.outputs.tag }}
           RELEASE_SHA: ${{ steps.edge-commit.outputs.sha }}

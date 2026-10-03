@@ -11,7 +11,8 @@ case "$requested_variant" in
 esac
 
 # Stable releases move vX.Y.Z, X.Y.Z, X.Y, and latest. Edge builds of main move
-# only edge and the immutable edge-<sha> tag passed as RELEASE_TAG.
+# only the edge-<sha> tag passed as RELEASE_TAG and, while the commit is still
+# the head of main, edge. Re-running an edge build rebuilds edge-<sha>.
 release_channel="${RELEASE_CHANNEL:-stable}"
 case "$release_channel" in
   stable)
@@ -20,6 +21,11 @@ case "$release_channel" in
   edge)
     if [[ ! "${RELEASE_TAG:-}" =~ ^edge-[0-9a-f]{7,40}$ ]]; then
       printf 'Edge images need RELEASE_TAG formatted as edge-<commit sha>, got: %s\n' "${RELEASE_TAG:-}" >&2
+      exit 2
+    fi
+    if [[ "${RELEASE_SHA:-}" != "${RELEASE_TAG#edge-}"* ]]; then
+      printf 'Edge tag %s does not match commit %s; no images were built. Check the edge workflow inputs.\n' \
+        "$RELEASE_TAG" "${RELEASE_SHA:-}" >&2
       exit 2
     fi
     # Keep edge staging separate so a release of the same commit cannot race it.
@@ -176,15 +182,32 @@ else
   stage_and_verify "$requested_variant"
 fi
 
+# Re-runs keep their original commit, so only move edge for the head of main;
+# otherwise a re-run of an older commit would move edge backwards.
+move_edge=1
+if [[ "$release_channel" == edge ]]; then
+  if ! main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" ||
+    [[ ! "$main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'Edge publish stopped: could not confirm whether %s is still the head of main, so no edge tags were moved. Re-run the edge workflow.\n' \
+      "$RELEASE_SHA" >&2
+    exit 1
+  fi
+  if [[ "$main_sha" != "$RELEASE_SHA" ]]; then
+    move_edge=0
+    printf 'Leaving edge unchanged: %s is no longer the head of main (now %s). Publishing only %s.\n' \
+      "$RELEASE_SHA" "$main_sha" "$RELEASE_TAG"
+  fi
+fi
+
 # No production tag moves until every requested variant/platform passes.
 for index in "${!verified_refs[@]}"; do
   verified_ref="${verified_refs[$index]}"
   suffix="${verified_suffixes[$index]}"
   if [[ "$release_channel" == edge ]]; then
-    production_tags=(
-      "$image:$RELEASE_TAG$suffix"
-      "$image:edge$suffix"
-    )
+    production_tags=("$image:$RELEASE_TAG$suffix")
+    if (( move_edge )); then
+      production_tags+=("$image:edge$suffix")
+    fi
   else
     production_tags=(
       "$image:$RELEASE_TAG$suffix"

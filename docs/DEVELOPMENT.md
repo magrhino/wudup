@@ -413,14 +413,20 @@ also run the same publisher as a fallback.
 
 ### Edge Channel
 
-Every push to `main` runs the `edge` workflow, which builds both variants for
+Pushes to `main` run the `edge` workflow, which builds both variants for
 amd64 and arm64 with the same smoke test, digest-pinned scan, and promotion
 barrier as releases, then moves only `edge`, `edge-<sha>`, `edge-trivy`, and
 `edge-<sha>-trivy` (`<sha>` is the 7-character commit). It creates no GitHub
 Release and never moves `latest`, `X.Y.Z`, `X.Y`, or `vX.Y.Z`, so users and
-WebUI self-update, which follow GitHub's latest release, are unaffected. Edge
-runs queue rather than cancel, so `edge` never moves back to an older commit.
-Rerun it for the current `main` with:
+WebUI self-update, which follow GitHub's latest release, are unaffected. `edge`
+and `edge-trivy` move only when the built commit is still the head of `main`,
+so re-running an older run publishes its `edge-<sha>` tags without moving
+`edge` backwards; if the head of `main` cannot be checked, no edge tags move.
+Re-running rebuilds `edge-<sha>`, so pin a digest when exact bytes matter.
+A run still waiting to start is replaced by a newer one, so a commit pushed
+during a run may get no `edge-<sha>` tag. If a re-run of an older commit
+replaces the newest waiting run, `edge` stays behind `main` until the next push.
+Start a fresh run for the current `main` to catch `edge` up:
 
 ```bash
 gh workflow run edge.yml --ref main

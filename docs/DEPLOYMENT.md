@@ -75,8 +75,13 @@ The `edge` and `edge-<sha>` tags (plus `edge-trivy` and `edge-<sha>-trivy`) are
 unreleased builds of `main` for testing changes before a stable release. They
 pass the same image scan as releases but may change or break at any time, so
 use `latest` or a release tag for normal deployments. WebUI self-update is
-skipped on `edge` images; set the image back to a release tag to receive stable
-releases again.
+skipped on `edge` images, so pull new `edge` builds from the host:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Set the image back to a release tag to receive stable releases again.
 
 Build a local helper image from this repository only for development or smoke
 testing:
