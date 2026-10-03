@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .command import CommandResult, CommandRunner
+from .command import CommandError, CommandResult, CommandRunner
 from .compose import ComposeCli, compose_discovery_message, compose_files_under
 from .config import COMPOSE_IGNORE_PATHS_ENV, ConfigError, parse_compose_ignore_paths
 
@@ -188,22 +188,21 @@ class Doctor:
                 project_directory = self._mapped_project_directory(compose_file)
                 if project_directory is None:
                     continue
-            result = self.runner.capture(
-                self.compose._compose_args(
-                    compose_file.name,
-                    "config",
-                    project_directory=project_directory,
-                ),
-                cwd=compose_file.parent,
-                check=False,
-            )
             label = f"compose config {compose_file}"
-            if result.ok:
+            try:
+                # Same render as Compose discovery, so a request that already
+                # rendered this stack reuses it instead of running Compose again.
+                self.compose.config_json(
+                    compose_file.parent,
+                    compose_file.name,
+                    project_directory=project_directory,
+                )
+            except CommandError as exc:
+                self._record("FAIL", label, _failure_detail(exc.result))
+            else:
                 valid_count += 1
                 self._record("PASS", label)
                 self._check_bind_mount_safety(compose_file, project_directory)
-            else:
-                self._record("FAIL", label, _failure_detail(result))
 
         if valid_count > 0:
             self._record(

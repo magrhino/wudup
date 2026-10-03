@@ -299,8 +299,7 @@ without storing or printing the raw recovery claim.
 
 ## Maintenance
 
-Pull the new image and recreate WUDup so startup sync refreshes the managed WUD
-script volume:
+Pull the new image and recreate WUDup:
 
 ```bash
 WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
@@ -314,3 +313,12 @@ For local image development, use the build example instead:
 docker compose -f docs/examples/docker-compose.build.yml build wudup
 docker compose -f docs/examples/docker-compose.build.yml up -d --force-recreate wudup
 ```
+
+### Slow Pages
+
+API responses that run Docker or WUD API calls include a `Server-Timing`
+header. Open your browser's developer tools, select a request such as
+`/api/v1/pending`, and check its timing details: `docker` and `wud` show the
+time and call count for each, and `reused` counts Docker reads the request
+shared instead of repeating. Every request still reads current container and
+WUD state; nothing is reused across requests.

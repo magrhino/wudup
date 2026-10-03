@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from fastapi import Request, Response
 
 from . import __version__, web_wud_api
+from .command import CommandRunner
 from .config import (
     COMPOSE_IGNORE_PATHS_ENV,
     DIGEST_PIN_UPDATES_ENV,
@@ -159,7 +160,13 @@ def missing_readiness_checks(checks: Sequence[DoctorCheckResponse]) -> list[str]
 def web_doctor_result(settings: WebSettings, request: Request) -> DoctorDataResult:
     try:
         options, env = _web_doctor_options_and_env(settings)
-        result = Doctor(options, environ=env).run_result()
+        # Run Docker with the same environment as planning and apply jobs, so
+        # Doctor checks the stacks they use and reuses this request's renders.
+        result = Doctor(
+            options,
+            environ=env,
+            runner=CommandRunner(env=settings.command_env),
+        ).run_result()
     except DoctorConfigError as exc:
         result = _doctor_configuration_result(exc)
     return DoctorDataResult(
