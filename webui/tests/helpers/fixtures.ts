@@ -277,6 +277,7 @@ export function statusResponse(
   return {
     ok: true,
     version: "0.24.2",
+    build_version: "",
     wud_file: "/out/images.todo",
     wud_file_exists: true,
     pending_count: 1,

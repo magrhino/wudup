@@ -10,6 +10,33 @@ case "$requested_variant" in
     ;;
 esac
 
+# Stable releases move vX.Y.Z, X.Y.Z, X.Y, and latest. Edge builds of main move
+# only the edge-<sha> tag passed as RELEASE_TAG and, while the commit is still
+# the head of main, edge. Re-running an edge build rebuilds edge-<sha>.
+release_channel="${RELEASE_CHANNEL:-stable}"
+case "$release_channel" in
+  stable)
+    staging_prefix="staging-"
+    ;;
+  edge)
+    if [[ ! "${RELEASE_TAG:-}" =~ ^edge-[0-9a-f]{7,40}$ ]]; then
+      printf 'Edge images need RELEASE_TAG formatted as edge-<commit sha>, got: %s\n' "${RELEASE_TAG:-}" >&2
+      exit 2
+    fi
+    if [[ "${RELEASE_SHA:-}" != "${RELEASE_TAG#edge-}"* ]]; then
+      printf 'Edge tag %s does not match commit %s; no images were built. Check the edge workflow inputs.\n' \
+        "$RELEASE_TAG" "${RELEASE_SHA:-}" >&2
+      exit 2
+    fi
+    # Keep edge staging separate so a release of the same commit cannot race it.
+    staging_prefix="staging-edge-"
+    ;;
+  *)
+    printf 'RELEASE_CHANNEL must be stable or edge, got: %s\n' "$release_channel" >&2
+    exit 2
+    ;;
+esac
+
 # Use the same pinned scanner as the optional image, outside the scanned image.
 scanner_image="$(sed -n 's/^FROM \(aquasec\/trivy:[^ ]*\) AS trivy$/\1/p' Dockerfile)"
 if [[ ! "$scanner_image" =~ ^aquasec/trivy:[^@]+@sha256:[0-9a-f]{64}$ ]]; then
@@ -38,13 +65,16 @@ stage_and_verify() {
 
   image="$REGISTRY/$IMAGE_NAME"
   expected_platforms="linux/amd64 linux/arm64"
-  staging_ref="$image:staging-${RELEASE_SHA}${suffix}"
+  staging_ref="$image:${staging_prefix}${RELEASE_SHA}${suffix}"
   label_args=(
     --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
     --label "org.opencontainers.image.revision=$RELEASE_SHA"
     --label "org.opencontainers.image.version=$RELEASE_TAG"
   )
   build_args=(--build-arg "APT_REFRESH=$APT_REFRESH")
+  if [[ "$release_channel" == edge ]]; then
+    build_args+=(--build-arg "WUDUP_BUILD_VERSION=$RELEASE_TAG")
+  fi
   tag_args=(-t "$staging_ref")
 
   build_image() {
@@ -155,16 +185,40 @@ else
   stage_and_verify "$requested_variant"
 fi
 
+# Re-runs keep their original commit, so only move edge for the head of main;
+# otherwise a re-run of an older commit would move edge backwards.
+move_edge=1
+if [[ "$release_channel" == edge ]]; then
+  if ! main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" ||
+    [[ ! "$main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'Edge publish stopped: could not confirm whether %s is still the head of main, so no edge tags were moved. Re-run the edge workflow.\n' \
+      "$RELEASE_SHA" >&2
+    exit 1
+  fi
+  if [[ "$main_sha" != "$RELEASE_SHA" ]]; then
+    move_edge=0
+    printf 'Leaving edge unchanged: %s is no longer the head of main (now %s). Publishing only %s.\n' \
+      "$RELEASE_SHA" "$main_sha" "$RELEASE_TAG"
+  fi
+fi
+
 # No production tag moves until every requested variant/platform passes.
 for index in "${!verified_refs[@]}"; do
   verified_ref="${verified_refs[$index]}"
   suffix="${verified_suffixes[$index]}"
-  production_tags=(
-    "$image:$RELEASE_TAG$suffix"
-    "$image:$VERSION$suffix"
-    "$image:$MINOR_VERSION$suffix"
-    "$image:latest$suffix"
-  )
+  if [[ "$release_channel" == edge ]]; then
+    production_tags=("$image:$RELEASE_TAG$suffix")
+    if (( move_edge )); then
+      production_tags+=("$image:edge$suffix")
+    fi
+  else
+    production_tags=(
+      "$image:$RELEASE_TAG$suffix"
+      "$image:$VERSION$suffix"
+      "$image:$MINOR_VERSION$suffix"
+      "$image:latest$suffix"
+    )
+  fi
 
   for ref in "${production_tags[@]}"; do
     docker buildx imagetools create --tag "$ref" "$verified_ref"

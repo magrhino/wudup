@@ -340,6 +340,21 @@ describe("app shell", () => {
     );
     expect(buildLink.exists()).toBe(true);
     expect(buildLink.text()).toBe("dev-build");
+
+    stores.connection.status = statusResponse({
+      version: "0.24.2",
+      build_version: "edge-0123abc",
+    });
+    await nextTick();
+
+    const edgeLink = wrapper.find(
+      'a[href="https://github.com/magrhino/wudup/commit/0123abc"]',
+    );
+    expect(edgeLink.exists()).toBe(true);
+    expect(edgeLink.text()).toBe("edge 0123abc");
+    expect(edgeLink.attributes("title")).toBe(
+      "Edge build of commit 0123abc; open it on GitHub",
+    );
   });
 
   it("cycles theme preference from system to light to dark", async () => {

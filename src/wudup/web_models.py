@@ -1100,6 +1100,7 @@ class HealthResponse(BaseModel):
 class StatusResponse(BaseModel):
     ok: bool
     version: str
+    build_version: str = ""
     wud_file: str
     wud_file_exists: bool
     pending_count: int
