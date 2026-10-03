@@ -360,7 +360,9 @@ class CommandRunner:
         return merged
 
 
-_DOCKER_OPTIONS_WITH_VALUE = frozenset(
+# Compose options WUDup itself passes before the Compose subcommand. Anything
+# else before a subcommand makes the command ineligible for reuse.
+_COMPOSE_OPTIONS_WITH_VALUE = frozenset(
     {"-f", "--file", "-p", "--project-name", "--project-directory", "--env-file"}
 )
 _REUSABLE_DOCKER_READS = frozenset({"inspect", "ps", "version"})
@@ -371,36 +373,35 @@ def _timing_phase(argv: tuple[str, ...]) -> str:
     return "docker" if argv and Path(argv[0]).name == "docker" else "command"
 
 
-def _subcommand(tokens: Sequence[str]) -> tuple[str, int]:
+def _compose_subcommand(tokens: Sequence[str]) -> str:
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token in _DOCKER_OPTIONS_WITH_VALUE:
+        if token in _COMPOSE_OPTIONS_WITH_VALUE:
             index += 2
             continue
         if token.startswith("-"):
-            index += 1
-            continue
-        return token, index
-    return "", index
+            return ""
+        return token
+    return ""
 
 
 def _is_reusable_read(argv: tuple[str, ...]) -> bool:
     """Whether a request may reuse this Docker command's earlier result.
 
     Only commands that read Docker or Compose state qualify, so reuse can never
-    skip a pull, restart, or rewrite.
+    skip a pull, restart, or rewrite. Parsing fails closed: a global option or
+    an option WUDup does not pass makes the command ineligible, because its
+    value could otherwise be mistaken for a read subcommand.
     """
 
-    if not argv or Path(argv[0]).name != "docker":
+    if len(argv) < 2 or Path(argv[0]).name != "docker":
         return False
-    command, index = _subcommand(argv[1:])
+    command = argv[1]
     if command == "compose":
-        compose_command, _ = _subcommand(argv[index + 2 :])
-        return compose_command in _REUSABLE_COMPOSE_READS
+        return _compose_subcommand(argv[2:]) in _REUSABLE_COMPOSE_READS
     if command == "image":
-        image_command, _ = _subcommand(argv[index + 2 :])
-        return image_command == "inspect"
+        return len(argv) > 2 and argv[2] == "inspect"
     return command in _REUSABLE_DOCKER_READS
 
 

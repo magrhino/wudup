@@ -6,8 +6,9 @@ import threading
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
-from wudup import command, request_scope
+from wudup import command, request_scope, web_request_scope
 from wudup.command import CommandRunner
 
 
@@ -43,6 +44,16 @@ def _calls(log: Path) -> list[str]:
         (("docker", "pull", "repo/app:1"), False),
         (("docker", "restart", "cid"), False),
         (("docker", "manifest", "inspect", "repo/app:1"), False),
+        # Options WUDup never passes fail closed even when their value is a read verb.
+        (("docker", "--context", "ps", "run", "repo/app:1"), False),
+        (("docker", "-H", "inspect", "restart", "cid"), False),
+        (("docker", "--host", "tcp://docker:2375", "ps"), False),
+        (("docker", "--config", "/tmp/cfg", "inspect", "cid"), False),
+        (("docker", "compose", "--profile", "ps", "up", "-d"), False),
+        (("docker", "compose", "--ansi", "never", "config"), False),
+        (("docker", "compose", "-f", "c.yml", "--profile", "config", "pull"), False),
+        (("docker", "image", "rm", "repo/app:1"), False),
+        (("docker", "image"), False),
         (("trivy", "image", "repo/app:1"), False),
         ((), False),
     ],
@@ -194,3 +205,79 @@ def test_server_timing_header_lists_phases_and_reuse() -> None:
         'wud;dur=12.5;desc="1 calls", '
         'reused;desc="3 reads"'
     )
+
+
+def _request(method: str, path: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [],
+            "scheme": "http",
+            "server": ("testserver", 80),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "reuses"),
+    [
+        ("GET", "/api/v1/pending", True),
+        ("HEAD", "/api/v1/status", True),
+        ("POST", "/api/v1/plans", True),
+        ("POST", "/api/v1/plans/", False),
+        ("POST", "/prefix/api/v1/plans", False),
+        ("POST", "/api/v1/future-plans", False),
+        ("POST", "/api/v1/plans/apply", False),
+        ("POST", "/api/v1/retag-plans", False),
+        ("POST", "/api/v1/jobs", False),
+        ("POST", "/api/v1/self-update", False),
+        ("POST", "/api/v1/self-update/prepare", False),
+        ("POST", "/api/v1/tracking-repairs/apply", False),
+        ("POST", "/api/v1/doctor", False),
+        ("POST", "/api/v1/container/restart", False),
+        ("POST", "/api/v1/pending/rescan", False),
+        ("PUT", "/api/v1/plans", False),
+        ("DELETE", "/api/v1/plans", False),
+    ],
+)
+def test_only_reads_and_plan_preview_reuse_docker_reads(
+    method: str,
+    path: str,
+    reuses: bool,
+) -> None:
+    assert web_request_scope.reuses_reads(_request(method, path)) is reuses
+
+
+def test_jobs_submitted_from_a_request_run_without_its_scope() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    token = request_scope.begin(reuse_reads=True)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            job_scope = executor.submit(request_scope.current).result()
+    finally:
+        request_scope.end(token)
+
+    assert job_scope is None
+
+
+def test_server_timing_header_is_built_from_a_locked_snapshot() -> None:
+    scope = request_scope.RequestScope(reuse_reads=False)
+    scope.record("docker", 0.001)
+    acquired = scope._lock.acquire(blocking=False)
+    assert acquired
+    result: list[str] = []
+    thread = threading.Thread(
+        target=lambda: result.append(request_scope.server_timing_header(scope))
+    )
+    thread.start()
+    thread.join(timeout=0.2)
+    # The header waits for the lock instead of reading phases mid-update.
+    assert thread.is_alive()
+    scope._lock.release()
+    thread.join(timeout=2)
+    assert result == ['docker;dur=1.0;desc="1 calls"']

@@ -102,12 +102,20 @@ def reuse_read(key: Hashable, compute: Callable[[], _Result]) -> _Result:
 def server_timing_header(scope: RequestScope | None) -> str:
     """Format recorded phases, or return "" when the request did no tracked work."""
 
-    if scope is None or not scope.phases:
+    if scope is None:
+        return ""
+    # A streamed body may still record into this scope while the header is built.
+    with scope._lock:
+        phases = sorted(
+            (name, phase.seconds, phase.count) for name, phase in scope.phases.items()
+        )
+        reused = scope.reused
+    if not phases:
         return ""
     entries = [
-        f'{name};dur={phase.seconds * 1000:.1f};desc="{phase.count} calls"'
-        for name, phase in sorted(scope.phases.items())
+        f'{name};dur={seconds * 1000:.1f};desc="{count} calls"'
+        for name, seconds, count in phases
     ]
-    if scope.reused:
-        entries.append(f'reused;desc="{scope.reused} reads"')
+    if reused:
+        entries.append(f'reused;desc="{reused} reads"')
     return ", ".join(entries)

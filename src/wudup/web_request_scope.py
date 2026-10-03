@@ -9,15 +9,14 @@ from fastapi import Request, Response
 from . import request_scope
 
 # Plan preview only reads Docker and Compose state, so it may reuse reads too.
-_READ_ONLY_POST_SUFFIXES = ("/api/v1/plans",)
+# Match exact paths so a future mutating route never inherits reuse by name.
+_READ_ONLY_POST_PATHS = frozenset({"/api/v1/plans"})
 
 
 def reuses_reads(request: Request) -> bool:
     if request.method in {"GET", "HEAD"}:
         return True
-    return request.method == "POST" and request.url.path.endswith(
-        _READ_ONLY_POST_SUFFIXES
-    )
+    return request.method == "POST" and request.url.path in _READ_ONLY_POST_PATHS
 
 
 async def request_scope_middleware(
