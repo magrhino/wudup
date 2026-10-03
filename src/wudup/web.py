@@ -36,6 +36,7 @@ from . import (
     web_release_notes,
     web_release_notifications,
     web_request_context,
+    web_request_scope,
     web_retag_targets,
     web_retags,
     web_rollback,
@@ -132,6 +133,17 @@ def create_app(
             request,
             call_next,
             active_settings,
+        )
+
+    # Registered last so it wraps every other middleware and the whole request.
+    @app.middleware("http")
+    async def web_request_timing(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        return await web_request_scope.request_scope_middleware(
+            request,
+            call_next,
         )
 
     web_health.configure(

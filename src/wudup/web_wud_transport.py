@@ -17,6 +17,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from . import request_scope
 from .web_auth import WebConfigError
 from .web_models import WebSettings, WudApiClientConfig
 from .web_redaction import redact_sensitive_text as _redact_sensitive_text
@@ -265,7 +266,10 @@ def _request_json_with_method(
     for name, value in credential_headers:
         request.add_unredirected_header(name, value)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with (
+            request_scope.timed("wud"),
+            urllib.request.urlopen(request, timeout=timeout) as response,
+        ):
             response_url = getattr(response, "url", None) or url
             body = response.read()
     except urllib.error.HTTPError as exc:

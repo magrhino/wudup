@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from . import request_scope
+
 try:  # pragma: no cover - platform availability is covered by fallback tests.
     import fcntl
     import pty
@@ -88,13 +90,42 @@ class CommandRunner:
 
         argv = normalize_args(args)
         cwd_path = Path(cwd) if cwd is not None else None
+        merged_env = self._merged_env(env)
+
+        def execute() -> tuple[CommandResult, OSError | None]:
+            with request_scope.timed(_timing_phase(argv)):
+                return self._capture_once(argv, cwd_path, merged_env, timeout_seconds)
+
+        if _is_reusable_read(argv):
+            result, os_error = request_scope.reuse_read(
+                (
+                    argv,
+                    cwd_path,
+                    None if merged_env is None else tuple(sorted(merged_env.items())),
+                    timeout_seconds,
+                ),
+                execute,
+            )
+        else:
+            result, os_error = execute()
+        if check and not result.ok:
+            raise CommandError(result) from os_error
+        return result
+
+    def _capture_once(
+        self,
+        argv: tuple[str, ...],
+        cwd_path: Path | None,
+        merged_env: dict[str, str] | None,
+        timeout_seconds: float | None,
+    ) -> tuple[CommandResult, OSError | None]:
         os_error: OSError | None = None
         try:
             # Security audit: argv stays a tuple and shell=False is the subprocess default.
             completed = subprocess.run(  # nosemgrep
                 argv,
                 cwd=str(cwd_path) if cwd_path is not None else None,
-                env=self._merged_env(env),
+                env=merged_env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -119,9 +150,7 @@ class CommandRunner:
         except OSError as exc:
             os_error = exc
             result = _result_from_os_error(argv, cwd_path, exc)
-        if check and not result.ok:
-            raise CommandError(result) from os_error
-        return result
+        return result, os_error
 
     def capture_lines(
         self,
@@ -329,6 +358,51 @@ class CommandRunner:
         if env is not None:
             merged.update(env)
         return merged
+
+
+# Compose options WUDup itself passes before the Compose subcommand. Anything
+# else before a subcommand makes the command ineligible for reuse.
+_COMPOSE_OPTIONS_WITH_VALUE = frozenset(
+    {"-f", "--file", "-p", "--project-name", "--project-directory", "--env-file"}
+)
+_REUSABLE_DOCKER_READS = frozenset({"inspect", "ps", "version"})
+_REUSABLE_COMPOSE_READS = frozenset({"config", "ps", "version"})
+
+
+def _timing_phase(argv: tuple[str, ...]) -> str:
+    return "docker" if argv and Path(argv[0]).name == "docker" else "command"
+
+
+def _compose_subcommand(tokens: Sequence[str]) -> str:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _COMPOSE_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if token.startswith("-"):
+            return ""
+        return token
+    return ""
+
+
+def _is_reusable_read(argv: tuple[str, ...]) -> bool:
+    """Whether a request may reuse this Docker command's earlier result.
+
+    Only commands that read Docker or Compose state qualify, so reuse can never
+    skip a pull, restart, or rewrite. Parsing fails closed: a global option or
+    an option WUDup does not pass makes the command ineligible, because its
+    value could otherwise be mistaken for a read subcommand.
+    """
+
+    if len(argv) < 2 or Path(argv[0]).name != "docker":
+        return False
+    command = argv[1]
+    if command == "compose":
+        return _compose_subcommand(argv[2:]) in _REUSABLE_COMPOSE_READS
+    if command == "image":
+        return len(argv) > 2 and argv[2] == "inspect"
+    return command in _REUSABLE_DOCKER_READS
 
 
 def normalize_args(args: Sequence[CommandArg]) -> tuple[str, ...]:
