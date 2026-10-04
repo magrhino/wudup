@@ -27,13 +27,21 @@ const navListRef = ref<HTMLElement | null>(null);
 const appShellLayout = useMediaQuery(responsiveMediaQueries.appShell);
 
 const RELEASES_URL = "https://github.com/magrhino/wudup/releases";
+const COMMIT_URL = "https://github.com/magrhino/wudup/commit";
 const VERSION_RELEASE_RE = /^v?\d+\.\d+/;
+const EDGE_BUILD_RE = /^edge-([0-9a-f]{7,40})$/;
 
+const edgeCommit = computed(
+  () => EDGE_BUILD_RE.exec(connection.status?.build_version ?? "")?.[1] ?? "",
+);
 const appVersion = computed(() => connection.status?.version ?? "");
 const appVersionIsRelease = computed(() =>
   VERSION_RELEASE_RE.test(appVersion.value),
 );
 const appVersionLabel = computed(() => {
+  if (edgeCommit.value) {
+    return `edge ${edgeCommit.value}`;
+  }
   if (!appVersion.value) {
     return "";
   }
@@ -45,16 +53,22 @@ const appVersionLabel = computed(() => {
   return appVersion.value;
 });
 const appVersionHref = computed(() => {
+  if (edgeCommit.value) {
+    return `${COMMIT_URL}/${edgeCommit.value}`;
+  }
   if (!appVersion.value || !appVersionIsRelease.value) {
     return RELEASES_URL;
   }
   return `${RELEASES_URL}/tag/${appVersionLabel.value}`;
 });
-const appVersionTitle = computed(() =>
-  appVersionIsRelease.value
+const appVersionTitle = computed(() => {
+  if (edgeCommit.value) {
+    return `Edge build of commit ${edgeCommit.value}; open it on GitHub`;
+  }
+  return appVersionIsRelease.value
     ? `Open ${appVersionLabel.value} release notes`
-    : "Open WUDup releases",
-);
+    : "Open WUDup releases";
+});
 
 type NavItem = {
   to: string;

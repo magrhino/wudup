@@ -40,6 +40,8 @@ LEGACY_SELF_UPDATE_REPOS = frozenset(
 )
 _SEMVER_IMAGE_TAG_RE = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+].*)?$")
 _BARE_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_EDGE_IMAGE_TAG_RE = re.compile(r"^edge(?:-[0-9a-f]{7,40})?(?:-trivy)?$")
+_EDGE_BUILD_VERSION_RE = re.compile(r"^edge-[0-9a-f]{7,40}$")
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,8 @@ def github_release_self_update(
     latest_tag = latest_tag or ""
 
     current_image = current_container_image(env)
+    if is_edge_image(current_image):
+        return None
     if not self_update_image_variant_known(current_image):
         raise SelfUpdateInspectionError(
             "Could not inspect the running WUDup container image; "
@@ -87,6 +91,20 @@ def github_release_self_update(
             latest_tag,
         ),
     )
+
+
+def is_edge_image(current_image: str) -> bool:
+    """Return whether the running image is an unreleased ``edge`` build of main."""
+
+    return bool(_EDGE_IMAGE_TAG_RE.fullmatch(_image_reference_tag(current_image)))
+
+
+def edge_build_version(environ: Mapping[str, str] | None = None) -> str:
+    """Return the ``edge-<sha>`` tag baked into an edge image, or ``""``."""
+
+    env = os.environ if environ is None else environ
+    value = env.get("WUDUP_BUILD_VERSION", "").strip()
+    return value if _EDGE_BUILD_VERSION_RE.fullmatch(value) else ""
 
 
 def self_update_image_variant_known(current_image: str) -> bool:

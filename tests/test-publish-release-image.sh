@@ -47,7 +47,17 @@ fi
 FAKE_DOCKER
 chmod +x "$TEST_TMP/docker"
 
+cat > "$TEST_TMP/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_GH_LOG"
+[[ "${FAKE_GH_FAIL:-0}" != 1 ]] || exit 1
+printf '%s\n' "${FAKE_MAIN_SHA:-}"
+FAKE_GH
+chmod +x "$TEST_TMP/gh"
+
 export PATH="$TEST_TMP:$PATH"
+export FAKE_GH_LOG="$TEST_TMP/gh.log"
 export REAL_BASH
 export FAKE_DOCKER_LOG="$TEST_TMP/docker.log"
 export FAKE_SCAN_TARGET="$TEST_TMP/scan-target"
@@ -171,5 +181,108 @@ if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
   printf 'incomplete platform manifest was promoted\n' >&2
   exit 1
 fi
+
+# Stable releases never bake an edge build version into the image.
+if grep -Fq -- "WUDUP_BUILD_VERSION" "$FAKE_DOCKER_LOG"; then
+  printf 'stable release build unexpectedly set WUDUP_BUILD_VERSION\n' >&2
+  exit 1
+fi
+
+# Stable releases never look up the head of main.
+if [[ -s "$FAKE_GH_LOG" ]]; then
+  printf 'stable release publish unexpectedly called gh\n' >&2
+  exit 1
+fi
+
+# Edge builds of main move only edge tags and never touch stable release tags.
+: > "$FAKE_DOCKER_LOG"
+env -u VERSION -u MINOR_VERSION RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 \
+  FAKE_MAIN_SHA="$RELEASE_SHA" bash .github/scripts/publish-release-image.sh all
+grep -Fxq 'api repos/magrhino/wudup/branches/main --jq .commit.sha' "$FAKE_GH_LOG"
+edge_staging_ref="ghcr.io/magrhino/wudup:staging-edge-${RELEASE_SHA}"
+grep -Fq -- "-t ${edge_staging_ref} " "$FAKE_DOCKER_LOG"
+grep -Fq -- "-t ${edge_staging_ref}-trivy " "$FAKE_DOCKER_LOG"
+grep -Fq -- "--label org.opencontainers.image.version=edge-0123456" "$FAKE_DOCKER_LOG"
+grep -Fq -- "--build-arg WUDUP_BUILD_VERSION=edge-0123456" "$FAKE_DOCKER_LOG"
+[[ "$(grep -c -- '--scanners vuln' "$FAKE_DOCKER_LOG")" == 4 ]]
+expected_edge_tags="$(printf '%s\n' \
+  ghcr.io/magrhino/wudup:edge \
+  ghcr.io/magrhino/wudup:edge-0123456 \
+  ghcr.io/magrhino/wudup:edge-0123456-trivy \
+  ghcr.io/magrhino/wudup:edge-trivy)"
+actual_edge_tags="$(sed -n 's/^buildx imagetools create --tag \([^ ]*\) .*/\1/p' "$FAKE_DOCKER_LOG" | sort)"
+if [[ "$actual_edge_tags" != "$expected_edge_tags" ]]; then
+  printf 'edge publish moved unexpected tags:\n%s\n' "$actual_edge_tags" >&2
+  exit 1
+fi
+last_scan="$(grep -n -- '--scanners vuln' "$FAKE_DOCKER_LOG" | tail -1 | cut -d: -f1)"
+first_promote="$(grep -n -m1 -- 'imagetools create --tag' "$FAKE_DOCKER_LOG" | cut -d: -f1)"
+(( last_scan < first_promote ))
+
+: > "$FAKE_DOCKER_LOG"
+: > "$FAKE_GH_LOG"
+if FAIL_SCAN_VARIANT=trivy FAIL_SCAN_PLATFORM=linux/arm64 RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 \
+  FAKE_MAIN_SHA="$RELEASE_SHA" bash .github/scripts/publish-release-image.sh all; then
+  printf 'failed edge scan unexpectedly succeeded\n' >&2
+  exit 1
+fi
+if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
+  printf 'edge tags changed after a failed scan\n' >&2
+  exit 1
+fi
+if [[ -s "$FAKE_GH_LOG" ]]; then
+  printf 'edge publish reached promotion after a failed scan\n' >&2
+  exit 1
+fi
+
+# Re-running an older commit publishes edge-<sha> but never moves edge back.
+: > "$FAKE_DOCKER_LOG"
+RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 FAKE_MAIN_SHA="$(printf 'f%.0s' {1..40})" \
+  bash .github/scripts/publish-release-image.sh all > "$TEST_TMP/edge-stale.out"
+grep -Fq "Leaving edge unchanged: ${RELEASE_SHA} is no longer the head of main" "$TEST_TMP/edge-stale.out"
+stale_edge_tags="$(sed -n 's/^buildx imagetools create --tag \([^ ]*\) .*/\1/p' "$FAKE_DOCKER_LOG" | sort)"
+expected_stale_tags="$(printf '%s\n' \
+  ghcr.io/magrhino/wudup:edge-0123456 \
+  ghcr.io/magrhino/wudup:edge-0123456-trivy)"
+if [[ "$stale_edge_tags" != "$expected_stale_tags" ]]; then
+  printf 'edge publish of an older commit moved unexpected tags:\n%s\n' "$stale_edge_tags" >&2
+  exit 1
+fi
+
+# If the head of main cannot be confirmed (lookup failure or malformed SHA),
+# no edge tags move.
+for main_lookup in fail:x ok:null ok:0123456 ok:; do
+  : > "$FAKE_DOCKER_LOG"
+  gh_fail=0
+  [[ "${main_lookup%%:*}" != fail ]] || gh_fail=1
+  if RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 FAKE_GH_FAIL="$gh_fail" FAKE_MAIN_SHA="${main_lookup#*:}" \
+    bash .github/scripts/publish-release-image.sh all 2> "$TEST_TMP/edge-unconfirmed.err"; then
+    printf 'edge publish without a confirmed main head unexpectedly succeeded: %s\n' "$main_lookup" >&2
+    exit 1
+  fi
+  grep -Fq 'could not confirm whether' "$TEST_TMP/edge-unconfirmed.err"
+  grep -Fq 'no edge tags were moved. Re-run the edge workflow.' "$TEST_TMP/edge-unconfirmed.err"
+  if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
+    printf 'edge tags changed without a confirmed main head: %s\n' "$main_lookup" >&2
+    exit 1
+  fi
+done
+
+for bad_edge in edge:v1.2.3 edge:edge-fedcba9 nightly:edge-0123456; do
+  : > "$FAKE_DOCKER_LOG"
+  if RELEASE_CHANNEL="${bad_edge%%:*}" RELEASE_TAG="${bad_edge#*:}" \
+    bash .github/scripts/publish-release-image.sh all 2>/dev/null; then
+    printf 'invalid edge publish settings unexpectedly succeeded: %s\n' "$bad_edge" >&2
+    exit 1
+  fi
+  if [[ -s "$FAKE_DOCKER_LOG" ]]; then
+    printf 'invalid edge publish settings ran docker: %s\n' "$bad_edge" >&2
+    exit 1
+  fi
+done
+
+grep -Fq 'RELEASE_CHANNEL: edge' .github/workflows/edge.yml
+grep -Fq "GH_TOKEN: \${{ github.token }}" .github/workflows/edge.yml
+grep -Fq 'bash .github/scripts/publish-release-image.sh all' .github/workflows/edge.yml
 
 printf 'ok - release image freshness, immutable scans, and publication barrier\n'

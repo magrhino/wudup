@@ -50,6 +50,7 @@ from .release_notes import detect_breaking
 from .self_update import (
     DEFAULT_SELF_UPDATE_IMAGE,
     current_container_image,
+    is_edge_image,
     release_self_update_target,
     self_update_image_variant_known,
 )
@@ -936,6 +937,23 @@ def _self_update_response(settings: WebSettings) -> SelfUpdateResponse:
             target_image="",
             restart_container=container,
             disabled_reason="release checks are disabled",
+        )
+
+    if is_edge_image(current_image):
+        return SelfUpdateResponse(
+            status="disabled",
+            strategy="pull_image",
+            current_tag=local_tag,
+            latest_tag="",
+            current_image=current_image,
+            target_image="",
+            restart_container=container,
+            disabled_reason=(
+                "self-update is skipped because this container runs an edge test "
+                "image, and self-update only follows stable releases; set the "
+                "Compose image back to a release tag such as latest to receive "
+                "stable releases again"
+            ),
         )
 
     latest_tag = fetch_latest_release_tag()

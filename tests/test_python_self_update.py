@@ -12,6 +12,9 @@ from wudup.self_update import (
     _inspected_container_image,
     _is_release_image_tag,
     current_container_image,
+    edge_build_version,
+    github_release_self_update,
+    is_edge_image,
     is_self_update_target,
     main,
     release_self_update_target,
@@ -387,6 +390,57 @@ class IsReleaseImageTagTests(unittest.TestCase):
 
     def test_partial_version_is_not_release_tag(self) -> None:
         self.assertFalse(_is_release_image_tag("v1.2"))
+
+
+class IsEdgeImageTests(unittest.TestCase):
+    def test_edge_tags_are_edge_images(self) -> None:
+        for image in (
+            "ghcr.io/magrhino/wudup:edge",
+            "ghcr.io/magrhino/wudup:edge-trivy",
+            "ghcr.io/magrhino/wudup:edge-0123abc",
+            "ghcr.io/magrhino/wudup:edge-0123abc-trivy",
+            f"ghcr.io/magrhino/wudup:edge@sha256:{'a' * 64}",
+        ):
+            with self.subTest(image=image):
+                self.assertTrue(is_edge_image(image))
+
+    def test_release_and_other_tags_are_not_edge_images(self) -> None:
+        for image in (
+            "",
+            "ghcr.io/magrhino/wudup:latest",
+            "ghcr.io/magrhino/wudup:v1.2.3-trivy",
+            "ghcr.io/magrhino/wudup:edge-feature",
+            "ghcr.io/magrhino/wudup:knife-edge",
+            f"ghcr.io/magrhino/wudup@sha256:{'a' * 64}",
+        ):
+            with self.subTest(image=image):
+                self.assertFalse(is_edge_image(image))
+
+    def test_edge_build_version_reads_only_valid_edge_tags(self) -> None:
+        self.assertEqual(
+            edge_build_version({"WUDUP_BUILD_VERSION": "edge-0123abc"}),
+            "edge-0123abc",
+        )
+        for value in ("", "v1.2.3", "edge", "edge-XYZ1234", "edge-0123abc-trivy"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    edge_build_version({"WUDUP_BUILD_VERSION": value}), ""
+                )
+        self.assertEqual(edge_build_version({}), "")
+
+    def test_github_release_self_update_skips_edge_image(self) -> None:
+        with (
+            mock.patch("wudup.self_update.current_tag", return_value="v0.65.2"),
+            mock.patch(
+                "wudup.self_update.fetch_latest_release_tag",
+                return_value="v0.66.0",
+            ),
+            mock.patch(
+                "wudup.self_update.current_container_image",
+                return_value="ghcr.io/magrhino/wudup:edge-0123abc",
+            ),
+        ):
+            self.assertIsNone(github_release_self_update({}))
 
 
 class IsAndDisplaySelfUpdateTests(unittest.TestCase):

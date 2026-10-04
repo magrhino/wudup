@@ -52,6 +52,7 @@ from . import (
     web_wud_api,
 )
 from .config import ConfigError
+from .self_update import edge_build_version
 
 DEFAULT_WEB_PORT = 7417
 LOGGER = logging.getLogger(__name__)
@@ -667,6 +668,7 @@ def api_status(request: Request) -> web_models.StatusResponse:
     return web_models.StatusResponse(
         ok=db_ready,
         version=__version__,
+        build_version=edge_build_version(),
         wud_file=str(settings.config.wud_out_file),
         wud_file_exists=settings.config.wud_out_file.is_file(),
         pending_count=pending.count,
