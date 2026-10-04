@@ -72,6 +72,10 @@ if [[ "$release_channel" == stable ]]; then
     all|check) published_suffixes=("" "-trivy") ;;
     default) published_suffixes=("") ;;
     trivy) published_suffixes=("-trivy") ;;
+    *)
+      printf 'Unknown image variant %s; no images were checked or built.\n' "$requested_variant" >&2
+      exit 2
+      ;;
   esac
   if [[ "${FORCE_REPUBLISH:-false}" == true ]]; then
     printf 'Forced re-publish requested: %s will be rebuilt and its tags moved to new image digests.\n' "$RELEASE_TAG"
