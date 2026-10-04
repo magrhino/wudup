@@ -2,24 +2,6 @@ FROM docker:29.8.1-cli@sha256:9f36dfce2d1fd053d700a4eca00c358df79bf7d8cb69d4a9e8
 
 FROM aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa AS trivy
 
-FROM --platform=$BUILDPLATFORM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS trivy-patched
-
-ARG TARGETOS
-ARG TARGETARCH
-RUN apk add --no-cache git \
-    && git clone --depth 1 --branch v0.74.0 https://github.com/aquasecurity/trivy.git /trivy \
-    && test "$(git -C /trivy rev-parse HEAD)" = e1fd17a0ea4a8cf24bc4b4dd7e2cfbf4bb31b994
-# Apply reviewed go.mod/go.sum versions and checksums before the read-only build.
-COPY docker/trivy-grpc-lock.patch /tmp/trivy-grpc-lock.patch
-WORKDIR /trivy
-# Remove this rebuild when an upstream Trivy release includes fixed gRPC.
-# Trivy v0.74.0 bundles gRPC v1.82.1; v1.83.2 fixes its release-blocking CVEs.
-RUN git apply /tmp/trivy-grpc-lock.patch \
-    && mkdir -p /out \
-    && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=readonly -trimpath \
-      -ldflags '-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.74.0' \
-      -o /out/trivy ./cmd/trivy
-
 FROM node:26-bookworm-slim@sha256:79723b41edbedf595f62e943a9f8b0ba9af5b1e61045c5f8f59c2c02c1212a16 AS webui-build
 
 WORKDIR /webui
@@ -103,6 +85,6 @@ CMD ["web"]
 
 FROM wudup-runtime AS wudup-trivy
 
-COPY --from=trivy-patched /out/trivy /usr/local/bin/trivy
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 
 FROM wudup-runtime AS wudup

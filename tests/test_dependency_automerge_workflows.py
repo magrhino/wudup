@@ -112,26 +112,15 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
 
     def test_renovate_marks_only_non_major_updates(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(config["packageRules"]), 1)
         rule = config["packageRules"][0]
 
         self.assertEqual(
             rule["matchUpdateTypes"], ["minor", "patch", "pin", "digest"]
         )
-        self.assertEqual(rule["matchDepNames"], ["!aquasec/trivy"])
+        self.assertNotIn("matchDepNames", rule)
         self.assertEqual(rule["addLabels"], ["automerge"])
         self.assertNotIn("automerge", rule)
-
-    def test_renovate_opens_trivy_updates_for_manual_review(self) -> None:
-        config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
-        rule = config["packageRules"][1]
-
-        self.assertEqual(rule["matchDepNames"], ["aquasec/trivy"])
-        self.assertNotIn("matchUpdateTypes", rule)
-        self.assertNotIn("enabled", rule)
-        self.assertFalse(rule["automerge"])
-        self.assertEqual(rule["minimumReleaseAge"], "0 days")
-        self.assertEqual(rule["schedule"], ["at any time"])
-        self.assertIn("separately pinned source", rule["prBodyNotes"][0])
 
     def test_dependency_review_checks_all_scopes_and_missing_licenses(self) -> None:
         workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
