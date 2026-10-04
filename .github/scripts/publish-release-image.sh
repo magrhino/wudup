@@ -3,9 +3,9 @@ set -euo pipefail
 
 requested_variant="${1:-}"
 case "$requested_variant" in
-  all|default|trivy) ;;
+  all|default|trivy|check) ;;
   *)
-    printf 'Usage: %s all|default|trivy\n' "$0" >&2
+    printf 'Usage: %s all|default|trivy|check\n' "$0" >&2
     exit 2
     ;;
 esac
@@ -36,6 +36,61 @@ case "$release_channel" in
     exit 2
     ;;
 esac
+
+image="$REGISTRY/$IMAGE_NAME"
+
+# A stable release is already published when its version tags hold images
+# built from this commit for both platforms. Floating X.Y and latest tags are
+# not checked because later releases move them.
+release_already_published() {
+  local suffix ref images
+  for suffix in "$@"; do
+    for ref in "$image:$RELEASE_TAG$suffix" "$image:$VERSION$suffix"; do
+      if ! images="$(docker buildx imagetools inspect --format '{{json .Image}}' "$ref" 2>/dev/null)"; then
+        printf 'Could not find %s in the registry (not published yet, or the registry could not be reached).\n' "$ref"
+        return 1
+      fi
+      if ! jq -e --arg version "$RELEASE_TAG" --arg revision "$RELEASE_SHA" '
+        (keys | sort) == ["linux/amd64", "linux/arm64"] and
+        all(.[].config.Labels;
+          ."org.opencontainers.image.version" == $version and
+          ."org.opencontainers.image.revision" == $revision)
+      ' <<<"$images" >/dev/null 2>&1; then
+        printf '%s exists but does not hold linux/amd64 and linux/arm64 images built from %s.\n' "$ref" "$RELEASE_SHA"
+        return 1
+      fi
+    done
+  done
+}
+
+# Every stable release starts several publisher runs (tag push and Release
+# Please dispatches). Only the first one builds; later runs leave the published
+# digests alone. FORCE_REPUBLISH=true rebuilds anyway, e.g. for a security
+# refresh. "check" exits 0 only when the release is already published.
+if [[ "$release_channel" == stable ]]; then
+  case "$requested_variant" in
+    all|check) published_suffixes=("" "-trivy") ;;
+    default) published_suffixes=("") ;;
+    trivy) published_suffixes=("-trivy") ;;
+    *)
+      printf 'Unknown image variant %s; no images were checked or built.\n' "$requested_variant" >&2
+      exit 2
+      ;;
+  esac
+  if [[ "${FORCE_REPUBLISH:-false}" == true ]]; then
+    printf 'Forced re-publish requested: %s will be rebuilt and its tags moved to new image digests.\n' "$RELEASE_TAG"
+    [[ "$requested_variant" != check ]] || exit 1
+  elif release_already_published "${published_suffixes[@]}"; then
+    printf '%s is already published from %s; skipping the image rebuild so its digests stay the same. To rebuild it on purpose, dispatch the release workflow with force_republish=true.\n' \
+      "$RELEASE_TAG" "$RELEASE_SHA"
+    exit 0
+  elif [[ "$requested_variant" == check ]]; then
+    exit 1
+  fi
+elif [[ "$requested_variant" == check ]]; then
+  printf 'The published-release check only applies to stable releases; edge images are rebuilt on every run.\n' >&2
+  exit 2
+fi
 
 # Use the same pinned scanner as the optional image, outside the scanned image.
 scanner_image="$(sed -n 's/^FROM \(aquasec\/trivy:[^ ]*\) AS trivy$/\1/p' Dockerfile)"
@@ -203,32 +258,43 @@ if [[ "$release_channel" == edge ]]; then
 fi
 
 # No production tag moves until every requested variant/platform passes.
+# Stable releases move X.Y and latest first and the version tags last, so a run
+# interrupted part-way leaves a version tag unset and the next run rebuilds
+# instead of treating the release as already published.
+production_tags=()
+production_sources=()
 for index in "${!verified_refs[@]}"; do
   verified_ref="${verified_refs[$index]}"
   suffix="${verified_suffixes[$index]}"
   if [[ "$release_channel" == edge ]]; then
-    production_tags=("$image:$RELEASE_TAG$suffix")
+    production_tags+=("$image:$RELEASE_TAG$suffix")
+    production_sources+=("$verified_ref")
     if (( move_edge )); then
       production_tags+=("$image:edge$suffix")
+      production_sources+=("$verified_ref")
     fi
   else
-    production_tags=(
-      "$image:$RELEASE_TAG$suffix"
-      "$image:$VERSION$suffix"
-      "$image:$MINOR_VERSION$suffix"
-      "$image:latest$suffix"
-    )
+    production_tags+=("$image:$MINOR_VERSION$suffix" "$image:latest$suffix")
+    production_sources+=("$verified_ref" "$verified_ref")
   fi
-
-  for ref in "${production_tags[@]}"; do
-    docker buildx imagetools create --tag "$ref" "$verified_ref"
-    platforms="$(
-      docker buildx imagetools inspect --raw "$ref" |
-        jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort | unique | join(" ")'
-    )"
-    if [[ "$platforms" != "$expected_platforms" ]]; then
-      printf 'Expected %s to publish platforms "%s", got "%s"\n' "$ref" "$expected_platforms" "$platforms" >&2
-      exit 1
-    fi
+done
+if [[ "$release_channel" == stable ]]; then
+  for index in "${!verified_refs[@]}"; do
+    suffix="${verified_suffixes[$index]}"
+    production_tags+=("$image:$RELEASE_TAG$suffix" "$image:$VERSION$suffix")
+    production_sources+=("${verified_refs[$index]}" "${verified_refs[$index]}")
   done
+fi
+
+for index in "${!production_tags[@]}"; do
+  ref="${production_tags[$index]}"
+  docker buildx imagetools create --tag "$ref" "${production_sources[$index]}"
+  platforms="$(
+    docker buildx imagetools inspect --raw "$ref" |
+      jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort | unique | join(" ")'
+  )"
+  if [[ "$platforms" != "$expected_platforms" ]]; then
+    printf 'Expected %s to publish platforms "%s", got "%s"\n' "$ref" "$expected_platforms" "$platforms" >&2
+    exit 1
+  fi
 done

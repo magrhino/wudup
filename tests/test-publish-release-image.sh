@@ -31,6 +31,17 @@ elif [[ "$*" == *"--scanners vuln"* ]]; then
   fi
 elif [[ "${FAIL_ARM64_VERIFY:-0}" == "1" && "$*" == "run --rm --platform linux/arm64 "* ]]; then
   exit 42
+elif [[ "$*" == "buildx imagetools create --tag "*":${FAIL_CREATE_TAG:-none} "* ]]; then
+  exit 1
+elif [[ "$*" == "buildx imagetools inspect --format "* ]]; then
+  # Already-published lookup: only answer for tags marked as published.
+  ref="${@: -1}"
+  if [[ -z "${FAKE_PUBLISHED_REVISION:-}" || "$ref" == *"${FAKE_MISSING_REF:-none}" ]]; then
+    exit 1
+  fi
+  labels="$(printf '{"org.opencontainers.image.version":"%s","org.opencontainers.image.revision":"%s"}' \
+    "$RELEASE_TAG" "$FAKE_PUBLISHED_REVISION")"
+  printf '{"linux/amd64":{"config":{"Labels":%s}},"linux/arm64":{"config":{"Labels":%s}}}\n' "$labels" "$labels"
 elif [[ "$*" == "buildx imagetools inspect --raw "* ]]; then
   if [[ "${BAD_MANIFEST:-0}" == 1 ]]; then
     printf '{"manifests":[{"digest":"sha256:%064d","platform":{"os":"linux","architecture":"amd64"}}]}\n' 1
@@ -182,6 +193,76 @@ if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
   exit 1
 fi
 
+# Version tags, which the already-published check reads, move last; X.Y and
+# latest move first. A run that stops part-way through promotion leaves the
+# version tags unset, so the next run rebuilds instead of skipping.
+: > "$FAKE_DOCKER_LOG"
+bash .github/scripts/publish-release-image.sh all > /dev/null
+promoted_tags="$(sed -n 's/^buildx imagetools create --tag ghcr.io\/magrhino\/wudup:\([^ ]*\) .*/\1/p' "$FAKE_DOCKER_LOG")"
+expected_promoted_tags="$(printf '%s\n' 1.2 latest 1.2-trivy latest-trivy v1.2.3 1.2.3 v1.2.3-trivy 1.2.3-trivy)"
+if [[ "$promoted_tags" != "$expected_promoted_tags" ]]; then
+  printf 'stable tags were promoted in an unexpected order:\n%s\n' "$promoted_tags" >&2
+  exit 1
+fi
+for failed_tag in 1.2-trivy latest-trivy; do
+  : > "$FAKE_DOCKER_LOG"
+  if FAIL_CREATE_TAG="$failed_tag" bash .github/scripts/publish-release-image.sh all > /dev/null 2>&1; then
+    printf 'failed promotion of %s unexpectedly succeeded\n' "$failed_tag" >&2
+    exit 1
+  fi
+  if grep -Eq -- '^buildx imagetools create --tag ghcr.io/magrhino/wudup:v?1\.2\.3(-trivy)? ' "$FAKE_DOCKER_LOG"; then
+    printf 'version tags moved although promotion stopped at %s\n' "$failed_tag" >&2
+    exit 1
+  fi
+done
+
+# A release whose version tags already hold this commit is not rebuilt, so
+# duplicate publisher runs leave its digests alone.
+: > "$FAKE_DOCKER_LOG"
+FAKE_PUBLISHED_REVISION="$RELEASE_SHA" bash .github/scripts/publish-release-image.sh check
+FAKE_PUBLISHED_REVISION="$RELEASE_SHA" bash .github/scripts/publish-release-image.sh all > "$TEST_TMP/published.out"
+grep -Fq 'v1.2.3 is already published from' "$TEST_TMP/published.out"
+for ref in v1.2.3 1.2.3 v1.2.3-trivy 1.2.3-trivy; do
+  grep -Fxq -- "buildx imagetools inspect --format {{json .Image}} ghcr.io/magrhino/wudup:$ref" "$FAKE_DOCKER_LOG"
+done
+if grep -Eq -- '^(buildx build|run |pull |buildx imagetools create)' "$FAKE_DOCKER_LOG"; then
+  printf 'already-published release was rebuilt or re-promoted\n' >&2
+  exit 1
+fi
+
+# A different commit, or a missing version tag, still publishes.
+for published in "revision:$(printf 'f%.0s' {1..40})" missing:1.2.3-trivy missing:v1.2.3; do
+  : > "$FAKE_DOCKER_LOG"
+  revision="$RELEASE_SHA"
+  missing=none
+  if [[ "${published%%:*}" == revision ]]; then
+    revision="${published#*:}"
+  else
+    missing="${published#*:}"
+  fi
+  if FAKE_PUBLISHED_REVISION="$revision" FAKE_MISSING_REF="$missing" \
+    bash .github/scripts/publish-release-image.sh check > /dev/null; then
+    printf 'unpublished release reported as published: %s\n' "$published" >&2
+    exit 1
+  fi
+  FAKE_PUBLISHED_REVISION="$revision" FAKE_MISSING_REF="$missing" \
+    bash .github/scripts/publish-release-image.sh all > /dev/null
+  [[ "$(grep -c -- 'imagetools create --tag' "$FAKE_DOCKER_LOG")" == 8 ]]
+done
+
+# A forced re-publish rebuilds and re-promotes an already-published release.
+: > "$FAKE_DOCKER_LOG"
+if FORCE_REPUBLISH=true FAKE_PUBLISHED_REVISION="$RELEASE_SHA" \
+  bash .github/scripts/publish-release-image.sh check > /dev/null; then
+  printf 'forced re-publish was reported as already published\n' >&2
+  exit 1
+fi
+FORCE_REPUBLISH=true FAKE_PUBLISHED_REVISION="$RELEASE_SHA" \
+  bash .github/scripts/publish-release-image.sh all > "$TEST_TMP/forced.out"
+grep -Fq 'Forced re-publish requested: v1.2.3' "$TEST_TMP/forced.out"
+[[ "$(grep -c -- '--scanners vuln' "$FAKE_DOCKER_LOG")" == 4 ]]
+[[ "$(grep -c -- 'imagetools create --tag' "$FAKE_DOCKER_LOG")" == 8 ]]
+
 # Stable releases never bake an edge build version into the image.
 if grep -Fq -- "WUDUP_BUILD_VERSION" "$FAKE_DOCKER_LOG"; then
   printf 'stable release build unexpectedly set WUDUP_BUILD_VERSION\n' >&2
@@ -218,6 +299,20 @@ fi
 last_scan="$(grep -n -- '--scanners vuln' "$FAKE_DOCKER_LOG" | tail -1 | cut -d: -f1)"
 first_promote="$(grep -n -m1 -- 'imagetools create --tag' "$FAKE_DOCKER_LOG" | cut -d: -f1)"
 (( last_scan < first_promote ))
+
+# Edge re-runs always rebuild edge-<sha>, even if its tags already exist.
+: > "$FAKE_DOCKER_LOG"
+RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 FAKE_MAIN_SHA="$RELEASE_SHA" FAKE_PUBLISHED_REVISION="$RELEASE_SHA" \
+  bash .github/scripts/publish-release-image.sh all > /dev/null
+[[ "$(grep -c -- '--scanners vuln' "$FAKE_DOCKER_LOG")" == 4 ]]
+if grep -Fq -- 'imagetools inspect --format' "$FAKE_DOCKER_LOG"; then
+  printf 'edge publish checked for an already-published release\n' >&2
+  exit 1
+fi
+if RELEASE_CHANNEL=edge RELEASE_TAG=edge-0123456 bash .github/scripts/publish-release-image.sh check 2>/dev/null; then
+  printf 'edge channel unexpectedly reported as already published\n' >&2
+  exit 1
+fi
 
 : > "$FAKE_DOCKER_LOG"
 : > "$FAKE_GH_LOG"
@@ -280,6 +375,14 @@ for bad_edge in edge:v1.2.3 edge:edge-fedcba9 nightly:edge-0123456; do
     exit 1
   fi
 done
+
+# All runs for one release tag share a queue, and duplicates skip validation
+# and publishing once the release is published.
+grep -Fq "group: release-\${{ inputs.release_tag || github.ref_name }}" .github/workflows/release.yml
+grep -Fq 'bash .github/scripts/publish-release-image.sh check' .github/workflows/release.yml
+grep -Fq 'The check published images job finished with %s, so release validations did not run' .github/workflows/release.yml
+[[ "$(grep -c "FORCE_REPUBLISH: \${{ inputs.force_republish }}" .github/workflows/release.yml)" == 2 ]]
+[[ "$(grep -c "if: \${{ needs.check-published.outputs.published != 'true' }}" .github/workflows/release.yml)" == 6 ]]
 
 grep -Fq 'RELEASE_CHANNEL: edge' .github/workflows/edge.yml
 grep -Fq "GH_TOKEN: \${{ github.token }}" .github/workflows/edge.yml
