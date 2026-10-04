@@ -77,8 +77,10 @@ EOF
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
     tests/test-edge-catch-up.sh \
+    tests/test-prune-edge-images.sh \
     .github/scripts/publish-release-image.sh \
     .github/scripts/edge-catch-up.sh \
+    .github/scripts/prune-edge-images.sh \
     tests/fakes/docker
 
   run shellcheck \
@@ -93,8 +95,10 @@ EOF
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
     tests/test-edge-catch-up.sh \
+    tests/test-prune-edge-images.sh \
     .github/scripts/publish-release-image.sh \
     .github/scripts/edge-catch-up.sh \
+    .github/scripts/prune-edge-images.sh \
     tests/fakes/docker
 
   for test_script in tests/test-*.sh; do
