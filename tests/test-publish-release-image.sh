@@ -31,6 +31,8 @@ elif [[ "$*" == *"--scanners vuln"* ]]; then
   fi
 elif [[ "${FAIL_ARM64_VERIFY:-0}" == "1" && "$*" == "run --rm --platform linux/arm64 "* ]]; then
   exit 42
+elif [[ "$*" == "buildx imagetools create --tag "*":${FAIL_CREATE_TAG:-none} "* ]]; then
+  exit 1
 elif [[ "$*" == "buildx imagetools inspect --format "* ]]; then
   # Already-published lookup: only answer for tags marked as published.
   ref="${@: -1}"
@@ -190,6 +192,29 @@ if grep -Fq -- 'imagetools create --tag' "$FAKE_DOCKER_LOG"; then
   printf 'incomplete platform manifest was promoted\n' >&2
   exit 1
 fi
+
+# Version tags, which the already-published check reads, move last; X.Y and
+# latest move first. A run that stops part-way through promotion leaves the
+# version tags unset, so the next run rebuilds instead of skipping.
+: > "$FAKE_DOCKER_LOG"
+bash .github/scripts/publish-release-image.sh all > /dev/null
+promoted_tags="$(sed -n 's/^buildx imagetools create --tag ghcr.io\/magrhino\/wudup:\([^ ]*\) .*/\1/p' "$FAKE_DOCKER_LOG")"
+expected_promoted_tags="$(printf '%s\n' 1.2 latest 1.2-trivy latest-trivy v1.2.3 1.2.3 v1.2.3-trivy 1.2.3-trivy)"
+if [[ "$promoted_tags" != "$expected_promoted_tags" ]]; then
+  printf 'stable tags were promoted in an unexpected order:\n%s\n' "$promoted_tags" >&2
+  exit 1
+fi
+for failed_tag in 1.2-trivy latest-trivy; do
+  : > "$FAKE_DOCKER_LOG"
+  if FAIL_CREATE_TAG="$failed_tag" bash .github/scripts/publish-release-image.sh all > /dev/null 2>&1; then
+    printf 'failed promotion of %s unexpectedly succeeded\n' "$failed_tag" >&2
+    exit 1
+  fi
+  if grep -Eq -- '^buildx imagetools create --tag ghcr.io/magrhino/wudup:v?1\.2\.3(-trivy)? ' "$FAKE_DOCKER_LOG"; then
+    printf 'version tags moved although promotion stopped at %s\n' "$failed_tag" >&2
+    exit 1
+  fi
+done
 
 # A release whose version tags already hold this commit is not rebuilt, so
 # duplicate publisher runs leave its digests alone.
@@ -355,6 +380,7 @@ done
 # and publishing once the release is published.
 grep -Fq "group: release-\${{ inputs.release_tag || github.ref_name }}" .github/workflows/release.yml
 grep -Fq 'bash .github/scripts/publish-release-image.sh check' .github/workflows/release.yml
+grep -Fq 'The check published images job finished with %s, so release validations did not run' .github/workflows/release.yml
 [[ "$(grep -c "FORCE_REPUBLISH: \${{ inputs.force_republish }}" .github/workflows/release.yml)" == 2 ]]
 [[ "$(grep -c "if: \${{ needs.check-published.outputs.published != 'true' }}" .github/workflows/release.yml)" == 6 ]]
 

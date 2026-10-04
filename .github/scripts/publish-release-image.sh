@@ -254,32 +254,43 @@ if [[ "$release_channel" == edge ]]; then
 fi
 
 # No production tag moves until every requested variant/platform passes.
+# Stable releases move X.Y and latest first and the version tags last, so a run
+# interrupted part-way leaves a version tag unset and the next run rebuilds
+# instead of treating the release as already published.
+production_tags=()
+production_sources=()
 for index in "${!verified_refs[@]}"; do
   verified_ref="${verified_refs[$index]}"
   suffix="${verified_suffixes[$index]}"
   if [[ "$release_channel" == edge ]]; then
-    production_tags=("$image:$RELEASE_TAG$suffix")
+    production_tags+=("$image:$RELEASE_TAG$suffix")
+    production_sources+=("$verified_ref")
     if (( move_edge )); then
       production_tags+=("$image:edge$suffix")
+      production_sources+=("$verified_ref")
     fi
   else
-    production_tags=(
-      "$image:$RELEASE_TAG$suffix"
-      "$image:$VERSION$suffix"
-      "$image:$MINOR_VERSION$suffix"
-      "$image:latest$suffix"
-    )
+    production_tags+=("$image:$MINOR_VERSION$suffix" "$image:latest$suffix")
+    production_sources+=("$verified_ref" "$verified_ref")
   fi
-
-  for ref in "${production_tags[@]}"; do
-    docker buildx imagetools create --tag "$ref" "$verified_ref"
-    platforms="$(
-      docker buildx imagetools inspect --raw "$ref" |
-        jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort | unique | join(" ")'
-    )"
-    if [[ "$platforms" != "$expected_platforms" ]]; then
-      printf 'Expected %s to publish platforms "%s", got "%s"\n' "$ref" "$expected_platforms" "$platforms" >&2
-      exit 1
-    fi
+done
+if [[ "$release_channel" == stable ]]; then
+  for index in "${!verified_refs[@]}"; do
+    suffix="${verified_suffixes[$index]}"
+    production_tags+=("$image:$RELEASE_TAG$suffix" "$image:$VERSION$suffix")
+    production_sources+=("${verified_refs[$index]}" "${verified_refs[$index]}")
   done
+fi
+
+for index in "${!production_tags[@]}"; do
+  ref="${production_tags[$index]}"
+  docker buildx imagetools create --tag "$ref" "${production_sources[$index]}"
+  platforms="$(
+    docker buildx imagetools inspect --raw "$ref" |
+      jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort | unique | join(" ")'
+  )"
+  if [[ "$platforms" != "$expected_platforms" ]]; then
+    printf 'Expected %s to publish platforms "%s", got "%s"\n' "$ref" "$expected_platforms" "$platforms" >&2
+    exit 1
+  fi
 done

@@ -112,7 +112,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Any failure here means "not published", so the full release runs.
+          # A failed registry lookup counts as "not published", so the full
+          # release runs. A failed checkout or GHCR login fails this job, which
+          # stops the release before validation.
           published=false
           if RELEASE_SHA="$(git rev-parse HEAD)" bash .github/scripts/publish-release-image.sh check; then
             published=true
@@ -211,7 +213,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$CHECK_PUBLISHED_RESULT" == "success" && "$ALREADY_PUBLISHED" == "true" ]]; then
+          if [[ "$CHECK_PUBLISHED_RESULT" != "success" ]]; then
+            printf 'The check published images job finished with %s, so release validations did not run and no images were published. Fix the failed validate tag or check published images job, then re-run the release workflow.\n' \
+              "$CHECK_PUBLISHED_RESULT" >&2
+            exit 1
+          fi
+
+          if [[ "$ALREADY_PUBLISHED" == "true" ]]; then
             printf 'This release is already published, so validations were skipped and its images will not be rebuilt.\n'
             exit 0
           fi
