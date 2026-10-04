@@ -112,6 +112,8 @@ jobs:
           printf 'Resolved release publisher tag %s (draft=%s)\n' "$tag" "$release_is_draft"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
+      # Fallback for a tag push that does not start release.yml. When the tag
+      # push did start it, release.yml skips the duplicate run.
       - name: Dispatch release publisher
         if: ${{ steps.release-publisher.outputs.tag != '' }}
         shell: bash

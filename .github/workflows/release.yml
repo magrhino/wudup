@@ -10,9 +10,16 @@ on:
         description: Stable release tag to publish, formatted as vX.Y.Z.
         required: true
         type: string
+      force_republish:
+        description: Rebuild and re-promote images even when this release is already published, e.g. for a security refresh. Moves the release tags to new digests.
+        required: false
+        default: false
+        type: boolean
 
+# The tag push and the Release Please dispatches for one release share a group,
+# so they run one at a time and later runs find the release already published.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -63,10 +70,61 @@ jobs:
             printf 'minor=%s\n' "$minor"
           } >> "$GITHUB_OUTPUT"
 
+  check-published:
+    name: check published images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    needs:
+      - validate-tag
+    outputs:
+      published: ${{ steps.published.outputs.published }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Check whether this release is already published
+        id: published
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate-tag.outputs.tag }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          FORCE_REPUBLISH: ${{ inputs.force_republish }}
+        run: |
+          set -euo pipefail
+
+          # Any failure here means "not published", so the full release runs.
+          published=false
+          if RELEASE_SHA="$(git rev-parse HEAD)" bash .github/scripts/publish-release-image.sh check; then
+            published=true
+          fi
+          printf 'published=%s\n' "$published" >> "$GITHUB_OUTPUT"
+
   release-python:
     name: release python
     needs:
       - validate-tag
+      - check-published
+    if: ${{ needs.check-published.outputs.published != 'true' }}
     uses: ./.github/workflows/release-validation.yml
     with:
       release_tag: ${{ needs.validate-tag.outputs.tag }}
@@ -77,6 +135,8 @@ jobs:
     name: release shell
     needs:
       - validate-tag
+      - check-published
+    if: ${{ needs.check-published.outputs.published != 'true' }}
     uses: ./.github/workflows/release-validation.yml
     with:
       release_tag: ${{ needs.validate-tag.outputs.tag }}
@@ -87,6 +147,8 @@ jobs:
     name: release webui
     needs:
       - validate-tag
+      - check-published
+    if: ${{ needs.check-published.outputs.published != 'true' }}
     uses: ./.github/workflows/release-validation.yml
     with:
       release_tag: ${{ needs.validate-tag.outputs.tag }}
@@ -97,6 +159,8 @@ jobs:
     name: release webui smoke
     needs:
       - validate-tag
+      - check-published
+    if: ${{ needs.check-published.outputs.published != 'true' }}
     uses: ./.github/workflows/release-validation.yml
     with:
       release_tag: ${{ needs.validate-tag.outputs.tag }}
@@ -107,6 +171,8 @@ jobs:
     name: release docker
     needs:
       - validate-tag
+      - check-published
+    if: ${{ needs.check-published.outputs.published != 'true' }}
     uses: ./.github/workflows/release-validation.yml
     with:
       release_tag: ${{ needs.validate-tag.outputs.tag }}
@@ -119,6 +185,7 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     needs:
+      - check-published
       - release-python
       - release-shell
       - release-webui
@@ -134,6 +201,8 @@ jobs:
       - name: Check release validation results
         shell: bash
         env:
+          CHECK_PUBLISHED_RESULT: ${{ needs.check-published.result }}
+          ALREADY_PUBLISHED: ${{ needs.check-published.outputs.published }}
           RELEASE_PYTHON_RESULT: ${{ needs.release-python.result }}
           RELEASE_SHELL_RESULT: ${{ needs.release-shell.result }}
           RELEASE_WEBUI_RESULT: ${{ needs.release-webui.result }}
@@ -141,6 +210,11 @@ jobs:
           RELEASE_DOCKER_RESULT: ${{ needs.release-docker.result }}
         run: |
           set -euo pipefail
+
+          if [[ "$CHECK_PUBLISHED_RESULT" == "success" && "$ALREADY_PUBLISHED" == "true" ]]; then
+            printf 'This release is already published, so validations were skipped and its images will not be rebuilt.\n'
+            exit 0
+          fi
 
           failed=0
           check_result() {
@@ -172,6 +246,7 @@ jobs:
       packages: write
     needs:
       - validate-tag
+      - check-published
       - release-validations
 
     steps:
@@ -210,6 +285,7 @@ jobs:
           printf '%s\n' "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Scan all staged images and publish
+        if: ${{ needs.check-published.outputs.published != 'true' }}
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.validate-tag.outputs.tag }}
@@ -217,6 +293,7 @@ jobs:
           MINOR_VERSION: ${{ needs.validate-tag.outputs.minor }}
           RELEASE_SHA: ${{ steps.release-commit.outputs.sha }}
           APT_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}
+          FORCE_REPUBLISH: ${{ inputs.force_republish }}
         run: |
           set -euo pipefail
 

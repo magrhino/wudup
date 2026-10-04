@@ -411,6 +411,21 @@ container build, and Docker Compose E2E validation. Image tags are published as
 `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `latest`. Direct pushes of stable `vX.Y.Z` tags
 also run the same publisher as a fallback.
 
+Each stable release is built and published once. The tag push and the Release
+Please dispatch both start the publisher, so all runs for one tag share a
+queue. When `vX.Y.Z`, `X.Y.Z`, and their `-trivy` tags already hold amd64 and
+arm64 images labelled with the release commit, later runs skip validation and
+image publishing, keep the published digests, and only make sure the GitHub
+Release is published. GitHub cancels a run that is still waiting when another
+run for the same tag queues behind it, so a release may show one cancelled
+publisher run. To rebuild a published release on purpose, for example to pick
+up security fixes, dispatch it with `force_republish`; this moves its tags to
+new digests:
+
+```bash
+gh workflow run release.yml --ref main -f release_tag=v1.2.3 -f force_republish=true
+```
+
 ### Edge Channel
 
 Pushes to `main` run the `edge` workflow, which builds both variants for
