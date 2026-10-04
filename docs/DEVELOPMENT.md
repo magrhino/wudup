@@ -451,6 +451,21 @@ In that case, or if the catch-up job cannot reach GitHub, start a run by hand:
 gh workflow run edge.yml --ref main
 ```
 
+After each successful publish, the edge workflow keeps the 50 newest edge
+builds (`EDGE_KEEP_BUILDS` in `edge.yml`) plus whatever `edge` and
+`edge-trivy` point at, and deletes older `edge-<sha>`, `edge-<sha>-trivy`, and
+`staging-edge-<sha>` package versions with their platform images. At the
+current pace of merges to `main`, that keeps `edge-<sha>` pins pullable for
+about 10 days; pin a stable release for anything longer. Only versions whose
+every tag is an edge commit tag are deleted, so stable release tags and stable
+`staging-*` versions are never touched. Deleted versions can be restored from
+the package settings for 30 days. To preview a cleanup without deleting
+anything:
+
+```bash
+REGISTRY=ghcr.io IMAGE_NAME=magrhino/wudup DRY_RUN=1 bash .github/scripts/prune-edge-images.sh
+```
+
 Edge images carry their `edge-<sha>` tag in `WUDUP_BUILD_VERSION`, and the
 WebUI sidebar shows `edge <sha>` linked to that commit instead of the release
 version.
