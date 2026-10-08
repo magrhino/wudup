@@ -86,7 +86,6 @@ const props = defineProps<{
   planStatusLabel: string;
   preflightDigestPinNotice: string;
   preflightDigestUnpinNotice: string;
-  preflightServiceImpactLabel: string;
   preflightSummary: string;
   preflightTagRewriteNotice: string;
   preflightTitle: string;
@@ -103,6 +102,9 @@ const emit = defineEmits<{
 }>();
 
 const changes = computed(() => planChanges(props.plan));
+// A ready plan's state is carried by the Apply button; repeating it in the header adds nothing.
+const applyReady = computed(() => props.plan.status === "ready" && props.plan.can_apply);
+const readinessClear = computed(() => !!props.applyPreflight?.ok && !props.applyPreflightAttentionChecks.length);
 const unmatchedGuidanceSections = [
   { key: "preflight_findings", title: "Preflight found" },
   { key: "possible_reasons", title: "Likely causes" },
@@ -159,18 +161,15 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 <template>
   <PreflightModalShell
     :show="show"
-    eyebrow="Preflight"
     title-id="preflight-modal-title"
     :title="preflightTitle"
-    :summary="preflightSummary"
-    :status-label="planStatusLabel === preflightTitle ? '' : planStatusLabel"
+    :summary="applyReady ? '' : preflightSummary"
+    :status-label="applyReady || planStatusLabel === preflightTitle ? '' : planStatusLabel"
     :status-type="planAlertType"
     @close="emit('close')"
   >
     <section class="preflight-block" aria-label="Planned changes summary">
       <UpdateScopeSummary :changes="changes" fallback="No matched image changes" />
-      <p v-if="preflightServiceImpactLabel" class="preflight-summary-text">Service impact: <span class="preflight-impact-text">{{ preflightServiceImpactLabel }}</span></p>
-      <p class="preflight-summary-text">Review only. Nothing has been applied.</p>
     </section>
 
     <PendingReviewSummary
@@ -184,7 +183,20 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       :reasons="reviewReasons"
     >
       <section
-        v-if="applyPreflight"
+        v-if="applyPreflight && readinessClear"
+        class="apply-readiness apply-readiness-clear"
+        aria-label="Apply readiness"
+      >
+        <details class="apply-readiness-passed">
+          <summary>
+            <CheckCircle2 :size="16" aria-hidden="true" />
+            {{ pluralize(applyPreflightPassedChecks.length, "system check") }} passed
+          </summary>
+          <p class="apply-readiness-pass-list wrap-anywhere">{{ applyPreflightPassedText }}</p>
+        </details>
+      </section>
+      <section
+        v-else-if="applyPreflight"
         class="apply-readiness preflight-block"
         aria-labelledby="apply-readiness-title"
       >
@@ -809,6 +821,25 @@ function tagStreamRulePreview(issue: PlanIssue): string {
   border: 1px solid var(--color-border-subtle);
   border-radius: 7px;
   background: var(--color-surface);
+}
+
+.apply-readiness-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.apply-readiness-clear summary {
+  cursor: pointer;
+}
+
+.apply-readiness-clear summary > svg {
+  margin: 0 4px 0 2px;
+  vertical-align: -3px;
+}
+
+.apply-readiness-clear .apply-readiness-pass-list {
+  margin: 4px 0 0 22px;
 }
 
 .apply-readiness-heading {

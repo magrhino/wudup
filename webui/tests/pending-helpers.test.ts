@@ -187,7 +187,6 @@ function pendingPlanReviewModalProps(
     planTagStreamUpdates: [],
     preflightDigestPinNotice: "",
     preflightDigestUnpinNotice: "",
-    preflightServiceImpactLabel: "",
     preflightSummary: "1 service ready to update.",
     preflightTagRewriteNotice: "",
     preflightTitle: "Review selected updates",

@@ -285,7 +285,6 @@ const {
   planStatusLabel,
   preflightDigestPinNotice,
   preflightDigestUnpinNotice,
-  preflightServiceImpactLabel,
   preflightSummary,
   preflightTagRewriteNotice,
   preflightTitle,
@@ -878,7 +877,6 @@ onBeforeUnmount(() => {
       :plan-status-label="planStatusLabel"
       :preflight-digest-pin-notice="preflightDigestPinNotice"
       :preflight-digest-unpin-notice="preflightDigestUnpinNotice"
-      :preflight-service-impact-label="preflightServiceImpactLabel"
       :preflight-summary="preflightSummary"
       :preflight-tag-rewrite-notice="preflightTagRewriteNotice"
       :preflight-title="preflightTitle"

@@ -34,7 +34,6 @@ import {
   planTagUpdatesFromPlan,
   pluralize,
   reviewCountLabel,
-  summarizeList,
 } from "./utils";
 import {
   pendingSelectionForItem,
@@ -181,19 +180,6 @@ export function usePendingPlanReviewState(
       updates.plan.summary.target_count ||
       updates.plan.selected_line_numbers.length;
     return `${pluralize(serviceCount, "service")} ready to update.`;
-  });
-  const preflightServiceImpactLabel = computed(() => {
-    if (!updates.plan || updates.plan.status !== "ready") {
-      return "";
-    }
-    return summarizeList(
-      planLines.value.map(({ stack, line }) =>
-        updates.plan && updates.plan.summary.stack_count > 1
-          ? `${stack} / ${line.service || "stack-level"}`
-          : line.service || "stack-level",
-      ),
-      4,
-    );
   });
   const applyPreflight = computed(() => updates.plan?.apply_preflight ?? null);
   const applyPreflightPassedChecks = computed(
@@ -686,7 +672,6 @@ export function usePendingPlanReviewState(
     planStatusLabel,
     preflightDigestPinNotice,
     preflightDigestUnpinNotice,
-    preflightServiceImpactLabel,
     preflightSummary,
     preflightTagRewriteNotice,
     preflightTitle,

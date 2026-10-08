@@ -18,7 +18,7 @@ const groups = computed(() => {
 <template>
   <div class="update-scope-summary" :class="{ compact }">
     <component :is="compact ? 'strong' : 'h2'" class="scope-title">{{ scopeTitle(changes, fallback) }}</component>
-    <p v-if="!compact && changes.length === 1" class="scope-context">
+    <p v-if="!compact && changes.length === 1 && changes[0]!.stack !== changes[0]!.service" class="scope-context">
       Stack {{ changes[0]!.stack || "not recorded" }}
     </p>
     <details v-if="!compact && changes.length" class="scope-changes">

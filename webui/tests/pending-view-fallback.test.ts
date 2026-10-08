@@ -331,7 +331,7 @@ describe("pending view fallback and release notes", () => {
     expect(snoozedCard?.text()).toContain("Pending entry #1");
   });
 
-  it("shows ready preflight service impact and row tag rewrites", async () => {
+  it("keeps a ready preflight header short and shows row tag rewrites", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(true);
     updates.pending = pendingResponse();
     mockPendingLifecycle(settings, updates);
@@ -403,13 +403,15 @@ describe("pending view fallback and release notes", () => {
     const readiness = dialog.find(".apply-readiness");
     const impact = dialog.find(".preflight-impact");
     expect(dialog.find("#preflight-modal-title").text()).toBe("Review media plan");
-    expect(dialog.find(".preflight-impact-text").text()).toBe(
-      "radarr, wudup",
-    );
+    // The Apply button carries a ready plan's state; the header does not repeat it.
+    expect(dialog.find(".eyebrow").exists()).toBe(false);
+    expect(dialog.find(".section-heading .n-tag").exists()).toBe(false);
+    expect(dialog.find(".section-heading .preflight-summary-text").exists()).toBe(false);
+    expect(dialog.text()).not.toContain("Review only");
+    // This fixture only pulls, so the impact line lists the planned steps instead of a short form.
+    expect(dialog.find(".review-impact").text()).toMatch(/^Pull images for /);
     expect(readiness.exists()).toBe(true);
-    expect(readiness.text()).toContain("Apply readiness");
-    expect(readiness.text()).toContain("Ready");
-    expect(readiness.text()).toContain("9 checks passed");
+    expect(readiness.text()).toContain("9 system checks passed");
     expect(readiness.text()).toContain("Docker reachable");
     expect(readiness.text()).toContain("Selected services matched");
     expect(readiness.find(".apply-readiness-passed").exists()).toBe(true);

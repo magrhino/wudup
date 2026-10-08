@@ -110,9 +110,8 @@ describe("pending view preflight safety", () => {
     expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
     expect(modal.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     const summary = modal.find('[aria-label="Update review decision summary"]');
-    expect(summary.text()).toContain("Operational impact");
-    expect(summary.text()).toContain("Supporting evidence");
-    expect(summary.text()).toContain("Unresolved before apply");
+    expect(summary.find(".review-impact").exists()).toBe(true);
+    expect(summary.find("details.review-evidence").text()).toContain("Planned steps");
     expect(summary.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     expect(modal.classes()).toContain("preflight-modal-fixed-footer");
     expect(modal.element.tagName).toBe("DIV");
@@ -166,7 +165,7 @@ describe("pending view preflight safety", () => {
     await flushPromises();
     const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
     expect(summary.text()).toContain(expected);
-    expect(summary.text()).toContain("no candidate scan is confirmed");
+    expect(summary.text()).toContain("No candidate scan is confirmed");
     wrapper.unmount();
   });
 
