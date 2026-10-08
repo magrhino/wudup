@@ -480,6 +480,8 @@ describe("pending view fallback and release notes", () => {
       .findAll("button")
       .find((button) => button.text().includes("Apply 1 update"));
     expect(applyButton?.attributes("disabled")).toBeDefined();
+    expect(applyButton?.attributes("aria-describedby")).toBe("apply-blocked-reason");
+    expect(dialog.find("#apply-blocked-reason").text()).toBe("Failed check: Logs writable.");
     await applyButton?.trigger("click");
 
     expect(applyPlan).not.toHaveBeenCalled();

@@ -105,6 +105,10 @@ describe("pending view preflight safety", () => {
       .find((button) => button.text().includes("Apply 1 update"));
     expect(applyButton?.exists()).toBe(true);
     expect(applyButton?.attributes("disabled")).toBeDefined();
+    expect(applyButton?.attributes("aria-describedby")).toBe("apply-blocked-reason");
+    expect(wrapper.find("#apply-blocked-reason").text()).toBe(
+      "Read-only: applying updates from the browser is turned off.",
+    );
     const modal = wrapper.find(".preflight-modal");
     expect(modal.text().split("1 failed check must be fixed before applying.")).toHaveLength(2);
     expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
@@ -229,12 +233,14 @@ describe("pending view preflight safety", () => {
     expect(wrapper.find('[role="dialog"]').text()).toContain(
       "No Compose service matched repo/app:1.0.",
     );
+    // Regression: the shared footer used to fall back to an enabled, unwired "Apply" button.
     expect(
       wrapper
         .find('[role="dialog"]')
         .findAll("button")
-        .some((button) => button.text().includes("Apply 1 update")),
+        .some((button) => button.text().startsWith("Apply")),
     ).toBe(false);
+    expect(wrapper.find("#apply-blocked-reason").exists()).toBe(false);
     expect(applyPlan).not.toHaveBeenCalled();
   });
 
