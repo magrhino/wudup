@@ -487,6 +487,28 @@ describe("pending view fallback and release notes", () => {
     expect(applyPlan).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { name: "failed check without detail", plan: { can_apply: false, apply_preflight: failedApplyPreflight("logs-writable", "") }, expected: "Failed check: Logs writable." },
+    { name: "plan rejected after passing checks", plan: { can_apply: false }, expected: "This plan cannot be applied. Preview it again." },
+  ])("does not call a blocked apply read-only when browser mutations are enabled ($name)", async ({ plan, expected }) => {
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse(plan);
+    });
+    const wrapper = mountPendingView(pinia);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Review media plan"))
+      ?.trigger("click");
+    await flushPromises();
+    const reason = wrapper.find('[role="dialog"] #apply-blocked-reason');
+    expect(reason.text()).toBe(expected);
+    expect(reason.text()).not.toContain("Read-only");
+    wrapper.unmount();
+  });
+
   it("explains when degraded WUD metadata blocks apply", async () => {
     const { pinia, settings, updates } = setupStores(true);
     updates.pending = pendingResponse();

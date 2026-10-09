@@ -148,6 +148,7 @@ function pendingPlanReviewModalProps(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
+    applyBlockedReason: "",
     applyButtonLabel: "Apply 1 update",
     applyDisabled: false,
     applyPreflight: null,

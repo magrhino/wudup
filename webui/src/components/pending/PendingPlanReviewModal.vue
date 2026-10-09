@@ -47,6 +47,7 @@ import PreflightNoticeList from "../preflight/PreflightNoticeList.vue";
 type TagType = "default" | "error" | "info" | "success" | "warning";
 
 const props = defineProps<{
+  applyBlockedReason: string;
   applyButtonLabel: string;
   applyDisabled: boolean;
   applyPreflight: ApplyPreflightResponse | null;
@@ -105,16 +106,6 @@ const changes = computed(() => planChanges(props.plan));
 // A ready plan's state is carried by the Apply button; repeating it in the header adds nothing.
 const applyReady = computed(() => props.plan.status === "ready" && props.plan.can_apply);
 const readinessClear = computed(() => !!props.applyPreflight?.ok && !props.applyPreflightAttentionChecks.length);
-// The readiness card scrolls away; keep the reason a ready plan cannot apply next to the disabled button.
-const applyBlockedReason = computed(() => {
-  if (!props.applyVisible || props.plan.can_apply) return "";
-  const failed = props.applyPreflightAttentionChecks.filter(check => check.status === "FAIL");
-  if (props.mutationDisabledMessage || failed.some(check => check.code === "mutations-enabled")) {
-    return "Read-only: applying updates from the browser is turned off.";
-  }
-  if (failed.length) return `${failed.length === 1 ? "Failed check" : "Failed checks"}: ${failed.map(check => check.label).join(", ")}.`;
-  return "This plan cannot be applied. Preview it again.";
-});
 const unmatchedGuidanceSections = [
   { key: "preflight_findings", title: "Preflight found" },
   { key: "possible_reasons", title: "Likely causes" },

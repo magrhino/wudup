@@ -272,6 +272,7 @@ const {
   digestPinLabelApprovalApproved,
   digestPinLabelApprovalIssues,
   mutationDisabledMessage,
+  applyBlockedReason,
   mutationStateLabel,
   mutationStateType,
   pendingApplyTourDetail,
@@ -861,6 +862,7 @@ onBeforeUnmount(() => {
       :tag-stream-label-approval-issues="tagStreamLabelApprovalIssues"
       :loading="updates.loading"
       :mutation-disabled-message="mutationDisabledMessage"
+      :apply-blocked-reason="applyBlockedReason"
       :plan-actions="planActions"
       :plan-alert-type="planAlertType"
       :plan-digest-pin-label-rewrites="planDigestPinLabelRewrites"
