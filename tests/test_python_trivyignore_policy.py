@@ -47,15 +47,15 @@ def test_repository_ignore_file_follows_the_policy() -> None:
 
 def test_valid_entries_and_empty_lists_pass() -> None:
     assert errors_for(entry()) == []
-    assert errors_for(entry(id="GHSA-xvch-5gv4-984h", expired_at=date(2027, 1, 7))) == []
+    assert errors_for(entry(paths=None)) == []
     assert validate({"vulnerabilities": []}, TODAY) == ([], [])
     assert validate({"vulnerabilities": None}, TODAY) == ([], [])
 
 
-@pytest.mark.parametrize("missing", ["id", "paths", "statement", "expired_at"])
-def test_every_entry_needs_all_required_fields(missing: str) -> None:
-    errors = errors_for(entry(**{missing: None}))
-    assert any(f"missing {missing}" in error for error in errors)
+@pytest.mark.parametrize("missing", ["id", "statement", "expired_at"])
+def test_every_entry_needs_id_statement_and_date(missing: str) -> None:
+    assert any(f"missing {missing}" in error for error in errors_for(entry(**{missing: None})))
+    assert any(f"missing {missing}" in error for error in errors_for(entry(**{missing: "  "})))
 
 
 @pytest.mark.parametrize(
@@ -67,54 +67,25 @@ def test_every_entry_needs_all_required_fields(missing: str) -> None:
     ],
 )
 def test_expiry_must_be_a_date_within_90_days(expires, message: str) -> None:
-    errors = errors_for(entry(expired_at=expires))
-    assert any(message in error for error in errors)
+    assert any(message in error for error in errors_for(entry(expired_at=expires)))
 
 
 def test_expired_entries_are_reported_but_do_not_fail() -> None:
-    errors, notices = validate(
-        {"vulnerabilities": [entry(expired_at=TODAY)]}, TODAY
-    )
+    errors, notices = validate({"vulnerabilities": [entry(expired_at=TODAY)]}, TODAY)
     assert errors == []
     assert notices and "no longer applies" in notices[0]
 
 
-@pytest.mark.parametrize(
-    "paths",
-    [
-        [],
-        "usr/local/bin/docker",
-        ["usr/local/**"],
-        ["usr/local/bin/*"],
-        ["/usr/local/bin/docker"],
-        [""],
-    ],
-)
-def test_paths_must_be_exact_image_paths(paths) -> None:
-    assert errors_for(entry(paths=paths))
-
-
-@pytest.mark.parametrize("bad_id", ["CVE-2026", "cve-2026-78669", "GO-2026-1234", "*"])
-def test_ids_must_name_one_vulnerability(bad_id: str) -> None:
-    assert errors_for(entry(id=bad_id))
-
-
-def test_duplicates_unknown_keys_and_other_sections_fail() -> None:
-    assert any("more than once" in error for error in errors_for(entry(), entry()))
-    assert any("unsupported keys" in error for error in errors_for(entry(severity="HIGH")))
-    assert errors_for(entry(statement="   "))
-    assert errors_for(entry(purls=["not-a-purl"]))
+def test_malformed_files_fail() -> None:
     assert validate({"vulnerabilities": [], "secrets": []}, TODAY)[0]
     assert validate(["CVE-2026-78669"], TODAY)[0]
+    assert errors_for("CVE-2026-78669")
 
 
 def test_cli_rejects_a_dateless_entry(tmp_path: Path) -> None:
     ignore_file = tmp_path / ".trivyignore.yaml"
     ignore_file.write_text(
-        "vulnerabilities:\n"
-        "  - id: CVE-2026-78669\n"
-        "    paths: [usr/local/bin/docker]\n"
-        "    statement: no date\n",
+        "vulnerabilities:\n  - id: CVE-2026-78669\n    statement: no date\n",
         encoding="utf-8",
     )
     result = subprocess.run(

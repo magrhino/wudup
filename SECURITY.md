@@ -342,14 +342,13 @@ A finding with no shipped fix yet (for example, an upstream binary still built
 with a vulnerable Go release) can be ignored temporarily in `.trivyignore.yaml`
 so releases can continue. `scripts/check_trivyignore.py` runs in the Python
 test suite on every pull request and in release validation, and requires each
-entry to name one CVE or GHSA ID, list the exact image paths it applies to, give
-a statement explaining why shipping is acceptable and what fix will replace it,
-and set an unquoted `expired_at` date at most 90 days ahead. Trivy stops
-applying an entry at 00:00 UTC on that date, so the finding blocks again
-without any further change; renewing it needs a new review. Ignored findings
-are still printed in the scan log. Remove an entry as soon as the fix ships.
-The scan itself only honors dates, so the ignore file relies on that check
-and code-owner review to reject an entry without one.
+entry to have an ID, a statement explaining why shipping is acceptable and what
+fix will replace it, and an unquoted `expired_at` date at most 90 days ahead.
+Use `paths` to limit an entry to specific files. Ignored findings are still
+printed in every scan log. Trivy stops applying an entry at 00:00 UTC on its
+date, so a finding that is still unpatched fails the daily scheduled scan
+(GitHub notifies on the failure) and blocks publishing again; renewing it needs
+a new review. Remove an entry as soon as the fix ships.
 
 Scan findings, target digests, and scanner errors are recorded in the release
 workflow log. Lower-severity findings do not block publication under this
