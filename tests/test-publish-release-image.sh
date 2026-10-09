@@ -23,6 +23,10 @@ printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 if [[ "$*" == "image save --platform "* ]]; then
   printf '%s\n' "${@: -1}" > "$FAKE_SCAN_TARGET"
 elif [[ "$*" == *"--scanners vuln"* ]]; then
+  # The dated ignore file must be in the directory mounted at /scan.
+  for arg in "$@"; do
+    [[ "$arg" != *:/scan ]] || [[ -f "${arg%:/scan}/trivyignore.yaml" ]] || exit 3
+  done
   target="$(cat "$FAKE_SCAN_TARGET")"
   variant=default
   [[ "$target" != *-trivy@* ]] || variant=trivy

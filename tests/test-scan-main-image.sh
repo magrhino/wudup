@@ -19,6 +19,10 @@ if [[ "$*" == "buildx build "* ]]; then
   dest="$(sed -n 's/.*--output type=docker,dest=\([^ ]*\).*/\1/p' <<<"$*")"
   : > "$dest"
 elif [[ "$*" == *" image --input "* ]]; then
+  # The dated ignore file must be in the directory mounted at /scan.
+  for arg in "$@"; do
+    [[ "$arg" != *:/scan ]] || [[ -f "${arg%:/scan}/trivyignore.yaml" ]] || exit 3
+  done
   [[ "$(cat "$FAKE_BUILT")" != "${FAIL_SCAN:-none}" ]] || exit 1
 fi
 FAKE_DOCKER
@@ -40,7 +44,8 @@ reset() {
 }
 
 count() {
-  grep -c -- "$1" "$FAKE_DOCKER_LOG" || true
+  local pattern="$1"
+  grep -c -- "$pattern" "$FAKE_DOCKER_LOG" || true
 }
 
 # All four images build locally and are scanned with the release policy.
@@ -86,6 +91,8 @@ grep -Fq 'default (linux/amd64): build failed' "$TEST_TMP/out"
 workflow=.github/workflows/image-scan.yml
 grep -Fq 'bash .github/scripts/scan-main-image.sh' "$workflow"
 grep -Eq '^  schedule:' "$workflow"
+grep -Eq '^          ref: main$' "$workflow"
+grep -Eq '^  cancel-in-progress: false$' "$workflow"
 if grep -Eq 'packages: write|BUILDX_CACHE_TO|publish-release-image' "$workflow"; then
   printf 'scheduled scan workflow can publish images or write the build cache\n' >&2
   exit 1

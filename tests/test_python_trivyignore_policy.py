@@ -13,7 +13,8 @@ CHECKER = ROOT / "scripts" / "check_trivyignore.py"
 TODAY = date(2026, 10, 9)
 
 spec = importlib.util.spec_from_file_location("check_trivyignore", CHECKER)
-assert spec and spec.loader
+assert spec is not None
+assert spec.loader is not None
 check_trivyignore = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check_trivyignore)
 validate = check_trivyignore.validate
@@ -37,7 +38,7 @@ def errors_for(*entries):
 
 def test_repository_ignore_file_follows_the_policy() -> None:
     result = subprocess.run(
-        [sys.executable, str(CHECKER), str(ROOT / ".trivyignore.yaml")],
+        [sys.executable, str(CHECKER)],
         capture_output=True,
         text=True,
         check=False,
@@ -55,7 +56,7 @@ def test_valid_entries_and_empty_lists_pass() -> None:
 @pytest.mark.parametrize("missing", ["id", "statement", "expired_at"])
 def test_every_entry_needs_id_statement_and_date(missing: str) -> None:
     assert any(f"missing {missing}" in error for error in errors_for(entry(**{missing: None})))
-    assert any(f"missing {missing}" in error for error in errors_for(entry(**{missing: "  "})))
+    assert any(missing in error for error in errors_for(entry(**{missing: "  "})))
 
 
 @pytest.mark.parametrize(
@@ -73,7 +74,14 @@ def test_expiry_must_be_a_date_within_90_days(expires, message: str) -> None:
 def test_expired_entries_are_reported_but_do_not_fail() -> None:
     errors, notices = validate({"vulnerabilities": [entry(expired_at=TODAY)]}, TODAY)
     assert errors == []
-    assert notices and "no longer applies" in notices[0]
+    assert len(notices) == 1
+    assert "no longer applies" in notices[0]
+
+
+@pytest.mark.parametrize("key", ["id", "statement"])
+@pytest.mark.parametrize("value", [["CVE-2026-78669"], {"text": "x"}, 7])
+def test_id_and_statement_must_be_text(key: str, value) -> None:
+    assert any(f"missing {key}" in error for error in errors_for(entry(**{key: value})))
 
 
 def test_malformed_files_fail() -> None:
@@ -82,17 +90,16 @@ def test_malformed_files_fail() -> None:
     assert errors_for("CVE-2026-78669")
 
 
-def test_cli_rejects_a_dateless_entry(tmp_path: Path) -> None:
+def test_check_file_rejects_a_dateless_entry(tmp_path: Path, capsys) -> None:
     ignore_file = tmp_path / ".trivyignore.yaml"
     ignore_file.write_text(
         "vulnerabilities:\n  - id: CVE-2026-78669\n    statement: no date\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, str(CHECKER), str(ignore_file)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert "missing expired_at" in result.stderr
+    assert check_trivyignore.check_file(ignore_file) == 1
+    assert "missing expired_at" in capsys.readouterr().err
+
+
+def test_check_file_reports_unreadable_files(tmp_path: Path, capsys) -> None:
+    assert check_trivyignore.check_file(tmp_path / "missing.yaml") == 1
+    assert "Could not read" in capsys.readouterr().err

@@ -9,7 +9,6 @@ See SECURITY.md#release-image-policy.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -18,61 +17,70 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-IGNORE_FILE = ".trivyignore.yaml"
+IGNORE_FILE = Path(__file__).resolve().parents[1] / ".trivyignore.yaml"
 MAX_DAYS = 90
-REQUIRED_KEYS = ("id", "statement", "expired_at")
+TEXT_KEYS = ("id", "statement")
+
+
+def _check_expiry(label: str, expires: Any, today: date, latest: date) -> tuple[list[str], list[str]]:
+    if expires is None:
+        return [f"{label} is missing expired_at."], []
+    if isinstance(expires, datetime) or not isinstance(expires, date):
+        return [f"{label} expired_at must be an unquoted date such as {latest.isoformat()}."], []
+    if expires > latest:
+        message = (
+            f"{label} expires {expires.isoformat()}, more than {MAX_DAYS} days away; "
+            f"use {latest.isoformat()} or earlier and renew it if still needed."
+        )
+        return [message], []
+    if expires <= today:
+        return [], [f"{label} expired on {expires.isoformat()} and no longer applies; remove it."]
+    return [], []
+
+
+def _check_entry(index: int, entry: Any, today: date, latest: date) -> tuple[list[str], list[str]]:
+    if not isinstance(entry, dict):
+        return [f"Entry {index} must be a mapping with id, statement, and expired_at."], []
+    label = f"Entry {index} ({entry.get('id', 'no id')})"
+    errors = [
+        f"{label} is missing {key}; it must be non-empty text."
+        for key in TEXT_KEYS
+        if not isinstance(entry.get(key), str) or not entry[key].strip()
+    ]
+    expiry_errors, notices = _check_expiry(label, entry.get("expired_at"), today, latest)
+    return errors + expiry_errors, notices
 
 
 def validate(data: Any, today: date) -> tuple[list[str], list[str]]:
     """Return (errors, notices) for parsed ignore-file data."""
-    errors: list[str] = []
-    notices: list[str] = []
     if not isinstance(data, dict) or set(data) != {"vulnerabilities"}:
-        return ["The ignore file must contain only a top-level 'vulnerabilities' list."], notices
+        return ["The ignore file must contain only a top-level 'vulnerabilities' list."], []
     entries = data["vulnerabilities"] or []
     if not isinstance(entries, list):
-        return ["'vulnerabilities' must be a list (use [] when nothing is ignored)."], notices
+        return ["'vulnerabilities' must be a list (use [] when nothing is ignored)."], []
 
     latest = today + timedelta(days=MAX_DAYS)
+    errors: list[str] = []
+    notices: list[str] = []
     for index, entry in enumerate(entries, start=1):
-        if not isinstance(entry, dict):
-            errors.append(f"Entry {index} must be a mapping with id, statement, and expired_at.")
-            continue
-        label = f"Entry {index} ({entry.get('id', 'no id')})"
-        for key in REQUIRED_KEYS:
-            value = entry.get(key)
-            if value is None or (isinstance(value, str) and not value.strip()):
-                errors.append(f"{label} is missing {key}.")
-        expires = entry.get("expired_at")
-        if expires is None:
-            continue
-        if isinstance(expires, datetime) or not isinstance(expires, date):
-            errors.append(f"{label} expired_at must be an unquoted date such as {latest.isoformat()}.")
-        elif expires > latest:
-            errors.append(
-                f"{label} expires {expires.isoformat()}, more than {MAX_DAYS} days away; "
-                f"use {latest.isoformat()} or earlier and renew it if still needed."
-            )
-        elif expires <= today:
-            notices.append(f"{label} expired on {expires.isoformat()} and no longer applies; remove it.")
+        entry_errors, entry_notices = _check_entry(index, entry, today, latest)
+        errors += entry_errors
+        notices += entry_notices
     return errors, notices
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("path", nargs="?", default=IGNORE_FILE)
-    args = parser.parse_args(argv)
-    path = Path(args.path)
+def check_file(path: Path) -> int:
+    """Print problems with the ignore file at path; return a process exit code."""
     try:
         data = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
     except (OSError, YAMLError) as exc:
-        print(f"Could not read the image scan ignore file {path}: {exc}", file=sys.stderr)
+        print(f"Could not read the image scan ignore file {path.name}: {exc}", file=sys.stderr)
         return 1
     errors, notices = validate(data, datetime.now(timezone.utc).date())
     for notice in notices:
-        print(f"{path}: {notice}")
+        print(f"{path.name}: {notice}")
     if errors:
-        print(f"{path} breaks the image scan ignore policy:", file=sys.stderr)
+        print(f"{path.name} breaks the image scan ignore policy:", file=sys.stderr)
         for error in errors:
             print(f"  - {error}", file=sys.stderr)
         return 1
@@ -80,4 +88,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(check_file(IGNORE_FILE))
