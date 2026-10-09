@@ -330,6 +330,11 @@ builds of `main` before moving the `edge-<sha>` tags, and moves `edge` only whil
 that commit is still the head of `main`. Edge images are
 for maintainer testing; they are not releases and carry no release sign-off.
 
+New vulnerability data can fail this policy without any repository change. The
+`scheduled image scan` workflow rebuilds `main` daily for both variants and
+platforms and applies the same scan without publishing anything, so a newly
+disclosed CVE fails that run before it blocks the next edge or release publish.
+
 Scan findings, target digests, and scanner errors are recorded in the release
 workflow log. Lower-severity findings do not block publication under this
 policy. Scanner coverage depends on supported package metadata and vulnerability
