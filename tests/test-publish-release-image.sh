@@ -99,7 +99,7 @@ grep -Fq -- "pull --platform linux/arm64 ${staging_ref}@sha256:" "$FAKE_DOCKER_L
 grep -Fq -- "buildx imagetools inspect --raw ${staging_ref}@sha256:" "$FAKE_DOCKER_LOG"
 grep -Fq -- "run --rm --platform linux/amd64" "$FAKE_DOCKER_LOG"
 grep -Fq -- "run --rm --platform linux/arm64" "$FAKE_DOCKER_LOG"
-grep -Fq -- "--scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --ignore-unfixed=false --ignorefile /dev/null --exit-code 1 --exit-on-eol 1" "$FAKE_DOCKER_LOG"
+grep -Fq -- "--scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --ignore-unfixed=false --ignorefile /scan/trivyignore.yaml --show-suppressed --exit-code 1 --exit-on-eol 1" "$FAKE_DOCKER_LOG"
 grep -Fq -- "buildx imagetools create --tag ghcr.io/magrhino/wudup:v1.2.3-trivy ${staging_ref}@sha256:" "$FAKE_DOCKER_LOG"
 
 push_line="$(grep -n -m1 -- '--push' "$FAKE_DOCKER_LOG" | cut -d: -f1)"

@@ -1,0 +1,12 @@
+# Time-boxed exceptions for the edge, release, and scheduled image scans.
+# Policy: SECURITY.md#release-image-policy. Checked by scripts/check_trivyignore.py.
+#
+# Each entry needs:
+#   id:         one CVE-... or GHSA-... identifier
+#   paths:      exact image paths from the scan output (no wildcards)
+#   statement:  why it is safe to ship meanwhile and what fixes it
+#   expired_at: unquoted date at most 90 days ahead; Trivy stops applying the
+#               entry at 00:00 UTC that day and the finding blocks again
+#
+# Remove an entry as soon as the fix ships.
+vulnerabilities: []

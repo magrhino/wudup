@@ -265,7 +265,9 @@ dismissing or suppressing a finding. The record must include:
 Distinguish false positives and proven non-applicability from accepted risk.
 Accepted-risk exceptions are limited to non-blocking findings, require an owner,
 compensating controls, a remediation issue, and an expiry within 90 days, and
-must be reconsidered before renewal. They cannot waive a blocking condition.
+must be reconsidered before renewal. They cannot waive a blocking condition,
+except a release image scan finding recorded in `.trivyignore.yaml` under the
+[release image policy](#release-image-policy).
 Do not suppress a whole rule or package to silence one alert. Keep sensitive
 evidence private and publish only a sanitized rationale when disclosure is safe.
 No accepted SonarQube exceptions remain; see
@@ -320,7 +322,8 @@ The blocking policy is:
 - Scan all detectable OS and language-library dependencies in each final image,
   including Python packages and embedded Go dependencies in shipped binaries.
 - Block on any HIGH or CRITICAL vulnerability, including findings with no fix
-  available. No ignore list or automatic exception is applied.
+  available, unless a time-boxed entry in `.trivyignore.yaml` covers it (see
+  below). No other ignore list or automatic exception is applied.
 - Block on an end-of-life OS, scanner failure, database download failure, or
   missing platform digest. All four images must pass before any production tag
   is moved. Fix the reported dependency or scan failure and retry the release.
@@ -334,6 +337,19 @@ New vulnerability data can fail this policy without any repository change. The
 `scheduled image scan` workflow rebuilds `main` daily for both variants and
 platforms and applies the same scan without publishing anything, so a newly
 disclosed CVE fails that run before it blocks the next edge or release publish.
+
+A finding with no shipped fix yet (for example, an upstream binary still built
+with a vulnerable Go release) can be ignored temporarily in `.trivyignore.yaml`
+so releases can continue. `scripts/check_trivyignore.py` runs in the Python
+test suite on every pull request and in release validation, and requires each
+entry to name one CVE or GHSA ID, list the exact image paths it applies to, give
+a statement explaining why shipping is acceptable and what fix will replace it,
+and set an unquoted `expired_at` date at most 90 days ahead. Trivy stops
+applying an entry at 00:00 UTC on that date, so the finding blocks again
+without any further change; renewing it needs a new review. Ignored findings
+are still printed in the scan log. Remove an entry as soon as the fix ships.
+The scan itself only honors dates, so the ignore file relies on that check
+and code-owner review to reject an entry without one.
 
 Scan findings, target digests, and scanner errors are recorded in the release
 workflow log. Lower-severity findings do not block publication under this

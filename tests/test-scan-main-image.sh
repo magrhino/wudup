@@ -48,7 +48,7 @@ reset
 bash .github/scripts/scan-main-image.sh > "$TEST_TMP/out" 2>&1
 [[ "$(count '^buildx build ')" == 4 ]]
 [[ "$(count '--target wudup-trivy')" == 2 ]]
-[[ "$(count '--scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --ignore-unfixed=false --ignorefile /dev/null --exit-code 1 --exit-on-eol 1')" == 4 ]]
+[[ "$(count '--scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --ignore-unfixed=false --ignorefile /scan/trivyignore.yaml --show-suppressed --exit-code 1 --exit-on-eol 1')" == 4 ]]
 [[ "$(count "$scanner_image image --input /scan/image.tar")" == 4 ]]
 for platform in linux/amd64 linux/arm64; do
   [[ "$(count "^buildx build --platform $platform ")" == 2 ]]

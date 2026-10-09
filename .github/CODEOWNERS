@@ -6,6 +6,8 @@
 /.dockerignore @magrhino
 /Dockerfile @magrhino
 /entrypoint.sh @magrhino
+/.trivyignore.yaml @magrhino
+/scripts/check_trivyignore.py @magrhino
 
 /bin/ @magrhino
 /wud/ @magrhino
