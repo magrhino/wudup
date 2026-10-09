@@ -149,8 +149,8 @@ describe("Pending review decision summary", () => {
     expect(result.supporting.join(" ")).not.toContain("0 introduced");
     expect(result.gaps.join(" ")).toContain("database revisions differ");
     expect(result.unresolved.join(" ")).toContain("Database migration requires manual review");
-    expect(result.unresolved.join(" ")).toContain("Release notes mention security changes that need review.");
-    expect(result.gaps.join(" ")).toContain("Advisory lookup was incomplete");
+    expect(result.unresolved).toContain("Release notes mention security changes that need review. Advisory lookup was incomplete.");
+    expect(result.gaps.join(" ")).not.toContain("Advisory lookup was incomplete");
   });
 
   it("shows missing identity, stale metadata and failed release lookups without a clean result", () => {

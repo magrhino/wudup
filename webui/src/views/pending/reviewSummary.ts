@@ -114,8 +114,8 @@ function releaseEvidence(
     evidence.unresolved.push(`release notes flag breaking changes. ${note.breaking_reasons.join(" ") || "Read the release notes before applying."}`);
   }
   if (note.security.outcome === "needs_review") {
-    evidence.unresolved.push("release notes mention security changes that need review.");
-    evidence.gaps.push(`release security evidence needs review. ${note.security.reason}`);
+    // The reason carries severity (e.g. a High advisory vs. security wording only), so keep it visible.
+    evidence.unresolved.push(`release notes mention security changes that need review. ${note.security.reason}`.trim());
   }
   return evidence;
 }

@@ -340,7 +340,7 @@ export function usePendingPlanReviewState(
   // The readiness card scrolls away; keep why a ready plan cannot apply next to the disabled button.
   // Read-only comes from the session, not from mutationDisabledMessage, which also carries other reasons.
   const applyBlockedReason = computed(() => {
-    if (!updates.plan || updates.plan.status !== "ready" || updates.plan.can_apply) {
+    if (updates.plan?.status !== "ready" || updates.plan.can_apply) {
       return "";
     }
     const failed = applyPreflightAttentionChecks.value.filter((check) => check.status === "FAIL");
