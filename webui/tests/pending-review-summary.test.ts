@@ -216,6 +216,32 @@ describe("Pending review decision summary", () => {
     clean.unmount();
   });
 
+  it.each([
+    { loading: true, error: "", attention: "Candidate security scan information is loading.", summary: "Evidence details" },
+    { loading: false, error: "Scanner unavailable.", attention: "", summary: "Evidence details · 1 not available" },
+  ])("reports an unresolved scan request once, not as a per-service gap ($loading)", ({ loading, error, attention, summary }) => {
+    const { plan, note, scan } = evidenceFixture();
+    const line = plan.stacks[0]!.lines[0]!;
+    line.digest_provenance = {
+      source_image: line.compose_image, resolved_tag: "2.0.0", watch_tag: "2.0.0",
+      target_digest: "sha256:candidate", final_image: line.target_image,
+      provenance_source: "registry", provenance_confidence: "verified",
+    };
+    plan.stacks.push({ ...plan.stacks[0]!, name: "other" });
+    expect(reviewEvidence(plan, [note], null, false, "").gaps).toEqual([]);
+    const wrapper = mountWithApp({
+      components: { PendingReviewSummary },
+      setup: () => ({ plan, note, scan, loading, error }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="loading" :security-scans-error="error" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+    });
+    expect(wrapper.find("details.review-evidence summary").text()).toBe(summary);
+    expect(wrapper.text()).not.toMatch(/no candidate scan is confirmed/i);
+    if (attention) expect(wrapper.find(".review-attention").text()).toContain(attention);
+    else expect(wrapper.find(".review-attention").exists()).toBe(false);
+    if (error) expect(wrapper.find("details.review-evidence").text()).toContain(`Candidate security scan metadata is unavailable: ${error}`);
+    wrapper.unmount();
+  });
+
   it("renders scoped reasons as text and discloses all evidence for larger selections", () => {
     const { plan, note, scan } = evidenceFixture();
     plan.stacks.push({ ...plan.stacks[0]!, name: "other" });

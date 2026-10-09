@@ -147,7 +147,8 @@ function scanEvidence(target: string, digest: string, scan: SecurityScanInfo | u
 export function reviewEvidence(
   plan: PlanResponse,
   notes: ReleaseNoteInfo[],
-  scans: SecurityScanInfo[],
+  // null: the scan request is loading or failed, so per-line scan evidence is unknown rather than missing.
+  scans: SecurityScanInfo[] | null,
   releaseLoading: boolean,
   releaseError: string,
 ): ReviewEvidence {
@@ -157,7 +158,7 @@ export function reviewEvidence(
   // Name the service only when the selection has more than one.
   const named = plan.stacks.reduce((count, stack) => count + stack.lines.length, 0) > 1;
   const notesByLine = new Map(notes.map(note => [note.line_no, note]));
-  const scansByLine = new Map(scans.map(scan => [scan.line_no, scan]));
+  const scansByLine = new Map((scans ?? []).map(scan => [scan.line_no, scan]));
   for (const stack of plan.stacks) {
     for (const line of stack.lines) {
       const who = `${stack.name} / ${line.service || "service not recorded"}`;
@@ -170,7 +171,7 @@ export function reviewEvidence(
       const evidence = [
         imageEvidence(line, digest),
         releaseEvidence(targetTag, notesByLine.get(line.line_no), releaseLoading, releaseError),
-        scanEvidence(target, digest, scan),
+        ...(scans ? [scanEvidence(target, digest, scan)] : []),
       ];
       for (const part of evidence) {
         supporting.push(...part.supporting.map(label));

@@ -169,7 +169,8 @@ describe("pending view preflight safety", () => {
     await flushPromises();
     const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
     expect(summary.text()).toContain(expected);
-    expect(summary.text()).toContain("No candidate scan is confirmed");
+    // The request-level state replaces a per-service "no scan" gap.
+    expect(summary.text()).not.toContain("No candidate scan is confirmed");
     wrapper.unmount();
   });
 

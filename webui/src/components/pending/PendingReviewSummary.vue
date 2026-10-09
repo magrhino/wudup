@@ -16,8 +16,9 @@ const props = defineProps<{
 }>();
 const scanRequestGap = computed(() => props.securityScansError
   ? `Candidate security scan metadata is unavailable: ${props.securityScansError}` : "");
+// While the scan request is loading or failed, report it once instead of a per-line "no scan" gap.
 const evidence = computed(() => reviewEvidence(
-  props.plan, props.releaseNotes, props.securityScansLoading || scanRequestGap.value ? [] : props.securityScans,
+  props.plan, props.releaseNotes, props.securityScansLoading || scanRequestGap.value ? null : props.securityScans,
   props.releaseNotesLoading, props.releaseNotesError,
 ));
 // Only items that could change the apply decision are shown by default.
