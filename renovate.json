@@ -17,6 +17,12 @@
       "description": "Mark non-major Docker updates for merge automation",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "addLabels": ["automerge"]
+    },
+    {
+      "description": "Ship Docker CLI/Compose security fixes sooner; the bundled Go binaries are scanned on every edge and release publish",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker"],
+      "minimumReleaseAge": "1 day"
     }
   ],
   "pinDigests": true

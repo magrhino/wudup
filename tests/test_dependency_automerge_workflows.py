@@ -112,15 +112,34 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
 
     def test_renovate_marks_only_non_major_updates(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(config["packageRules"]), 1)
-        rule = config["packageRules"][0]
+        rules = config["packageRules"]
+        labelled = [rule for rule in rules if "addLabels" in rule]
+        self.assertEqual(len(labelled), 1)
+        rule = labelled[0]
 
         self.assertEqual(
             rule["matchUpdateTypes"], ["minor", "patch", "pin", "digest"]
         )
         self.assertNotIn("matchDepNames", rule)
         self.assertEqual(rule["addLabels"], ["automerge"])
-        self.assertNotIn("automerge", rule)
+        for any_rule in rules:
+            self.assertNotIn("automerge", any_rule)
+
+    def test_renovate_shortens_release_age_only_for_docker_cli(self) -> None:
+        config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["minimumReleaseAge"], "7 days")
+        overrides = [
+            rule for rule in config["packageRules"] if "minimumReleaseAge" in rule
+        ]
+        self.assertEqual(len(overrides), 1)
+        rule = overrides[0]
+        self.assertEqual(rule["matchDatasources"], ["docker"])
+        self.assertEqual(rule["matchPackageNames"], ["docker"])
+        self.assertEqual(rule["minimumReleaseAge"], "1 day")
+        self.assertEqual(
+            set(rule),
+            {"description", "matchDatasources", "matchPackageNames", "minimumReleaseAge"},
+        )
 
     def test_dependency_review_checks_all_scopes_and_missing_licenses(self) -> None:
         workflow, _ = self._workflow(ROOT / ".github/workflows/security.yml")
