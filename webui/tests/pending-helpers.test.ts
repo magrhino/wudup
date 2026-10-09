@@ -148,6 +148,7 @@ function pendingPlanReviewModalProps(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
+    applyBlockedReason: "",
     applyButtonLabel: "Apply 1 update",
     applyDisabled: false,
     applyPreflight: null,
@@ -187,7 +188,6 @@ function pendingPlanReviewModalProps(
     planTagStreamUpdates: [],
     preflightDigestPinNotice: "",
     preflightDigestUnpinNotice: "",
-    preflightServiceImpactLabel: "",
     preflightSummary: "1 service ready to update.",
     preflightTagRewriteNotice: "",
     preflightTitle: "Review selected updates",

@@ -5,7 +5,7 @@ type TagType = "default" | "error" | "info" | "success" | "warning";
 
 defineProps<{
   show: boolean;
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   titleId?: string;
   summary: string;
@@ -37,14 +37,14 @@ function handleShowUpdate(value: boolean): void {
       aria-modal="true"
       class="preflight-modal"
       :class="{ 'preflight-modal-fixed-footer': $slots.footer }"
-      :aria-labelledby="titleId ?? `${eyebrow}-preflight-title`"
+      :aria-labelledby="titleId ?? `${eyebrow ?? 'plan'}-preflight-title`"
     >
       <div class="preflight-scroll-content">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">{{ eyebrow }}</p>
-            <h2 :id="titleId ?? `${eyebrow}-preflight-title`">{{ title }}</h2>
-            <p class="preflight-summary-text">{{ summary }}</p>
+            <p v-if="eyebrow" class="eyebrow">{{ eyebrow }}</p>
+            <h2 :id="titleId ?? `${eyebrow ?? 'plan'}-preflight-title`">{{ title }}</h2>
+            <p v-if="summary" class="preflight-summary-text">{{ summary }}</p>
             <p v-if="impactLabel" class="preflight-impact-text">
               {{ impactLabel }}
             </p>

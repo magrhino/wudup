@@ -2,7 +2,7 @@ import type { PlanLine, PlanResponse, PlanStack, ReleaseNoteInfo, SecurityScanIn
 import { displayDigest } from "../../utils/digestProvenance";
 import { pendingMetadataStatus, releaseNoteReason } from "./pendingDisplay";
 
-export function operationalImpact(stack: PlanStack): string {
+function operationalSteps(stack: PlanStack): string {
   const scope = stack.services.length ? stack.services.join(", ") : "all services in this stack";
   const has = (kind: string) => stack.actions.some(action => action.kind === kind);
   const steps: string[] = [];
@@ -20,7 +20,31 @@ export function operationalImpact(stack: PlanStack): string {
   if (has("health-wait") || stack.actions.some(action => action.kind === "up" && action.args.includes("--wait"))) {
     steps.push("Health checks are planned after recreation; results are not available yet.");
   }
-  return `${stack.name}: ${steps.join(" ") || "Execution steps are not recorded. Review the plan details before applying."}`;
+  return steps.join(" ") || "Execution steps are not recorded. Review the plan details before applying.";
+}
+
+export function operationalImpact(stack: PlanStack): string {
+  return `${stack.name}: ${operationalSteps(stack)}`;
+}
+
+// One line of what the operator will notice; steps every plan shares (orphan cleanup, pending health results) stay in operationalImpact.
+export function impactSummary(stack: PlanStack, showStack: boolean): string {
+  const prefix = showStack ? `${stack.name}: ` : "";
+  if (!stack.actions.length) return `${prefix}Execution steps are not recorded for this plan.`;
+  const scope = stack.services.length ? stack.services.join(", ") : `All services in ${stack.name}`;
+  const has = (kind: string) => stack.actions.some(action => action.kind === kind);
+  const parts: string[] = [];
+  if (has("up")) parts.push(`${scope} will be ${stack.force_recreate ? "force-recreated" : "recreated"} (brief interruption).`);
+  else if (has("pause")) parts.push(`${scope} will be paused during the update.`);
+  // Without a recreate or pause step there is no short form to trust; show every planned step.
+  else return `${prefix}${operationalSteps(stack)}`;
+  const extraStops = stack.stop_services.filter(service => !stack.services.includes(service));
+  if (has("stop") && extraStops.length) parts.push(`Also stops ${extraStops.join(", ")}.`);
+  if (has("up") && stack.services.length && !stack.up_no_deps) parts.push("Dependencies may also start.");
+  if (has("health-wait") || stack.actions.some(action => action.kind === "up" && action.args.includes("--wait"))) {
+    parts.push("Waits for health checks.");
+  }
+  return `${prefix}${parts.join(" ")}`;
 }
 
 function repository(image: string): string {
@@ -28,7 +52,8 @@ function repository(image: string): string {
   return ref.lastIndexOf(":") > ref.lastIndexOf("/") ? ref.slice(0, ref.lastIndexOf(":")) : ref;
 }
 
-type ReviewEvidence = { supporting: string[]; unresolved: string[] };
+// unresolved: needs the operator's attention before applying. gaps: evidence WUDup could not gather.
+type ReviewEvidence = { supporting: string[]; unresolved: string[]; gaps: string[] };
 
 function scanReportsDigest(scan: SecurityScanInfo, digest: string): boolean {
   const digests = new Set([scan.subject.reported_digest, scan.subject.index_digest, scan.subject.manifest_digest]);
@@ -44,9 +69,9 @@ function plannedDigest(line: PlanLine, target: string, scan: SecurityScanInfo | 
 }
 
 function imageEvidence(line: PlanLine, digest: string): ReviewEvidence {
-  const evidence: ReviewEvidence = { supporting: [], unresolved: [] };
+  const evidence: ReviewEvidence = { supporting: [], unresolved: [], gaps: [] };
   if (digest) evidence.supporting.push(`planned image digest ${displayDigest(digest)}. This is a target, not proof that the image is running.`);
-  else evidence.unresolved.push("no exact image digest is confirmed for this planned target.");
+  else evidence.gaps.push("no exact image digest is confirmed for this planned target.");
   const metadataStatus = pendingMetadataStatus(line);
   if (metadataStatus !== "fresh") {
     evidence.unresolved.push(`update metadata is ${metadataStatus}. Refresh the update information and review again.`);
@@ -70,12 +95,17 @@ function releaseEvidence(
   const matches = note?.status === "ready"
     && /^\d+\.\d+\.\d+(?:[-+].+)?$/.test(targetTag)
     && targetTag === note.release_tag.replace(/^v(?=\d)/, "");
-  if (!matches) return { supporting: [], unresolved: [unavailableReleaseReason(note, loading, error)] };
+  if (!matches) {
+    // Loading stays visible: breaking or security flags may still arrive.
+    const reason = unavailableReleaseReason(note, loading, error);
+    return loading ? { supporting: [], unresolved: [reason], gaps: [] } : { supporting: [], unresolved: [], gaps: [reason] };
+  }
 
   const title = note.title && note.title !== note.release_tag ? ` ${note.title}.` : "";
   const evidence: ReviewEvidence = {
     supporting: [`${note.upstream_repo || note.provider || "upstream"} release ${note.release_tag} has the planned version label (upstream context).${title}`],
     unresolved: [],
+    gaps: [],
   };
   if (note.security.outcome === "verified_critical_high") {
     evidence.supporting.push(`release advisory (${note.security.severity}) — ${note.security.reason}`);
@@ -84,7 +114,8 @@ function releaseEvidence(
     evidence.unresolved.push(`release notes flag breaking changes. ${note.breaking_reasons.join(" ") || "Read the release notes before applying."}`);
   }
   if (note.security.outcome === "needs_review") {
-    evidence.unresolved.push(`release security evidence needs review. ${note.security.reason}`);
+    // The reason carries severity (e.g. a High advisory vs. security wording only), so keep it visible.
+    evidence.unresolved.push(`release notes mention security changes that need review. ${note.security.reason}`.trim());
   }
   return evidence;
 }
@@ -93,40 +124,45 @@ function scanEvidence(target: string, digest: string, scan: SecurityScanInfo | u
   // Never transfer evidence to an override or another digest just because its queue line matches.
   const matches = scan && digest && repository(scan.subject.requested_ref) === repository(target)
     && scanReportsDigest(scan, digest);
-  if (!matches) return { supporting: [], unresolved: ["no candidate scan is confirmed for the planned image digest."] };
+  if (!matches) return { supporting: [], unresolved: [], gaps: ["no candidate scan is confirmed for the planned image digest."] };
   if (scan.state !== "complete" || scan.verdict === "unknown") {
-    return { supporting: [], unresolved: [`candidate scan is ${scan.state.replaceAll("_", " ")}. ${scan.error_message || "Security evidence is incomplete."}`] };
+    return { supporting: [], unresolved: [], gaps: [`candidate scan is ${scan.state.replaceAll("_", " ")}. ${scan.error_message || "Security evidence is incomplete."}`] };
   }
 
   const scannedAt = scan.scanned_at ? ` at ${scan.scanned_at}` : "";
   const platform = scan.subject.platform ? ` (${scan.subject.platform})` : "";
   const provenance = `${scan.scanner || "Scanner"}${scannedAt}${platform}`;
-  const evidence: ReviewEvidence = { supporting: [], unresolved: [] };
+  const evidence: ReviewEvidence = { supporting: [], unresolved: [], gaps: [] };
   const comparison = scan.comparison;
   if (comparison.status === "unknown") {
     evidence.supporting.push(`${provenance} reports ${scan.verdict === "none_reported" ? "no findings" : "findings"} for the candidate.`);
-    evidence.unresolved.push(`installed-to-candidate comparison is unavailable. ${comparison.message}`);
+    evidence.gaps.push(`installed-to-candidate comparison is unavailable. ${comparison.message}`);
   } else {
     evidence.supporting.push(`${provenance} comparison — ${comparison.fixed_findings.length} fixed, ${comparison.introduced_findings.length} introduced, ${comparison.remaining_findings.length} remaining findings.`);
   }
-  evidence.unresolved.push(...scan.warnings);
+  evidence.gaps.push(...scan.warnings);
   return evidence;
 }
 
 export function reviewEvidence(
   plan: PlanResponse,
   notes: ReleaseNoteInfo[],
-  scans: SecurityScanInfo[],
+  // null: the scan request is loading or failed, so per-line scan evidence is unknown rather than missing.
+  scans: SecurityScanInfo[] | null,
   releaseLoading: boolean,
   releaseError: string,
 ): ReviewEvidence {
   const supporting: string[] = [];
   const unresolved: string[] = [];
+  const gaps: string[] = [];
+  // Name the service only when the selection has more than one.
+  const named = plan.stacks.reduce((count, stack) => count + stack.lines.length, 0) > 1;
   const notesByLine = new Map(notes.map(note => [note.line_no, note]));
-  const scansByLine = new Map(scans.map(scan => [scan.line_no, scan]));
+  const scansByLine = new Map((scans ?? []).map(scan => [scan.line_no, scan]));
   for (const stack of plan.stacks) {
     for (const line of stack.lines) {
       const who = `${stack.name} / ${line.service || "service not recorded"}`;
+      const label = (message: string) => named ? `${who}: ${message}` : message.charAt(0).toUpperCase() + message.slice(1);
       const target = line.target_image || line.resolved_image;
       const scan = scansByLine.get(line.line_no);
       const digest = plannedDigest(line, target, scan);
@@ -135,13 +171,14 @@ export function reviewEvidence(
       const evidence = [
         imageEvidence(line, digest),
         releaseEvidence(targetTag, notesByLine.get(line.line_no), releaseLoading, releaseError),
-        scanEvidence(target, digest, scan),
+        ...(scans ? [scanEvidence(target, digest, scan)] : []),
       ];
       for (const part of evidence) {
-        supporting.push(...part.supporting.map(message => `${who}: ${message}`));
-        unresolved.push(...part.unresolved.map(message => `${who}: ${message}`));
+        supporting.push(...part.supporting.map(label));
+        unresolved.push(...part.unresolved.map(label));
+        gaps.push(...part.gaps.map(label));
       }
     }
   }
-  return { supporting: [...new Set(supporting)], unresolved: [...new Set(unresolved)] };
+  return { supporting: [...new Set(supporting)], unresolved: [...new Set(unresolved)], gaps: [...new Set(gaps)] };
 }

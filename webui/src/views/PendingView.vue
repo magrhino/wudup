@@ -272,6 +272,7 @@ const {
   digestPinLabelApprovalApproved,
   digestPinLabelApprovalIssues,
   mutationDisabledMessage,
+  applyBlockedReason,
   mutationStateLabel,
   mutationStateType,
   pendingApplyTourDetail,
@@ -285,7 +286,6 @@ const {
   planStatusLabel,
   preflightDigestPinNotice,
   preflightDigestUnpinNotice,
-  preflightServiceImpactLabel,
   preflightSummary,
   preflightTagRewriteNotice,
   preflightTitle,
@@ -862,6 +862,7 @@ onBeforeUnmount(() => {
       :tag-stream-label-approval-issues="tagStreamLabelApprovalIssues"
       :loading="updates.loading"
       :mutation-disabled-message="mutationDisabledMessage"
+      :apply-blocked-reason="applyBlockedReason"
       :plan-actions="planActions"
       :plan-alert-type="planAlertType"
       :plan-digest-pin-label-rewrites="planDigestPinLabelRewrites"
@@ -878,7 +879,6 @@ onBeforeUnmount(() => {
       :plan-status-label="planStatusLabel"
       :preflight-digest-pin-notice="preflightDigestPinNotice"
       :preflight-digest-unpin-notice="preflightDigestUnpinNotice"
-      :preflight-service-impact-label="preflightServiceImpactLabel"
       :preflight-summary="preflightSummary"
       :preflight-tag-rewrite-notice="preflightTagRewriteNotice"
       :preflight-title="preflightTitle"

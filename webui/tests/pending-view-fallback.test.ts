@@ -331,7 +331,7 @@ describe("pending view fallback and release notes", () => {
     expect(snoozedCard?.text()).toContain("Pending entry #1");
   });
 
-  it("shows ready preflight service impact and row tag rewrites", async () => {
+  it("keeps a ready preflight header short and shows row tag rewrites", async () => {
     const { pinia, auth, connection, settings, updates, runs } = setupStores(true);
     updates.pending = pendingResponse();
     mockPendingLifecycle(settings, updates);
@@ -403,13 +403,15 @@ describe("pending view fallback and release notes", () => {
     const readiness = dialog.find(".apply-readiness");
     const impact = dialog.find(".preflight-impact");
     expect(dialog.find("#preflight-modal-title").text()).toBe("Review media plan");
-    expect(dialog.find(".preflight-impact-text").text()).toBe(
-      "radarr, wudup",
-    );
+    // The Apply button carries a ready plan's state; the header does not repeat it.
+    expect(dialog.find(".eyebrow").exists()).toBe(false);
+    expect(dialog.find(".section-heading .n-tag").exists()).toBe(false);
+    expect(dialog.find(".section-heading .preflight-summary-text").exists()).toBe(false);
+    expect(dialog.text()).not.toContain("Review only");
+    // This fixture only pulls, so the impact line lists the planned steps instead of a short form.
+    expect(dialog.find(".review-impact").text()).toMatch(/^Pull images for /);
     expect(readiness.exists()).toBe(true);
-    expect(readiness.text()).toContain("Apply readiness");
-    expect(readiness.text()).toContain("Ready");
-    expect(readiness.text()).toContain("9 checks passed");
+    expect(readiness.text()).toContain("9 system checks passed");
     expect(readiness.text()).toContain("Docker reachable");
     expect(readiness.text()).toContain("Selected services matched");
     expect(readiness.find(".apply-readiness-passed").exists()).toBe(true);
@@ -478,9 +480,33 @@ describe("pending view fallback and release notes", () => {
       .findAll("button")
       .find((button) => button.text().includes("Apply 1 update"));
     expect(applyButton?.attributes("disabled")).toBeDefined();
+    expect(applyButton?.attributes("aria-describedby")).toBe("apply-blocked-reason");
+    expect(dialog.find("#apply-blocked-reason").text()).toBe("Failed check: Logs writable.");
     await applyButton?.trigger("click");
 
     expect(applyPlan).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "failed check without detail", plan: { can_apply: false, apply_preflight: failedApplyPreflight("logs-writable", "") }, expected: "Failed check: Logs writable." },
+    { name: "plan rejected after passing checks", plan: { can_apply: false }, expected: "This plan cannot be applied. Preview it again." },
+  ])("does not call a blocked apply read-only when browser mutations are enabled ($name)", async ({ plan, expected }) => {
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse(plan);
+    });
+    const wrapper = mountPendingView(pinia);
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Review media plan"))
+      ?.trigger("click");
+    await flushPromises();
+    const reason = wrapper.find('[role="dialog"] #apply-blocked-reason');
+    expect(reason.text()).toBe(expected);
+    expect(reason.text()).not.toContain("Read-only");
+    wrapper.unmount();
   });
 
   it("explains when degraded WUD metadata blocks apply", async () => {

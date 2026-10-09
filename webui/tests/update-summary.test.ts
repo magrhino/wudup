@@ -3,6 +3,7 @@ import { imageTransition, planChanges, resultSignals, runChanges, scopeTitle } f
 import { planResponse, runSummary, runVerification } from "./helpers/fixtures";
 import { mountWithApp } from "./helpers/mount";
 import RunResultSummary from "../src/components/RunResultSummary.vue";
+import UpdateScopeSummary from "../src/components/UpdateScopeSummary.vue";
 
 const change = { stack: "home", service: "home-assistant", before: "ghcr.io/home-assistant/home-assistant:2026.5.1", after: "ghcr.io/home-assistant/home-assistant:2026.5.3" };
 const run = () => runSummary({ dry_run: false, finished_at: "2026-05-28T12:12:00Z", verification: runVerification() });
@@ -17,6 +18,20 @@ describe("update summaries", () => {
     const plan = planResponse();
     plan.stacks[0].lines.push({ ...plan.stacks[0].lines[0] });
     expect(planChanges(plan)).toHaveLength(1);
+  });
+
+  it("names the stack only when it adds context beyond the service name", () => {
+    const mount = (changes: typeof change[]) => mountWithApp({
+      components: { UpdateScopeSummary }, setup: () => ({ changes }),
+      template: '<UpdateScopeSummary :changes="changes" fallback="Review" />',
+    });
+    const distinct = mount([change]);
+    expect(distinct.find(".scope-context").text()).toBe("Stack home");
+    distinct.unmount();
+    const same = mount([{ ...change, stack: "home-assistant" }]);
+    expect(same.find(".scope-title").text()).toContain("home-assistant");
+    expect(same.find(".scope-context").exists()).toBe(false);
+    same.unmount();
   });
 
   it("does not confuse registry ports, digest pins, same-tag refreshes or repository switches with versions", () => {

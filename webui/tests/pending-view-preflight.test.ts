@@ -105,14 +105,17 @@ describe("pending view preflight safety", () => {
       .find((button) => button.text().includes("Apply 1 update"));
     expect(applyButton?.exists()).toBe(true);
     expect(applyButton?.attributes("disabled")).toBeDefined();
+    expect(applyButton?.attributes("aria-describedby")).toBe("apply-blocked-reason");
+    expect(wrapper.find("#apply-blocked-reason").text()).toBe(
+      "Read-only: applying updates from the browser is turned off.",
+    );
     const modal = wrapper.find(".preflight-modal");
     expect(modal.text().split("1 failed check must be fixed before applying.")).toHaveLength(2);
     expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
     expect(modal.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     const summary = modal.find('[aria-label="Update review decision summary"]');
-    expect(summary.text()).toContain("Operational impact");
-    expect(summary.text()).toContain("Supporting evidence");
-    expect(summary.text()).toContain("Unresolved before apply");
+    expect(summary.find(".review-impact").exists()).toBe(true);
+    expect(summary.find("details.review-evidence").text()).toContain("Planned steps");
     expect(summary.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     expect(modal.classes()).toContain("preflight-modal-fixed-footer");
     expect(modal.element.tagName).toBe("DIV");
@@ -166,7 +169,8 @@ describe("pending view preflight safety", () => {
     await flushPromises();
     const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
     expect(summary.text()).toContain(expected);
-    expect(summary.text()).toContain("no candidate scan is confirmed");
+    // The request-level state replaces a per-service "no scan" gap.
+    expect(summary.text()).not.toContain("No candidate scan is confirmed");
     wrapper.unmount();
   });
 
@@ -230,12 +234,14 @@ describe("pending view preflight safety", () => {
     expect(wrapper.find('[role="dialog"]').text()).toContain(
       "No Compose service matched repo/app:1.0.",
     );
+    // Regression: the shared footer used to fall back to an enabled, unwired "Apply" button.
     expect(
       wrapper
         .find('[role="dialog"]')
         .findAll("button")
-        .some((button) => button.text().includes("Apply 1 update")),
+        .some((button) => button.text().startsWith("Apply")),
     ).toBe(false);
+    expect(wrapper.find("#apply-blocked-reason").exists()).toBe(false);
     expect(applyPlan).not.toHaveBeenCalled();
   });
 

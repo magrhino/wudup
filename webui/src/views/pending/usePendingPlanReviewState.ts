@@ -34,7 +34,6 @@ import {
   planTagUpdatesFromPlan,
   pluralize,
   reviewCountLabel,
-  summarizeList,
 } from "./utils";
 import {
   pendingSelectionForItem,
@@ -181,19 +180,6 @@ export function usePendingPlanReviewState(
       updates.plan.summary.target_count ||
       updates.plan.selected_line_numbers.length;
     return `${pluralize(serviceCount, "service")} ready to update.`;
-  });
-  const preflightServiceImpactLabel = computed(() => {
-    if (!updates.plan || updates.plan.status !== "ready") {
-      return "";
-    }
-    return summarizeList(
-      planLines.value.map(({ stack, line }) =>
-        updates.plan && updates.plan.summary.stack_count > 1
-          ? `${stack} / ${line.service || "stack-level"}`
-          : line.service || "stack-level",
-      ),
-      4,
-    );
   });
   const applyPreflight = computed(() => updates.plan?.apply_preflight ?? null);
   const applyPreflightPassedChecks = computed(
@@ -350,6 +336,24 @@ export function usePendingPlanReviewState(
         : "Fix the failed apply readiness check before applying updates.";
     }
     return "This plan cannot be applied.";
+  });
+  // The readiness card scrolls away; keep why a ready plan cannot apply next to the disabled button.
+  // Read-only comes from the session, not from mutationDisabledMessage, which also carries other reasons.
+  const applyBlockedReason = computed(() => {
+    if (updates.plan?.status !== "ready" || updates.plan.can_apply) {
+      return "";
+    }
+    const failed = applyPreflightAttentionChecks.value.filter((check) => check.status === "FAIL");
+    if (
+      !auth.session?.mutations_enabled ||
+      failed.some((check) => check.code === "mutations-enabled")
+    ) {
+      return "Read-only: applying updates from the browser is turned off.";
+    }
+    if (failed.length) {
+      return `${failed.length === 1 ? "Failed check" : "Failed checks"}: ${failed.map((check) => check.label).join(", ")}.`;
+    }
+    return "This plan cannot be applied. Preview it again.";
   });
   const selectedStackNames = computed(() =>
     options.stackGroups.value
@@ -672,6 +676,7 @@ export function usePendingPlanReviewState(
     digestPinLabelApprovalApproved,
     digestPinLabelApprovalIssues,
     mutationDisabledMessage,
+    applyBlockedReason,
     mutationStateLabel,
     mutationStateType,
     pendingApplyTourDetail,
@@ -686,7 +691,6 @@ export function usePendingPlanReviewState(
     planStatusLabel,
     preflightDigestPinNotice,
     preflightDigestUnpinNotice,
-    preflightServiceImpactLabel,
     preflightSummary,
     preflightTagRewriteNotice,
     preflightTitle,
