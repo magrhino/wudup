@@ -403,7 +403,8 @@ validates the multi-arch manifests, and then creates or publishes the GitHub
 Release. All four scans must pass the [release image policy](../SECURITY.md#release-image-policy)
 before any production image tag is promoted. HIGH/CRITICAL findings (including
 unfixed vulnerabilities), end-of-life operating systems, and scan errors block
-the release. The pinned scanner checks OS and language packages in the final
+the release, except findings covered by a dated entry in `.trivyignore.yaml`
+(at most 90 days, checked by `scripts/check_trivyignore.py`). The pinned scanner checks OS and language packages in the final
 images; the former four-package upgrade check is no longer the release gate.
 The public GitHub Release is published only after the GHCR image
 tags are available. The release gate includes Python, shell, WebUI, WebUI smoke,

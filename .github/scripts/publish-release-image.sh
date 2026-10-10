@@ -93,11 +93,9 @@ elif [[ "$requested_variant" == check ]]; then
 fi
 
 # Use the same pinned scanner as the optional image, outside the scanned image.
-scanner_image="$(sed -n 's/^FROM \(aquasec\/trivy:[^ ]*\) AS trivy$/\1/p' Dockerfile)"
-if [[ ! "$scanner_image" =~ ^aquasec/trivy:[^@]+@sha256:[0-9a-f]{64}$ ]]; then
-  printf 'Release scan needs a digest-pinned Trivy image in Dockerfile.\n' >&2
-  exit 1
-fi
+# shellcheck source=.github/scripts/image-scan-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/image-scan-policy.sh"
+scanner_image="$(image_scanner_ref)"
 scan_dir="$(mktemp -d)"
 trap 'rm -rf "$scan_dir"' EXIT
 verified_refs=()
@@ -206,11 +204,7 @@ stage_and_verify() {
     # socket are exposed to the scanner. Reuse only its database cache.
     docker image save --platform "$platform" --output "$scan_dir/image.tar" "$immutable_ref"
     printf 'Scanning %s (%s): %s\n' "$variant" "$platform" "$immutable_ref"
-    if ! docker run --rm --user "$(id -u):$(id -g)" --volume "$scan_dir:/scan" "$scanner_image" image \
-      --input /scan/image.tar --platform "$platform" --cache-dir /scan/cache \
-      --scanners vuln --pkg-types os,library --severity HIGH,CRITICAL \
-      --ignore-unfixed=false --ignorefile /dev/null --exit-code 1 \
-      --exit-on-eol 1 --timeout 10m --no-progress; then
+    if ! scan_image_archive "$scanner_image" "$scan_dir" image.tar "$platform"; then
       printf 'Release blocked: %s (%s) failed the image security policy or could not be scanned. Review the scan output, fix the image or scanner failure, and retry.\n' \
         "$variant" "$platform" >&2
       exit 1

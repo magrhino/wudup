@@ -1,0 +1,57 @@
+name: scheduled image scan
+
+# New vulnerability data can fail the edge and release image scans without any
+# repository change. Rebuild main daily and scan it with the same policy so the
+# failure shows up here, not on the next merge or release.
+on:
+  schedule:
+    - cron: "17 11 * * *"
+  workflow_dispatch:
+
+# Queue instead of cancelling so a manual run never stops the daily scan.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan-main-image:
+    name: scan images built from main
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Always scan main, even when dispatched from another branch.
+          ref: main
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and scan both variants for amd64 and arm64
+        shell: bash
+        env:
+          # Read the edge build cache only; scheduled scans never write it.
+          BUILDX_CACHE_FROM: type=gha,scope=wudup-edge
+          APT_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          bash .github/scripts/scan-main-image.sh
