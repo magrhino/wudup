@@ -84,6 +84,22 @@ def test_id_and_statement_must_be_text(key: str, value) -> None:
     assert any(f"missing {key}" in error for error in errors_for(entry(**{key: value})))
 
 
+@pytest.mark.parametrize("key", ["paths", "purls"])
+@pytest.mark.parametrize("value", [[], None, "usr/local/bin/docker", [""], [7]])
+def test_filters_must_be_non_empty_lists(key: str, value) -> None:
+    errors = errors_for({**entry(), key: value})
+    assert any(f"{key} must be a non-empty list" in error for error in errors)
+
+
+def test_misspelled_filter_keys_fail() -> None:
+    errors = errors_for(entry(paths=None, path=["usr/local/bin/docker"]))
+    assert any("unsupported keys: path" in error for error in errors)
+
+
+def test_purls_filter_is_allowed() -> None:
+    assert errors_for(entry(purls=["pkg:golang/stdlib@v1.26.8"])) == []
+
+
 def test_malformed_files_fail() -> None:
     assert validate({"vulnerabilities": [], "secrets": []}, TODAY)[0]
     assert validate(["CVE-2026-78669"], TODAY)[0]

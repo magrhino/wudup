@@ -20,6 +20,10 @@ from ruamel.yaml.error import YAMLError
 IGNORE_FILE = Path(__file__).resolve().parents[1] / ".trivyignore.yaml"
 MAX_DAYS = 90
 TEXT_KEYS = ("id", "statement")
+# Optional Trivy filters. An empty or misspelled one would apply the entry to
+# the whole image, so they must be non-empty lists when present.
+FILTER_KEYS = ("paths", "purls")
+ALLOWED_KEYS = {*TEXT_KEYS, "expired_at", *FILTER_KEYS}
 
 
 def _check_expiry(label: str, expires: Any, today: date, latest: date) -> tuple[list[str], list[str]]:
@@ -47,8 +51,20 @@ def _check_entry(index: int, entry: Any, today: date, latest: date) -> tuple[lis
         for key in TEXT_KEYS
         if not isinstance(entry.get(key), str) or not entry[key].strip()
     ]
+    unknown = sorted(str(key) for key in entry if key not in ALLOWED_KEYS)
+    if unknown:
+        errors.append(f"{label} has unsupported keys: {', '.join(unknown)} (allowed: {', '.join(sorted(ALLOWED_KEYS))}).")
+    errors += [
+        f"{label} {key} must be a non-empty list of non-empty text values."
+        for key in FILTER_KEYS
+        if key in entry and not _is_text_list(entry[key])
+    ]
     expiry_errors, notices = _check_expiry(label, entry.get("expired_at"), today, latest)
     return errors + expiry_errors, notices
+
+
+def _is_text_list(value: Any) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(item, str) and item.strip() for item in value)
 
 
 def validate(data: Any, today: date) -> tuple[list[str], list[str]]:
