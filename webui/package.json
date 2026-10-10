@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.47.0",
-    "@vueuse/core": "^14.4.0",
+    "@vueuse/core": "^15.0.0",
     "marked": "^18.0.14",
     "naive-ui": "^2.45.3",
     "pinia": "^4.0.3",
