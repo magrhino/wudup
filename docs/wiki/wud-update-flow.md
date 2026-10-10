@@ -42,22 +42,28 @@ On Pending, select stack updates, then choose **Review selected**. The review
 bar stays available while scrolling and shows the eligible update count. Each
 stack also has a **Review … plan** action. Review changes nothing; **Apply** stays
 inside the plan dialog, subject to read-only mode, readiness and fresh-plan checks.
-The dialog scrolls its contents separately from Close and Apply. The plan summary
+The dialog scrolls its contents separately from Close and Apply. Its heading
 shows the proposed image transition for one service, or service and stack totals
-for larger selections. Expand **Inspect image change** (or **Inspect all service
-changes**) to compare exact references grouped by stack.
+for larger selections; **Services and images** lists the exact from and to
+references for every selected service.
 
-The review also summarizes **Operational impact**, **Supporting evidence**, and
-**Unresolved before apply**. Impact follows the planned pull, pause/stop,
-recreate, dependency, orphan-removal, and health-check steps, including
-stack-wide recreation. Supporting evidence distinguishes the planned digest
-from a running-image verification result. Release information is matched to
-the planned version, and scan comparisons are shown only for a matching image
-digest. Missing evidence, breaking-change notices, skipped updates, and plan
-issues retain their reasons. Longer selections expand within each section.
-These summaries do not change apply eligibility: release and scan evidence
-remains advisory, and existing readiness and fresh-plan checks still control
-Apply.
+**Check before applying** appears only when something could change the decision:
+breaking-change notices, release security notes that need review, verified
+critical or high release advisories, scan findings the running image does not
+have, stale update metadata, and plan issues or skipped updates with their
+reasons. Below it, one line names the services that will be recreated, paused,
+or stopped, whether dependencies may start, and whether the plan waits for
+health checks. When every readiness check passes, readiness collapses to a
+passed-checks line; warnings and failures keep the full list.
+
+**Evidence details** stays collapsed. It holds the evidence that was found, the
+release information that was not available, and the full planned steps, including
+pulls, orphan removal, and stack-wide recreation. Release information is matched
+to the planned version, and scan comparisons are shown only for a matching image
+digest. Security scans are mentioned only when a scan ran for the planned image;
+with scanning off or no scan yet, the review says nothing about them. These
+summaries do not change apply eligibility: release and scan evidence remains
+advisory, and existing readiness and fresh-plan checks still control Apply.
 
 The Dashboard leads with pending work by stack, distinguishing version decisions
 and targets needing attention from stopped, unverified, and snoozed work. These
