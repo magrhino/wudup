@@ -176,7 +176,11 @@ describe("pending view preflight safety", () => {
     wrapper.unmount();
   });
 
-  it("does not mention scan requests in the review modal when scanning is off", async () => {
+  it.each([
+    { error: "", expected: null },
+    // A cached "off" response may predate a restart that turned scanning on; a failed read still reports itself.
+    { error: "Scanner connection failed.", expected: "Candidate security scan metadata is unavailable: Scanner connection failed." },
+  ])("does not mention scan requests in the review modal when scanning is off (error: $error)", async ({ error, expected }) => {
     const { pinia, settings, updates } = setupStores(false);
     const pending = pendingResponse();
     updates.pending = pending;
@@ -191,8 +195,8 @@ describe("pending view preflight safety", () => {
       items: [],
       warnings: [],
     };
-    updates.securityScansLoading = true;
-    updates.securityScansError = "Scanner connection failed.";
+    updates.securityScansLoading = !error;
+    updates.securityScansError = error;
     mockPendingLifecycle(settings, updates);
     vi.spyOn(updates, "createPlan").mockImplementation(async () => {
       updates.plan = planResponse({ can_apply: false });
@@ -202,7 +206,8 @@ describe("pending view preflight safety", () => {
     await flushPromises();
     const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
     expect(summary.exists()).toBe(true);
-    expect(summary.text()).not.toMatch(/scan|security/i);
+    if (expected) expect(summary.text()).toContain(expected);
+    else expect(summary.text()).not.toMatch(/scan|security/i);
     wrapper.unmount();
   });
 

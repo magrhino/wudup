@@ -874,7 +874,7 @@ onBeforeUnmount(() => {
       :security-scans="updates.currentSecurityScanItems"
       :security-scans-loading="updates.securityScansLoading"
       :security-scans-error="updates.securityScansError"
-      :security-scans-disabled="updates.securityScans?.scanning_enabled === false"
+      :security-scans-disabled="updates.securityScans?.scanning_enabled === false && !updates.securityScansError"
       :plan-tag-stream-updates="planTagStreamUpdates"
       :plan-metadata-warning="planMetadataWarning"
       :plan-status-label="planStatusLabel"
