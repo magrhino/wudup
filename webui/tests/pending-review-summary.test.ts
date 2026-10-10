@@ -102,7 +102,8 @@ describe("Pending review decision summary", () => {
     expect(result.supporting.join(" ")).not.toContain("0 introduced");
     expect(result.unresolved).toEqual([]);
     expect(result.gaps.join(" ")).toContain("not confirmed for this planned version");
-    expect(result.gaps.join(" ")).toContain("No candidate scan is confirmed");
+    // A scan for another candidate is neither reused nor reported as missing.
+    expect(result.gaps.join(" ")).not.toMatch(/scan/i);
     plan.stacks[0]!.lines[0]!.target_image = "other/app@sha256:candidate";
     expect(reviewEvidence(plan, [note], [scan], false, "").supporting.join(" ")).not.toContain("0 introduced");
   });
@@ -115,8 +116,7 @@ describe("Pending review decision summary", () => {
     for (const scans of [[scan], []]) {
       const result = reviewEvidence(plan, [note], scans, false, "");
       expect(result.supporting).toEqual([]);
-      expect(result.gaps.join(" ")).toContain("No exact image digest is confirmed for this planned target");
-      expect(result.gaps.join(" ")).toContain("No candidate scan is confirmed");
+      expect(result.gaps.join(" ")).not.toMatch(/digest|scan/i);
     }
     // Even a scan for the new tag cannot confirm a different retained digest.
     scan.subject.requested_ref = line.target_image;
@@ -158,7 +158,8 @@ describe("Pending review decision summary", () => {
     plan.stacks[0]!.lines[0]!.metadata_status = "recovered";
     const result = reviewEvidence(plan, [], [], false, "Release provider is unavailable.");
     expect(result.supporting).toEqual([]);
-    expect(result.gaps.join(" ")).toContain("No exact image digest");
+    // Tag-based plans rarely carry a digest; its absence is not reported.
+    expect(result.gaps.join(" ")).not.toMatch(/digest/i);
     expect(result.unresolved.join(" ")).toContain("metadata is recovered");
     expect(result.gaps.join(" ")).toContain("Release provider is unavailable");
   });
@@ -196,30 +197,61 @@ describe("Pending review decision summary", () => {
     wrapper.unmount();
   });
 
-  it("counts missing evidence on the collapsed disclosure so a quiet summary is not read as clean", () => {
-    const plan = planResponse();
+  it.each(["not_scanned", "disabled", "unsupported"] as const)("says nothing about security for an unscanned candidate (%s)", state => {
+    const { plan, note, scan } = evidenceFixture();
+    scan.state = state;
+    const result = reviewEvidence(plan, [note], [scan], false, "");
+    expect(result.unresolved).toEqual([]);
+    expect([...result.supporting, ...result.gaps].join(" ")).not.toMatch(/scan|finding|trivy/i);
     const wrapper = mountWithApp({
       components: { PendingReviewSummary },
-      setup: () => ({ plan }),
-      template: '<PendingReviewSummary :plan="plan" :release-notes="[]" :security-scans="[]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+      setup: () => ({ plan, note, scan }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
     });
     expect(wrapper.find(".review-attention").exists()).toBe(false);
-    expect(wrapper.find("details.review-evidence summary").text()).toBe("Evidence details · 3 not available");
+    expect(wrapper.find("details.review-evidence summary").text()).toBe("Evidence details");
+    expect(wrapper.text()).not.toMatch(/scan|security|not available/i);
     wrapper.unmount();
-    const { plan: covered, note, scan } = evidenceFixture();
-    const clean = mountWithApp({
+  });
+
+  it("says nothing about scan requests when the backend reports scanning is off", () => {
+    const { plan, note, scan } = evidenceFixture();
+    const wrapper = mountWithApp({
       components: { PendingReviewSummary },
-      setup: () => ({ covered, note, scan }),
-      template: '<PendingReviewSummary :plan="covered" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+      setup: () => ({ plan, note, scan }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="true" security-scans-error="Scanner unavailable." security-scans-disabled :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
     });
-    expect(clean.find("details.review-evidence summary").text()).toBe("Evidence details");
-    clean.unmount();
+    expect(wrapper.find(".review-attention").exists()).toBe(false);
+    expect(wrapper.text()).not.toMatch(/scan|security/i);
+    wrapper.unmount();
+  });
+
+  it("lists introduced scan findings and verified release advisories before applying", () => {
+    const { plan, note, scan } = evidenceFixture();
+    scan.comparison.status = "worse";
+    scan.comparison.introduced_findings = [{
+      target: "", target_class: "", target_type: "", vulnerability_id: "CVE-2026-0001", package_name: "openssl",
+      installed_version: "3.0.0", fixed_version: "3.0.1", severity: "high", title: "", primary_url: "",
+    }];
+    note.security = { ...note.security, outcome: "verified_critical_high", severity: "critical", reason: "GHSA-xxxx affects 2.0.0." };
+    const result = reviewEvidence(plan, [note], [scan], false, "");
+    expect(result.unresolved.join(" ")).toContain("1 introduced");
+    expect(result.unresolved.join(" ")).toContain("Release advisory (critical) — GHSA-xxxx affects 2.0.0.");
+    expect(result.supporting.join(" ")).not.toMatch(/introduced|advisory/);
+    const wrapper = mountWithApp({
+      components: { PendingReviewSummary },
+      setup: () => ({ plan, note, scan }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+    });
+    expect(wrapper.find(".review-attention").text()).toContain("GHSA-xxxx affects 2.0.0.");
+    expect(wrapper.find(".review-attention").text()).toContain("1 introduced");
+    wrapper.unmount();
   });
 
   it.each([
-    { loading: true, error: "", attention: "Candidate security scan information is loading.", summary: "Evidence details" },
-    { loading: false, error: "Scanner unavailable.", attention: "", summary: "Evidence details · 1 not available" },
-  ])("reports an unresolved scan request once, not as a per-service gap ($loading)", ({ loading, error, attention, summary }) => {
+    { loading: true, error: "", attention: "Candidate security scan information is loading." },
+    { loading: false, error: "Scanner unavailable.", attention: "" },
+  ])("reports an unresolved scan request once, not as a per-service gap ($loading)", ({ loading, error, attention }) => {
     const { plan, note, scan } = evidenceFixture();
     const line = plan.stacks[0]!.lines[0]!;
     line.digest_provenance = {
@@ -234,7 +266,7 @@ describe("Pending review decision summary", () => {
       setup: () => ({ plan, note, scan, loading, error }),
       template: '<PendingReviewSummary :plan="plan" :release-notes="[note]" :security-scans="[scan]" :security-scans-loading="loading" :security-scans-error="error" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
     });
-    expect(wrapper.find("details.review-evidence summary").text()).toBe(summary);
+    expect(wrapper.find("details.review-evidence summary").text()).toBe("Evidence details");
     expect(wrapper.text()).not.toMatch(/no candidate scan is confirmed/i);
     if (attention) expect(wrapper.find(".review-attention").text()).toContain(attention);
     else expect(wrapper.find(".review-attention").exists()).toBe(false);
