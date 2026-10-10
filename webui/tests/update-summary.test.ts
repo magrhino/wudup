@@ -34,6 +34,20 @@ describe("update summaries", () => {
     same.unmount();
   });
 
+  it("omits the image change disclosure when the caller already lists each change", () => {
+    const mount = (hide: boolean) => mountWithApp({
+      components: { UpdateScopeSummary }, setup: () => ({ changes: [change], hide }),
+      template: '<UpdateScopeSummary :changes="changes" fallback="Review" :hide-changes="hide" />',
+    });
+    const shown = mount(false);
+    expect(shown.find("details.scope-changes").exists()).toBe(true);
+    shown.unmount();
+    const hidden = mount(true);
+    expect(hidden.find("details.scope-changes").exists()).toBe(false);
+    expect(hidden.find(".scope-title").text()).toContain("→");
+    hidden.unmount();
+  });
+
   it("does not confuse registry ports, digest pins, same-tag refreshes or repository switches with versions", () => {
     expect(imageTransition({ ...change, before: "localhost:5000/app:1", after: "localhost:5000/app:2" })).toBe("1 → 2");
     expect(imageTransition({ ...change, before: "app:stable", after: "app:stable" })).toBe("stable · same image reference");

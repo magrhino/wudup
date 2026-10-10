@@ -12,18 +12,22 @@ const props = defineProps<{
   securityScans: SecurityScanInfo[];
   securityScansLoading: boolean;
   securityScansError: string;
+  // Set only when the backend confirms scanning is off; an unknown state still reports request problems.
+  securityScansDisabled?: boolean;
   reasons: string[];
 }>();
-const scanRequestGap = computed(() => props.securityScansError
+const scanRequestGap = computed(() => props.securityScansError && !props.securityScansDisabled
   ? `Candidate security scan metadata is unavailable: ${props.securityScansError}` : "");
-// While the scan request is loading or failed, report it once instead of a per-line "no scan" gap.
+const scansLoading = computed(() => props.securityScansLoading && !props.securityScansDisabled);
+// While the scan request is loading or failed, report it once instead of per-line scan evidence.
 const evidence = computed(() => reviewEvidence(
-  props.plan, props.releaseNotes, props.securityScansLoading || scanRequestGap.value ? null : props.securityScans,
+  props.plan, props.releaseNotes,
+  props.securityScansDisabled || scansLoading.value || scanRequestGap.value ? null : props.securityScans,
   props.releaseNotesLoading, props.releaseNotesError,
 ));
 // Only items that could change the apply decision are shown by default.
 const attention = computed(() => [...new Set([
-  props.securityScansLoading ? "Candidate security scan information is loading." : "",
+  scansLoading.value ? "Candidate security scan information is loading." : "",
   ...props.reasons,
   ...evidence.value.unresolved,
 ].filter(Boolean))]);
@@ -50,15 +54,13 @@ const evidenceSections = computed(() => [
     <p v-for="line in impact" :key="line" class="review-impact">{{ line }}</p>
     <slot />
     <details class="review-evidence">
-      <summary>
-        Evidence details<template v-if="missingEvidence.length"> · {{ missingEvidence.length }} not available</template>
-      </summary>
+      <summary>Evidence details</summary>
       <div v-for="section in evidenceSections" :key="section.title" class="review-evidence-section">
         <h4>{{ section.title }}</h4>
         <ul><li v-for="item in section.items" :key="item">{{ item }}</li></ul>
       </div>
       <p class="review-evidence-limit">
-        Release and scan evidence is advisory. Missing evidence does not mean an image is safe.
+        This evidence is advisory. Missing evidence does not mean an image is safe.
       </p>
     </details>
   </section>

@@ -2,7 +2,8 @@
 import { computed } from "vue";
 import { imageTransition, scopeTitle, type ImageChange } from "../utils/updateSummary";
 
-const props = defineProps<{ changes: ImageChange[]; fallback: string; compact?: boolean }>();
+// hideChanges: the caller already lists each image change, as the plan review's services card does.
+const props = defineProps<{ changes: ImageChange[]; fallback: string; compact?: boolean; hideChanges?: boolean }>();
 const groups = computed(() => {
   const stacks = new Map<string, ImageChange[]>();
   for (const change of props.changes) {
@@ -21,7 +22,7 @@ const groups = computed(() => {
     <p v-if="!compact && changes.length === 1 && changes[0]!.stack !== changes[0]!.service" class="scope-context">
       Stack {{ changes[0]!.stack || "not recorded" }}
     </p>
-    <details v-if="!compact && changes.length" class="scope-changes">
+    <details v-if="!compact && !hideChanges && changes.length" class="scope-changes">
       <summary>Inspect {{ changes.length === 1 ? 'image change' : `all ${changes.length} service changes` }}</summary>
       <section v-for="[stack, items] in groups" :key="stack" class="scope-stack">
         <h3>{{ stack }}</h3>

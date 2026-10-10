@@ -70,8 +70,8 @@ function plannedDigest(line: PlanLine, target: string, scan: SecurityScanInfo | 
 
 function imageEvidence(line: PlanLine, digest: string): ReviewEvidence {
   const evidence: ReviewEvidence = { supporting: [], unresolved: [], gaps: [] };
+  // Tag-based updates rarely carry a digest, so only a known digest is worth a line.
   if (digest) evidence.supporting.push(`planned image digest ${displayDigest(digest)}. This is a target, not proof that the image is running.`);
-  else evidence.gaps.push("no exact image digest is confirmed for this planned target.");
   const metadataStatus = pendingMetadataStatus(line);
   if (metadataStatus !== "fresh") {
     evidence.unresolved.push(`update metadata is ${metadataStatus}. Refresh the update information and review again.`);
@@ -108,7 +108,7 @@ function releaseEvidence(
     gaps: [],
   };
   if (note.security.outcome === "verified_critical_high") {
-    evidence.supporting.push(`release advisory (${note.security.severity}) — ${note.security.reason}`);
+    evidence.unresolved.push(`release advisory (${note.security.severity}) — ${note.security.reason}`);
   }
   if (note.breaking) {
     evidence.unresolved.push(`release notes flag breaking changes. ${note.breaking_reasons.join(" ") || "Read the release notes before applying."}`);
@@ -120,11 +120,14 @@ function releaseEvidence(
   return evidence;
 }
 
+// States where no scan of this candidate was attempted; the review stays silent about security.
+const UNSCANNED_STATES = new Set(["disabled", "not_scanned", "unsupported"]);
+
 function scanEvidence(target: string, digest: string, scan: SecurityScanInfo | undefined): ReviewEvidence {
   // Never transfer evidence to an override or another digest just because its queue line matches.
   const matches = scan && digest && repository(scan.subject.requested_ref) === repository(target)
     && scanReportsDigest(scan, digest);
-  if (!matches) return { supporting: [], unresolved: [], gaps: ["no candidate scan is confirmed for the planned image digest."] };
+  if (!matches || UNSCANNED_STATES.has(scan.state)) return { supporting: [], unresolved: [], gaps: [] };
   if (scan.state !== "complete" || scan.verdict === "unknown") {
     return { supporting: [], unresolved: [], gaps: [`candidate scan is ${scan.state.replaceAll("_", " ")}. ${scan.error_message || "Security evidence is incomplete."}`] };
   }
@@ -138,7 +141,9 @@ function scanEvidence(target: string, digest: string, scan: SecurityScanInfo | u
     evidence.supporting.push(`${provenance} reports ${scan.verdict === "none_reported" ? "no findings" : "findings"} for the candidate.`);
     evidence.gaps.push(`installed-to-candidate comparison is unavailable. ${comparison.message}`);
   } else {
-    evidence.supporting.push(`${provenance} comparison — ${comparison.fixed_findings.length} fixed, ${comparison.introduced_findings.length} introduced, ${comparison.remaining_findings.length} remaining findings.`);
+    const counts = `${provenance} comparison — ${comparison.fixed_findings.length} fixed, ${comparison.introduced_findings.length} introduced, ${comparison.remaining_findings.length} remaining findings.`;
+    // Findings the running image does not have are the ones that can change the apply decision.
+    (comparison.introduced_findings.length ? evidence.unresolved : evidence.supporting).push(counts);
   }
   evidence.gaps.push(...scan.warnings);
   return evidence;
@@ -147,7 +152,7 @@ function scanEvidence(target: string, digest: string, scan: SecurityScanInfo | u
 export function reviewEvidence(
   plan: PlanResponse,
   notes: ReleaseNoteInfo[],
-  // null: the scan request is loading or failed, so per-line scan evidence is unknown rather than missing.
+  // null: scanning is off, or the scan request is loading or failed, so per-line scan evidence is skipped.
   scans: SecurityScanInfo[] | null,
   releaseLoading: boolean,
   releaseError: string,

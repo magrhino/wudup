@@ -82,6 +82,7 @@ const props = defineProps<{
   securityScans: SecurityScanInfo[];
   securityScansLoading: boolean;
   securityScansError: string;
+  securityScansDisabled?: boolean;
   planTagStreamUpdates: { stack: string; update: PlanTagStreamUpdate }[];
   planMetadataWarning: string;
   planStatusLabel: string;
@@ -170,7 +171,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
     @close="emit('close')"
   >
     <section class="preflight-block" aria-label="Planned changes summary">
-      <UpdateScopeSummary :changes="changes" fallback="No matched image changes" />
+      <UpdateScopeSummary :changes="changes" fallback="No matched image changes" hide-changes />
     </section>
 
     <PendingReviewSummary
@@ -181,6 +182,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       :security-scans="securityScans"
       :security-scans-loading="securityScansLoading"
       :security-scans-error="securityScansError"
+      :security-scans-disabled="securityScansDisabled"
       :reasons="reviewReasons"
     >
       <section

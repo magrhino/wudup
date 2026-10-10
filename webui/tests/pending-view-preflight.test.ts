@@ -114,6 +114,8 @@ describe("pending view preflight safety", () => {
     expect(modal.text().split("Set WUD_WEB_MUTATIONS_ENABLED=true on the server to apply updates.")).toHaveLength(2);
     expect(modal.find(".apply-readiness").text()).toContain("Read-only mode is active.");
     const summary = modal.find('[aria-label="Update review decision summary"]');
+    // The services card already lists each image change, so the scope summary does not repeat it.
+    expect(modal.find("details.scope-changes").exists()).toBe(false);
     expect(summary.find(".review-impact").exists()).toBe(true);
     expect(summary.find("details.review-evidence").text()).toContain("Planned steps");
     expect(summary.find(".apply-readiness").text()).toContain("Read-only mode is active.");
@@ -171,6 +173,36 @@ describe("pending view preflight safety", () => {
     expect(summary.text()).toContain(expected);
     // The request-level state replaces a per-service "no scan" gap.
     expect(summary.text()).not.toContain("No candidate scan is confirmed");
+    wrapper.unmount();
+  });
+
+  it("does not mention scan requests in the review modal when scanning is off", async () => {
+    const { pinia, settings, updates } = setupStores(false);
+    const pending = pendingResponse();
+    updates.pending = pending;
+    updates.securityScans = {
+      source_file: pending.source_file,
+      source: pending.source,
+      source_hash: pending.source_hash ?? "",
+      scanning_enabled: false,
+      scanner: "",
+      scan_mode: "",
+      count: 0,
+      items: [],
+      warnings: [],
+    };
+    updates.securityScansLoading = true;
+    updates.securityScansError = "Scanner connection failed.";
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse({ can_apply: false });
+    });
+    const wrapper = mountPendingView(pinia);
+    await wrapper.findAll("button").find((button) => button.text() === "Review media plan")!.trigger("click");
+    await flushPromises();
+    const summary = wrapper.find('.preflight-modal [aria-label="Update review decision summary"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).not.toMatch(/scan|security/i);
     wrapper.unmount();
   });
 
