@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
-from collections.abc import Sequence
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from types import FrameType
 
 from .banner import print_startup_banner
 from .doctor import run_doctor_from_namespace
@@ -103,7 +107,35 @@ def _run_update_from_wud(args: argparse.Namespace) -> int:
     except UpdaterError as exc:
         print(exc, file=sys.stderr)
         return 1
-    return run_update_from_wud(options)
+    with _stop_signals_interrupt():
+        return run_update_from_wud(options)
+
+
+@contextmanager
+def _stop_signals_interrupt() -> Iterator[None]:
+    """Treat SIGTERM and SIGHUP like Ctrl-C so an update can clean up.
+
+    Without this the process exits at once, leaving a rewritten Compose file
+    and removed WUD entries behind.
+    """
+
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def interrupt(signum: int, _frame: FrameType | None) -> None:
+        raise KeyboardInterrupt(signal.Signals(signum).name)
+
+    previous = {}
+    for name in ("SIGTERM", "SIGHUP"):
+        signum = getattr(signal, name, None)
+        if signum is not None:
+            previous[signum] = signal.signal(signum, interrupt)
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def _run_doctor(args: argparse.Namespace) -> int:

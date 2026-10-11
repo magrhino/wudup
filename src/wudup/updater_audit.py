@@ -263,6 +263,28 @@ def finish_audit_run(
         raise
 
 
+def mark_interrupted_pending(runner: Any) -> None:
+    """Fail the pending rows a stopped run left in progress (best effort)."""
+
+    if runner.audit_conn is None or runner.audit_run_id is None:
+        return
+    try:
+        with runner.audit_conn:
+            runner.audit_conn.execute(
+                """
+                UPDATE pending_updates
+                SET status = 'failed',
+                    status_reason = 'run-interrupted',
+                    updated_at = ?
+                WHERE run_id = ?
+                  AND status = 'in_progress'
+                """,
+                (db_utc_timestamp(), runner.audit_run_id),
+            )
+    except sqlite3.Error:
+        return
+
+
 def mark_unmatched_pending(
     runner: Any,
     parsed: ParsedWudFile,

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Sequence
 from typing import Any
 
@@ -106,11 +107,20 @@ class StackLifecycleExecutor(
         state = state_or_status
         # An exception escaping the steps counts as a failure, so the backup
         # is kept and its path logged when the Compose file was not restored.
-        status = StackStatus("failure", "unexpected-error")
         try:
             status = self._run_stack_update_steps(state)
-        finally:
-            self._discard_compose_backup(state, status)
+        except BaseException:
+            # An interrupt or unexpected error must not leave a Compose file on
+            # a tag that never passed the health gate. A failure here (even of
+            # logging) must not replace the error that stopped the update.
+            with contextlib.suppress(Exception):
+                self._restore_compose_after_abort(state)
+            with contextlib.suppress(Exception):
+                self._discard_compose_backup(
+                    state, StackStatus("failure", "unexpected-error"),
+                )
+            raise
+        self._discard_compose_backup(state, status)
         return status
 
     def _run_stack_update_steps(self, state: _StackUpdateState) -> StackStatus:

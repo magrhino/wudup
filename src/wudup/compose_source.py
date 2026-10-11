@@ -51,7 +51,13 @@ def _load_compose_yaml(
     *,
     width: int | None = None,
 ) -> tuple[str, YAML, CommentedMap, CommentedMap]:
-    source = compose_path.read_bytes().decode("utf-8")
+    try:
+        source = compose_path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ComposeTagRewriteError(
+            "Compose file is not UTF-8 text, so WUDup cannot edit it safely; "
+            f"save it as UTF-8 and retry ({exc})."
+        ) from exc
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
     if width is not None:

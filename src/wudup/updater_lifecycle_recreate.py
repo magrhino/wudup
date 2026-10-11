@@ -309,6 +309,7 @@ class _LifecycleRecreateMixin:
                 services=state.stopped_services,
                 matches=state.matches,
             )
+            state.health_verified = True
             self.log.info(f"[{stack.name}] Updated without starting stopped services")
             self._remember_applied_digest_changes(state)
             return StackStatus("success", "updated")
@@ -357,6 +358,7 @@ class _LifecycleRecreateMixin:
                 )
                 return StackStatus("failure", "down-failed")
 
+            state.health_verified = True
             # Record the verified state so history shows services whose
             # earlier start failed as running after this update.
             self.runner.stack_runtime_states_after[stack.index] = (

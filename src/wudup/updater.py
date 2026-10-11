@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import sys
@@ -24,6 +25,7 @@ from .updater_matching import (
 )
 from .updater_models import (
     DigestRequirementOutcomes,
+    InFlightPending,
     StackStatus,
     UpdaterError,
 )
@@ -86,6 +88,8 @@ class UpdateFromWudRunner(
         self.expected_digest_outcomes = DigestRequirementOutcomes()
         self.partially_selected_line_numbers: tuple[int, ...] = ()
         self.matched_tag_stream_updates: set[TagStreamUpdate] = set()
+        # WUD entries removed before the update and not yet reconciled.
+        self.in_flight_pending: InFlightPending | None = None
         self.audit_conn: sqlite3.Connection | None = None
         self.audit_run_id: int | None = None
         self.audit_db_path: Path | None = None
@@ -235,7 +239,7 @@ class UpdateFromWudRunner(
                 return 0
 
             self._confirm_before_mutation()
-            audit_parsed = self._prepare_mutation(
+            in_flight = self._prepare_mutation(
                 parsed,
                 matches,
                 skipped_tags,
@@ -244,29 +248,37 @@ class UpdateFromWudRunner(
                 lock,
             )
 
-            stack_statuses = self._preflight_matching_stack_digests(matches)
-            exclusion_statuses = self._apply_tag_exclusions([
+            # Record outcomes on the in-flight record as they happen, so an
+            # interrupted run knows which removed entries to put back.
+            stack_statuses = in_flight.stack_statuses
+            stack_statuses.update(self._preflight_matching_stack_digests(matches))
+            exclusion_statuses = in_flight.exclusion_statuses
+            exclusion_statuses.update(self._apply_tag_exclusions([
                 update for update in exclusion_updates
                 if update.stack.index not in stack_statuses
-            ])
+            ]))
             exclusion_statuses.update({
                 (update.stack.index, update.source_line): StackStatus("failure", "preflight-skipped")
                 for update in exclusion_updates
                 if update.stack.index in stack_statuses
             })
-            stack_statuses.update(self._update_matching_stacks([
-                match for match in matches
-                if match.stack.index not in stack_statuses
-            ]))
+            self._update_matching_stacks(
+                [
+                    match for match in matches
+                    if match.stack.index not in stack_statuses
+                ],
+                stack_statuses,
+            )
 
             self._reconcile_pending_entries(
-                audit_parsed,
+                in_flight.parsed,
                 matches,
                 stack_statuses,
                 exclusion_updates,
                 exclusion_statuses,
                 lock,
             )
+            self.in_flight_pending = None
             return self._finish_run(
                 matches,
                 stack_statuses,
@@ -275,16 +287,17 @@ class UpdateFromWudRunner(
                 exclusion_failures,
             )
         except (CommandError, ComposeDiscoveryError, LineSpecError, OwnerConfigError, WudLockError) as exc:
-            updater_audit.finish_audit_run(self, "failure", best_effort=True)
+            self._abort_run(lock)
             raise UpdaterError(str(exc)) from exc
         except OSError as exc:
-            updater_audit.finish_audit_run(self, "failure", best_effort=True)
+            self._abort_run(lock)
             raise UpdaterError(f"Filesystem operation failed: {exc}") from exc
         except (sqlite3.Error, db.DatabaseError) as exc:
-            updater_audit.finish_audit_run(self, "failure", best_effort=True)
+            self._abort_run(lock)
             raise UpdaterError(f"Could not update audit database: {exc}") from exc
-        except UpdaterError:
-            updater_audit.finish_audit_run(self, "failure", best_effort=True)
+        except BaseException:
+            # UpdaterError, KeyboardInterrupt, and unexpected errors.
+            self._abort_run(lock)
             raise
         finally:
             if self.audit_conn is not None:
@@ -432,7 +445,7 @@ class UpdateFromWudRunner(
         exclusion_updates: Sequence[TagExclusionUpdate],
         exclusion_failures: Sequence[tuple[WudTarget, str]],
         lock: DirectoryLock,
-    ) -> ParsedWudFile:
+    ) -> InFlightPending:
         opts = self.options
         remove_line_numbers = parse_line_spec(
             opts.remove_lines_before_run,
@@ -465,6 +478,12 @@ class UpdateFromWudRunner(
         updater_audit.mark_matched_pending(self, matches, status="in_progress")
         self._mark_tag_exclusions_pending(exclusion_updates)
         self._mark_tag_exclusion_failures(exclusion_failures)
+        in_flight = InFlightPending(
+            parsed=audit_parsed,
+            matches=tuple(matches),
+            exclusion_updates=tuple(exclusion_updates),
+        )
+        self.in_flight_pending = in_flight
         wud_file.remove_lines_before_run(
             opts.wud_file,
             audit_parsed,
@@ -473,19 +492,117 @@ class UpdateFromWudRunner(
             owner=self.owner,
         )
         self.log.info("Removed in-flight WUD entries before update.")
-        return audit_parsed
+        return in_flight
 
     def _update_matching_stacks(
         self,
         matches: Sequence[Match],
-    ) -> dict[int, StackStatus]:
-        stack_statuses: dict[int, StackStatus] = {}
+        stack_statuses: dict[int, StackStatus],
+    ) -> None:
         for stack in _stacks_to_update(matches):
             stack_matches = [
                 match for match in matches if match.stack.index == stack.index
             ]
             stack_statuses[stack.index] = self._update_stack(stack, stack_matches)
-        return stack_statuses
+
+    def _abort_run(self, lock: DirectoryLock) -> None:
+        """Clean up after a run that stopped before it could finish normally.
+
+        Every step runs even when an earlier one fails, and the audit run is
+        always finished. A failed step is not reported again because logging
+        may be what failed (a hung-up terminal or a full disk); the error that
+        stopped the run still propagates.
+        """
+
+        in_flight = self.in_flight_pending
+        self.in_flight_pending = None
+        try:
+            if in_flight is not None:
+                with contextlib.suppress(Exception):
+                    self._restore_unfinished_pending(in_flight, lock)
+                with contextlib.suppress(Exception):
+                    self._record_finished_stacks(in_flight)
+        finally:
+            try:
+                updater_audit.mark_interrupted_pending(self)
+            finally:
+                updater_audit.finish_audit_run(self, "failure", best_effort=True)
+
+    def _restore_unfinished_pending(
+        self,
+        in_flight: InFlightPending,
+        lock: DirectoryLock,
+    ) -> None:
+        # Stale digest entries are put back too; the next run reports them.
+        unfinished = set(self._unfinished_pending_lines(
+            in_flight.matches,
+            in_flight.stack_statuses,
+            in_flight.exclusion_updates,
+            in_flight.exclusion_statuses,
+        )) | set(self.partially_selected_line_numbers)
+        if not unfinished:
+            return
+        wud_label = self.options.wud_file_label or str(self.options.wud_file)
+        lines = ", ".join(str(line_no) for line_no in sorted(unfinished))
+        try:
+            wud_file.restore_failed_lines(
+                self.options.wud_file,
+                in_flight.parsed,
+                sorted(unfinished),
+                lock=lock,
+                owner=self.owner,
+            )
+        except Exception as exc:  # noqa: BLE001 - the run is already failing.
+            self.log.error(
+                f"The update stopped, and unfinished WUD entries on lines {lines} "
+                f"could not be kept pending in {wud_label}: {exc}. The next WUD "
+                "check reports them again."
+            )
+            return
+        self.log.warning(
+            f"The update stopped; kept unfinished WUD entries on lines {lines} "
+            f"pending in {wud_label}."
+        )
+
+    def _record_finished_stacks(self, in_flight: InFlightPending) -> None:
+        """Keep history for stacks that finished before the run stopped."""
+
+        statuses = in_flight.stack_statuses
+        attempted = tuple(
+            match for match in in_flight.matches if match.stack.index in statuses
+        )
+        failed_lines = sorted({
+            match.target.line_no
+            for match in attempted
+            if statuses[match.stack.index].status != "success"
+        })
+        # Tag exclusions are applied together, so either all have a status or none.
+        exclusion_updates = tuple(
+            update
+            for update in in_flight.exclusion_updates
+            if (update.stack.index, update.source_line) in in_flight.exclusion_statuses
+        )
+        try:
+            # All matches, so a line shared with an unattempted stack stays open.
+            updater_audit.mark_successful_pending(self, in_flight.matches, statuses)
+            # Attempted matches only, so the reason comes from the stack that failed.
+            updater_audit.mark_failed_pending(self, attempted, statuses, failed_lines)
+            self._mark_successful_tag_exclusions(
+                exclusion_updates,
+                in_flight.exclusion_statuses,
+            )
+            updater_audit.record_update_events(
+                self,
+                attempted,
+                statuses,
+                insert_event=db.insert_update_event,
+            )
+            updater_audit.record_known_images(self, attempted, statuses)
+        except Exception as exc:  # noqa: BLE001 - the run is already failing.
+            self.log.error(
+                "The update stopped, and the stacks that finished before it "
+                f"could not be added to the update history: {exc}"
+            )
 
     def _preflight_matching_stack_digests(
         self,
@@ -534,23 +651,19 @@ class UpdateFromWudRunner(
         lock: DirectoryLock,
     ) -> None:
         opts = self.options
+        wud_label = opts.wud_file_label or str(opts.wud_file)
         self._progress(
             "cleanup",
             "running",
             "Reconciling pending entries after the update attempt.",
             matches=matches,
         )
-        failed_lines = _failed_line_numbers(matches, stack_statuses)
-        failed_exclusion_lines = {
-            update.source_line
-            for update in exclusion_updates
-            if exclusion_statuses.get(
-                (update.stack.index, update.source_line),
-                StackStatus("failure", "missing"),
-            ).status
-            != "success"
-        }
-        failed_lines.extend(sorted(failed_exclusion_lines))
+        failed_lines = self._unfinished_pending_lines(
+            matches,
+            stack_statuses,
+            exclusion_updates,
+            exclusion_statuses,
+        )
         partial_lines = set(self.partially_selected_line_numbers)
         stale_failed_lines = (
             self._stale_pending_digest_line_numbers(matches, failed_lines)
@@ -574,12 +687,12 @@ class UpdateFromWudRunner(
             )
         if failed_lines:
             if restorable_failed_lines:
-                self.log.warning(f"Restored failed WUD entries in {opts.wud_file}")
+                self.log.warning(f"Kept failed WUD entries pending in {wud_label}")
             if stale_failed_lines:
                 stale_lines = ", ".join(str(line) for line in sorted(stale_failed_lines))
                 self.log.warning(
                     "Removed stale digest WUD entries from "
-                    f"{opts.wud_file}: lines {stale_lines}. "
+                    f"{wud_label}: lines {stale_lines}. "
                     "Refresh or replace them before retrying."
                 )
             self._mark_failed_lines_restored(restorable_failed_lines)
@@ -616,6 +729,28 @@ class UpdateFromWudRunner(
                 "Pending entries were reconciled.",
                 matches=matches,
             )
+
+    @staticmethod
+    def _unfinished_pending_lines(
+        matches: Sequence[Match],
+        stack_statuses: Mapping[int, StackStatus],
+        exclusion_updates: Sequence[TagExclusionUpdate],
+        exclusion_statuses: Mapping[tuple[int, int], StackStatus],
+    ) -> list[int]:
+        """Return removed WUD lines whose stack or tag exclusion did not succeed."""
+
+        failed_lines = _failed_line_numbers(matches, stack_statuses)
+        failed_exclusion_lines = {
+            update.source_line
+            for update in exclusion_updates
+            if exclusion_statuses.get(
+                (update.stack.index, update.source_line),
+                StackStatus("failure", "missing"),
+            ).status
+            != "success"
+        }
+        failed_lines.extend(sorted(failed_exclusion_lines))
+        return failed_lines
 
     def _finish_run(
         self,
