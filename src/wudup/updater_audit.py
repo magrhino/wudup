@@ -248,12 +248,15 @@ def finish_audit_run(
         return
     try:
         with runner.audit_conn:
+            # A run is finished once; a later failure, such as a log write
+            # after a successful finish, must not overwrite its status.
             runner.audit_conn.execute(
                 """
                 UPDATE update_runs
                 SET status = ?,
                     finished_at = ?
                 WHERE id = ?
+                  AND finished_at IS NULL
                 """,
                 (status, db_utc_timestamp(), runner.audit_run_id),
             )

@@ -129,7 +129,8 @@ def _stop_signals_interrupt() -> Iterator[None]:
     previous = {}
     for name in ("SIGTERM", "SIGHUP"):
         signum = getattr(signal, name, None)
-        if signum is not None:
+        # Keep a signal the operator chose to ignore, such as SIGHUP under nohup.
+        if signum is not None and signal.getsignal(signum) is not signal.SIG_IGN:
             previous[signum] = signal.signal(signum, interrupt)
     try:
         yield

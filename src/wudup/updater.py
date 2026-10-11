@@ -483,14 +483,20 @@ class UpdateFromWudRunner(
             matches=tuple(matches),
             exclusion_updates=tuple(exclusion_updates),
         )
-        self.in_flight_pending = in_flight
-        wud_file.remove_lines_before_run(
-            opts.wud_file,
-            audit_parsed,
-            in_flight_lines,
-            lock=lock,
-            owner=self.owner,
-        )
+        # Take the lock first: a lock timeout then means nothing was removed,
+        # so an abort has nothing to put back.
+        lock.acquire()
+        try:
+            self.in_flight_pending = in_flight
+            wud_file.remove_lines_before_run(
+                opts.wud_file,
+                audit_parsed,
+                in_flight_lines,
+                lock=lock,
+                owner=self.owner,
+            )
+        finally:
+            lock.release()
         self.log.info("Removed in-flight WUD entries before update.")
         return in_flight
 
@@ -553,10 +559,16 @@ class UpdateFromWudRunner(
                 owner=self.owner,
             )
         except Exception as exc:  # noqa: BLE001 - the run is already failing.
+            entries = "; ".join(
+                line.raw
+                for line in in_flight.parsed.lines
+                if line.line_no in unfinished
+            )
             self.log.error(
                 f"The update stopped, and unfinished WUD entries on lines {lines} "
-                f"could not be kept pending in {wud_label}: {exc}. The next WUD "
-                "check reports them again."
+                f"could not be kept pending in {wud_label}: {exc}. Check that WUD "
+                f"still lists these updates, and add them back by hand if it does "
+                f"not: {entries}"
             )
             return
         self.log.warning(

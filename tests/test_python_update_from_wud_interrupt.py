@@ -18,10 +18,11 @@ from wudup.cli import _stop_signals_interrupt
 from wudup.command import CommandRunner
 from wudup.compose import ComposeCli
 from wudup.compose_source import _load_compose_yaml
+from wudup.locks import DirectoryLock, WudLockTimeout
 from wudup.updater import UpdateFromWudRunner
 from wudup.updater_lifecycle import StackLifecycleExecutor
 from wudup.updater_logging import Logger
-from wudup.updater_models import ComposeTagRewriteError
+from wudup.updater_models import ComposeTagRewriteError, UpdaterError
 
 TAG_LINE = "repo/app:1.0 tag=2.0\n"
 OTHER_LINE = "repo/other:latest\n"
@@ -143,6 +144,63 @@ class UpdateFromWudInterruptTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), TAG_LINE)
         self.assertEqual(self._pending_rows()[1], ("failed", "run-interrupted"))
         self.assertEqual(self._run_status(), "failure")
+
+    def test_lock_timeout_before_removal_skips_restore(self) -> None:
+        output = StringIO()
+        with (
+            mock.patch.object(
+                DirectoryLock,
+                "acquire",
+                side_effect=WudLockTimeout("Timed out waiting for WUD file lock"),
+            ),
+            mock.patch("wudup.wud_file.restore_failed_lines") as restore,
+            redirect_stdout(output),
+            redirect_stderr(output),
+            self.assertRaisesRegex(UpdaterError, "Timed out waiting"),
+        ):
+            self.make_runner(allow_tag_updates=True).run()
+
+        restore.assert_not_called()
+        self.assertNotIn("could not be kept pending", output.getvalue())
+        self.assertEqual(
+            self.wud_file.read_text(encoding="utf-8"),
+            TAG_LINE + OTHER_LINE,
+        )
+        self.assertEqual(self._run_status(), "failure")
+
+    def test_failed_wud_restore_names_entries_to_add_back(self) -> None:
+        with mock.patch(
+            "wudup.wud_file.restore_failed_lines",
+            side_effect=OSError("disk full"),
+        ):
+            output = self._run_raising(KeyboardInterrupt, during="b-app")
+
+        self.assertIn("could not be kept pending", output)
+        self.assertIn("add them back by hand if it does not: repo/app:1.0 tag=2.0", output)
+        self.assertNotIn("next WUD check", output)
+
+    def test_log_failure_after_successful_finish_keeps_success_status(self) -> None:
+        real_info = Logger.info
+
+        def info(logger: Logger, message: str) -> None:
+            if message.startswith("Done."):
+                raise OSError(errno.ENOSPC, "No space left on device")
+            real_info(logger, message)
+
+        output = StringIO()
+        with (
+            mock.patch.object(Logger, "info", autospec=True, side_effect=info),
+            redirect_stdout(output),
+            redirect_stderr(output),
+            self.assertRaisesRegex(UpdaterError, "No space left"),
+        ):
+            self.make_runner(allow_tag_updates=True).run()
+
+        self.assertEqual(self._run_status(), "success")
+        self.assertEqual(
+            {status for status, _reason in self._pending_rows().values()},
+            {"resolved"},
+        )
 
     def test_failing_log_writes_do_not_stop_abort_cleanup(self) -> None:
         def break_logging() -> None:
@@ -322,3 +380,14 @@ class StopSignalsInterruptTests(UpdateFromWudRunnerTestCase):
             os.kill(os.getpid(), signal.SIGTERM)
 
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
+
+    def test_ignored_sighup_stays_ignored(self) -> None:
+        previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        self.addCleanup(signal.signal, signal.SIGHUP, previous)
+
+        with _stop_signals_interrupt():
+            # Under nohup a hang-up must not stop the update.
+            self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+            os.kill(os.getpid(), signal.SIGHUP)
+
+        self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
