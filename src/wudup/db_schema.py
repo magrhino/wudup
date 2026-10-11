@@ -734,14 +734,20 @@ def _migration_transaction(conn: sqlite3.Connection) -> Iterator[None]:
     """
 
     if conn.in_transaction:
-        conn.commit()
+        try:
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
     conn.execute("BEGIN IMMEDIATE")
+    committed = False
     try:
         yield
         conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
+        committed = True
+    finally:
+        if not committed:
+            conn.rollback()
 
 
 def _execute_script(conn: sqlite3.Connection, script: str) -> None:

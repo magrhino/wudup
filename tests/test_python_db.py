@@ -52,7 +52,14 @@ class FakeConnection:
 
 class FailingStatementConnection(sqlite3.Connection):
     fail_on = ""
+    fail_next_commit = False
     block_executescript = False
+
+    def commit(self) -> None:
+        if self.fail_next_commit:
+            self.fail_next_commit = False
+            raise sqlite3.OperationalError("database is locked")
+        super().commit()
 
     def execute(self, sql: str, *args: object) -> sqlite3.Cursor:
         if self.fail_on and self.fail_on in sql:
@@ -762,6 +769,27 @@ class DatabaseTests(unittest.TestCase):
                     ).fetchone()
 
         self.assertEqual(row, ("kept",))
+
+    def test_failed_commit_of_pending_caller_writes_rolls_them_back(self) -> None:
+        with closing(
+            sqlite3.connect(":memory:", factory=FailingStatementConnection)
+        ) as conn:
+            init_db(conn)
+            conn.execute(
+                "INSERT INTO web_settings (key, value, updated_at) "
+                "VALUES ('pending', 'dropped', 'now')"
+            )
+            conn.fail_next_commit = True
+
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                init_db(conn)
+
+            self.assertFalse(conn.in_transaction)
+            row = conn.execute(
+                "SELECT value FROM web_settings WHERE key = 'pending'"
+            ).fetchone()
+
+        self.assertIsNone(row)
 
     def test_schema_creation_and_migrations_never_use_executescript(self) -> None:
         with closing(
