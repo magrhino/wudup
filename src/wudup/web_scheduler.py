@@ -48,7 +48,7 @@ AUTO_UPDATE_GRACE_SECONDS = 300
 # blocked it is held this long before it is recorded as missed.
 AUTO_UPDATE_MAX_LATE_SECONDS = 3600
 AUTO_UPDATE_MISSED_MODE = "auto-update-missed"
-AUTO_UPDATE_HOLD_BUSY = "Another update job was still running."
+AUTO_UPDATE_HOLD_BUSY = "Another WUDup job was still running."
 AUTO_UPDATE_HOLD_OTHER_MODE = (
     "Services scheduled at the same time with a different update mode ran first."
 )
@@ -277,15 +277,28 @@ def _runnable_auto_update_policies(
     )
     if missed:
         with _immediate_transaction(conn):
-            _record_missed_auto_update_slots(conn, settings, missed, held)
+            _record_missed_auto_update_slots(
+                conn, settings, missed, held, now_utc=now_utc
+            )
     due_schedule_keys = {policy.schedule_key for policy in policies.values()}
     for schedule_key in [key for key in held if key not in due_schedule_keys]:
         del held[schedule_key]
-    if policies and web_job_registry._active_apply_job_exists_in_state(state):
+    if not policies:
+        return {}
+    active_error = web_job_registry._active_mutation_error_in_state(state)
+    if active_error:
+        reason = _busy_hold_reason(active_error)
         for schedule_key in due_schedule_keys:
-            held.setdefault(schedule_key, AUTO_UPDATE_HOLD_BUSY)
+            held.setdefault(schedule_key, reason)
         return {}
     return policies
+
+
+def _busy_hold_reason(active_error: str) -> str:
+    detail = active_error.strip().rstrip(".")
+    if not detail:
+        return AUTO_UPDATE_HOLD_BUSY
+    return f"{AUTO_UPDATE_HOLD_BUSY[:-1]}: {detail}."
 
 
 def _hold_failed_submission(
@@ -296,7 +309,7 @@ def _hold_failed_submission(
     # Keep the slot so the next tick can still run it late. A 409 means another
     # job started while the plan was built.
     reason = (
-        AUTO_UPDATE_HOLD_BUSY
+        _busy_hold_reason(str(exc.detail))
         if isinstance(exc, HTTPException) and exc.status_code == 409
         else AUTO_UPDATE_HOLD_SUBMIT_FAILED
     )
@@ -820,9 +833,30 @@ def _record_missed_auto_update_slots(
     settings: WebSettings,
     missed: Sequence[AutoUpdatePolicy],
     held: Mapping[str, str],
+    *,
+    now_utc: datetime,
 ) -> None:
-    """Record held slots that passed the late limit as one run in History."""
+    """Record held slots that passed the late limit as one run in History.
+
+    Runs inside an immediate transaction. Each slot is rechecked against the
+    current policy and claimed with a `missed` schedule row, so a slot is
+    recorded at most once even across processes or restarts.
+    """
     now = utc_timestamp()
+    missed = [
+        policy
+        for policy in missed
+        if _claim_missed_auto_update_slot(
+            conn,
+            settings,
+            policy,
+            reason=held.get(policy.schedule_key, AUTO_UPDATE_HOLD_BUSY),
+            now=now,
+            now_utc=now_utc,
+        )
+    ]
+    if not missed:
+        return
     late_minutes = AUTO_UPDATE_MAX_LATE_SECONDS // 60
     slots = [
         {
@@ -848,7 +882,7 @@ def _record_missed_auto_update_slots(
         "slots": slots,
         "timezone": settings.config.timezone_name,
     }
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO update_runs (
             started_at,
@@ -864,6 +898,86 @@ def _record_missed_auto_update_slots(
         """,
         (now, now, AUTO_UPDATE_MISSED_MODE, _json_object(metadata)),
     )
+    run_id = int(cursor.lastrowid)
+    conn.executemany(
+        """
+        UPDATE auto_update_schedule_runs
+        SET run_id = ?
+        WHERE schedule_key = ?
+        """,
+        [(run_id, policy.schedule_key) for policy in missed],
+    )
+
+
+def _claim_missed_auto_update_slot(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    policy: AutoUpdatePolicy,
+    *,
+    reason: str,
+    now: str,
+    now_utc: datetime,
+) -> bool:
+    if not _missed_auto_update_slot_still_scheduled(conn, settings, policy, now_utc):
+        return False
+    metadata = {
+        "source": "webui-auto",
+        "status": "missed",
+        "scheduled_for": policy.scheduled_for.isoformat(),
+        "update_mode": policy.update_mode,
+        "reason": reason,
+    }
+    cursor = conn.execute(
+        """
+        INSERT OR IGNORE INTO auto_update_schedule_runs (
+            schedule_key,
+            service_key,
+            scheduled_for,
+            run_id,
+            status,
+            created_at,
+            updated_at,
+            metadata_json
+        )
+        VALUES (?, ?, ?, NULL, 'missed', ?, ?, ?)
+        """,
+        (
+            policy.schedule_key,
+            policy.service_key,
+            policy.scheduled_for.isoformat(),
+            now,
+            now,
+            _json_object(metadata),
+        ),
+    )
+    return cursor.rowcount == 1
+
+
+def _missed_auto_update_slot_still_scheduled(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    policy: AutoUpdatePolicy,
+    now_utc: datetime,
+) -> bool:
+    """Return whether the current policy still schedules this slot."""
+    row = conn.execute(
+        """
+        SELECT auto_update, auto_update_time, auto_update_days_json
+        FROM service_policy
+        WHERE service_key = ?
+        """,
+        (policy.service_key,),
+    ).fetchone()
+    if row is None or not row["auto_update"]:
+        return False
+    if str(row["auto_update_time"]) != policy.auto_update_time:
+        return False
+    tz = ZoneInfo(settings.config.timezone_name)
+    day = AUTO_UPDATE_DAYS[policy.scheduled_for.astimezone(tz).weekday()]
+    if day not in _auto_update_days_from_row(row):
+        return False
+    now_text = now_utc.replace(microsecond=0).isoformat()
+    return active_snooze(conn, service_key=policy.service_key, now=now_text) is None
 
 
 def _release_auto_update_schedule_runs(

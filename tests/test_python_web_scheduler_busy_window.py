@@ -20,6 +20,7 @@ from wudup.db import open_db
 
 SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
 APP_KEY = "stack/app|2026-05-30|09:30|America/Chicago"
+APPLY_RUNNING = "an apply job is already running"
 
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def scheduler(tmp_path: Path, monkeypatch):
         ],
     )
     client.app.state.web_auto_update_started_at = SCHEDULED - timedelta(minutes=30)
-    busy = {"value": False}
+    busy = {"value": False, "error": APPLY_RUNNING}
     submitted: list[tuple[str, tuple[str, ...]]] = []
 
     def fake_submit(_state, _settings, plan, **kwargs):
@@ -64,8 +65,8 @@ def scheduler(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", fake_submit)
     monkeypatch.setattr(
         web_scheduler.web_job_registry,
-        "_active_apply_job_exists_in_state",
-        lambda _state: busy["value"],
+        "_active_mutation_error_in_state",
+        lambda _state: busy["error"] if busy["value"] else "",
     )
     return client, tmp_path / "state" / "images.todo", busy, submitted
 
@@ -157,9 +158,18 @@ def test_held_slot_is_recorded_once_as_missed_after_late_limit(
             "schedule_key": APP_KEY,
             "scheduled_for": "2026-05-30T14:30:00+00:00",
             "update_mode": "live",
-            "reason": web_scheduler.AUTO_UPDATE_HOLD_BUSY,
+            "reason": "Another WUDup job was still running: "
+            "an apply job is already running.",
         }
     ]
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        claim = conn.execute(
+            "SELECT status, run_id FROM auto_update_schedule_runs"
+            " WHERE schedule_key = ?",
+            (APP_KEY,),
+        ).fetchone()
+    assert claim["status"] == "missed"
+    assert claim["run_id"] is not None
     runs = client.get("/api/v1/runs").json()
     assert any(
         run["mode"] == web_scheduler.AUTO_UPDATE_MISSED_MODE
@@ -286,6 +296,9 @@ def test_held_slot_survives_a_rejected_submission(
     rejected_at = SCHEDULED + timedelta(minutes=10)
     with pytest.raises(HTTPException):
         _auto_update_tick(client, rejected_at)
+    assert client.app.state.web_auto_update_held == {
+        APP_KEY: "Another WUDup job was still running: another job is running."
+    }
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", accepting_submit)
     response = _auto_update_tick(client, SCHEDULED + timedelta(minutes=11))
 
@@ -399,3 +412,95 @@ def test_failed_submission_is_held_with_a_plain_reason(
     assert client.app.state.web_auto_update_held == {
         APP_KEY: web_scheduler.AUTO_UPDATE_HOLD_SUBMIT_FAILED
     }
+
+
+def test_busy_reason_names_a_security_scan_blocker(scheduler) -> None:
+    client, wud_file, busy, _submitted = scheduler
+    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+    _set_policy(client, "app", "live")
+
+    busy["value"] = True
+    busy["error"] = "security scan refresh is already running"
+    assert _auto_update_tick(client, SCHEDULED) is None
+
+    assert client.app.state.web_auto_update_held == {
+        APP_KEY: "Another WUDup job was still running: "
+        "security scan refresh is already running."
+    }
+
+
+def _held_app_policy() -> web_scheduler.AutoUpdatePolicy:
+    return web_scheduler.AutoUpdatePolicy(
+        service_key="stack/app",
+        update_mode="live",
+        auto_update_time="09:30",
+        auto_update_days=("sat",),
+        schedule_key=APP_KEY,
+        scheduled_for=SCHEDULED,
+    )
+
+
+def _record_missed(client, tmp_path: Path, policy) -> None:
+    settings = client.app.state.web_settings
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        with web_scheduler._immediate_transaction(conn):
+            web_scheduler._record_missed_auto_update_slots(
+                conn,
+                settings,
+                [policy],
+                {},
+                now_utc=SCHEDULED + timedelta(hours=1),
+            )
+
+
+def test_missed_slot_claim_is_durable_across_calls(
+    scheduler,
+    tmp_path: Path,
+) -> None:
+    client, _wud_file, _busy, _submitted = scheduler
+    _set_policy(client, "app", "live")
+    policy = _held_app_policy()
+
+    _record_missed(client, tmp_path, policy)
+    _record_missed(client, tmp_path, policy)
+
+    assert len(_missed_runs(tmp_path)) == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"auto_update": False},
+        {"auto_update_time": "10:00"},
+        {"auto_update_days": ["sun"]},
+    ],
+)
+def test_missed_slot_is_not_recorded_when_policy_changed_before_record(
+    scheduler,
+    tmp_path: Path,
+    change: dict,
+) -> None:
+    client, _wud_file, _busy, _submitted = scheduler
+    _set_policy(client, "app", "live")
+    policy = _held_app_policy()
+    response = client.post(
+        "/api/v1/state/operations",
+        json={
+            "kind": "upsert_service_policy",
+            "service_key": "stack/app",
+            "update_mode": "live",
+            "auto_update": True,
+            "auto_update_time": "09:30",
+            "auto_update_days": ["sat"],
+            **change,
+        },
+        headers=_csrf_headers(client),
+    )
+    assert response.status_code == 200
+
+    _record_missed(client, tmp_path, policy)
+
+    assert _missed_runs(tmp_path) == []
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        rows = conn.execute("SELECT * FROM auto_update_schedule_runs").fetchall()
+    assert rows == []
