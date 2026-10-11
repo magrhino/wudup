@@ -58,6 +58,9 @@ def test_auto_update_selection_prefers_earliest_scheduled_mode() -> None:
         "stack/worker|2026-05-30|09:00|America/Chicago",
     )
     assert selection.scheduled_for == earlier
+    assert selection.deferred_schedule_keys == (
+        "stack/app|2026-05-30|10:00|America/Chicago",
+    )
 
 
 def test_auto_update_selection_excludes_unsatisfied_dependency_snoozes() -> None:
