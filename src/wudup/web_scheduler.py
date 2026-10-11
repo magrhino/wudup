@@ -150,34 +150,22 @@ def _auto_update_tick(
     if not isinstance(started_at, datetime):
         started_at = now_utc
     started_at_utc = started_at.astimezone(timezone.utc)
-    held = getattr(app.state, "web_auto_update_held", None)
-    if not isinstance(held, dict):
-        held = {}
-        app.state.web_auto_update_held = held
+    held = _auto_update_held_slots(app.state)
 
     job_submitted = False
     start_event: Event | None = None
     try:
         with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
             init_db(conn)
-            policies, missed = _due_auto_update_policies(
+            policies = _runnable_auto_update_policies(
                 conn,
                 settings,
+                app.state,
+                held,
                 now_utc=now_utc,
                 started_at=started_at_utc,
-                held=held,
             )
-            if missed:
-                with _immediate_transaction(conn):
-                    _record_missed_auto_update_slots(conn, settings, missed, held)
-            due_schedule_keys = {policy.schedule_key for policy in policies.values()}
-            for schedule_key in [key for key in held if key not in due_schedule_keys]:
-                del held[schedule_key]
             if not policies:
-                return None
-            if web_job_registry._active_apply_job_exists_in_state(app.state):
-                for policy in policies.values():
-                    held.setdefault(policy.schedule_key, AUTO_UPDATE_HOLD_BUSY)
                 return None
             candidate = _auto_update_candidate(
                 conn,
@@ -238,15 +226,7 @@ def _auto_update_tick(
                     LOGGER.exception(
                         "failed to release auto update schedule reservation"
                     )
-                # Keep the slot so the next tick can still run it late. A 409
-                # means another job started while the plan was built.
-                reason = (
-                    AUTO_UPDATE_HOLD_BUSY
-                    if isinstance(exc, HTTPException) and exc.status_code == 409
-                    else AUTO_UPDATE_HOLD_SUBMIT_FAILED
-                )
-                for schedule_key in selection.schedule_keys:
-                    held.setdefault(schedule_key, reason)
+                _hold_failed_submission(held, selection, exc)
                 raise
             job_submitted = True
             with _immediate_transaction(conn):
@@ -265,6 +245,63 @@ def _auto_update_tick(
         if job_submitted and start_event is not None:
             start_event.set()
         raise
+
+
+def _auto_update_held_slots(state: Any) -> dict[str, str]:
+    held = getattr(state, "web_auto_update_held", None)
+    if not isinstance(held, dict):
+        held = {}
+        state.web_auto_update_held = held
+    return held
+
+
+def _runnable_auto_update_policies(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    state: Any,
+    held: dict[str, str],
+    *,
+    now_utc: datetime,
+    started_at: datetime,
+) -> dict[str, AutoUpdatePolicy]:
+    """Record expired held slots, prune held, and return policies to check now.
+
+    Returns nothing while another job is running; due slots are held instead.
+    """
+    policies, missed = _due_auto_update_policies(
+        conn,
+        settings,
+        now_utc=now_utc,
+        started_at=started_at,
+        held=held,
+    )
+    if missed:
+        with _immediate_transaction(conn):
+            _record_missed_auto_update_slots(conn, settings, missed, held)
+    due_schedule_keys = {policy.schedule_key for policy in policies.values()}
+    for schedule_key in [key for key in held if key not in due_schedule_keys]:
+        del held[schedule_key]
+    if policies and web_job_registry._active_apply_job_exists_in_state(state):
+        for schedule_key in due_schedule_keys:
+            held.setdefault(schedule_key, AUTO_UPDATE_HOLD_BUSY)
+        return {}
+    return policies
+
+
+def _hold_failed_submission(
+    held: dict[str, str],
+    selection: AutoUpdateSelection,
+    exc: Exception,
+) -> None:
+    # Keep the slot so the next tick can still run it late. A 409 means another
+    # job started while the plan was built.
+    reason = (
+        AUTO_UPDATE_HOLD_BUSY
+        if isinstance(exc, HTTPException) and exc.status_code == 409
+        else AUTO_UPDATE_HOLD_SUBMIT_FAILED
+    )
+    for schedule_key in selection.schedule_keys:
+        held.setdefault(schedule_key, reason)
 
 
 def _auto_update_candidate(
@@ -425,14 +462,10 @@ def _due_auto_update_policies(
     for row in rows:
         days = _auto_update_days_from_row(row)
         update_time = str(row["auto_update_time"])
-        try:
-            parsed_time = datetime_time.fromisoformat(update_time)
-        except ValueError:
-            continue
-        occurrence = _auto_update_latest_occurrence(
+        occurrence = _auto_update_row_occurrence(
+            update_time,
+            days,
             local_now=local_now,
-            parsed_time=parsed_time,
-            days=days,
             now_utc=now_utc,
             tz=tz,
         )
@@ -450,9 +483,7 @@ def _due_auto_update_policies(
         in_window = now_utc < window_end and started_at < window_end
         if not in_window and schedule_key not in held:
             continue
-        if active_snooze(conn, service_key=service_key, now=now_text) is not None:
-            continue
-        if _auto_update_schedule_recorded(conn, schedule_key):
+        if _auto_update_slot_closed(conn, service_key, schedule_key, now_text):
             continue
         policy = AutoUpdatePolicy(
             service_key=service_key,
@@ -468,6 +499,39 @@ def _due_auto_update_policies(
         else:
             missed.append(policy)
     return policies, missed
+
+
+def _auto_update_row_occurrence(
+    update_time: str,
+    days: Sequence[str],
+    *,
+    local_now: datetime,
+    now_utc: datetime,
+    tz: ZoneInfo,
+) -> tuple[datetime, datetime] | None:
+    try:
+        parsed_time = datetime_time.fromisoformat(update_time)
+    except ValueError:
+        return None
+    return _auto_update_latest_occurrence(
+        local_now=local_now,
+        parsed_time=parsed_time,
+        days=days,
+        now_utc=now_utc,
+        tz=tz,
+    )
+
+
+def _auto_update_slot_closed(
+    conn: sqlite3.Connection,
+    service_key: str,
+    schedule_key: str,
+    now_text: str,
+) -> bool:
+    """Return whether the slot is snoozed or already has a schedule row."""
+    if active_snooze(conn, service_key=service_key, now=now_text) is not None:
+        return True
+    return _auto_update_schedule_recorded(conn, schedule_key)
 
 
 def _auto_update_latest_occurrence(

@@ -283,8 +283,9 @@ def test_held_slot_survives_a_rejected_submission(
     assert _auto_update_tick(client, SCHEDULED) is None
     busy["value"] = False
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", rejected_submit)
+    rejected_at = SCHEDULED + timedelta(minutes=10)
     with pytest.raises(HTTPException):
-        _auto_update_tick(client, SCHEDULED + timedelta(minutes=10))
+        _auto_update_tick(client, rejected_at)
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", accepting_submit)
     response = _auto_update_tick(client, SCHEDULED + timedelta(minutes=11))
 
@@ -344,8 +345,9 @@ def test_held_slot_survives_a_plan_build_error(
     assert _auto_update_tick(client, SCHEDULED) is None
     busy["value"] = False
     monkeypatch.setattr(web_scheduler, "_build_auto_update_plan", failing_build)
+    failed_at = SCHEDULED + timedelta(minutes=10)
     with pytest.raises(RuntimeError):
-        _auto_update_tick(client, SCHEDULED + timedelta(minutes=10))
+        _auto_update_tick(client, failed_at)
     monkeypatch.setattr(web_scheduler, "_build_auto_update_plan", build_plan)
     response = _auto_update_tick(client, SCHEDULED + timedelta(minutes=11))
 
