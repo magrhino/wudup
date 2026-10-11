@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Callable, Iterator
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 
 from .digest_provenance import DIGEST_PROVENANCE_SQL_COLUMNS
@@ -439,16 +439,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
     version = _user_version(conn)
     if version > 0:
-        expected_schema = _EXPECTED_SCHEMAS_BY_VERSION.get(version)
-        if expected_schema is None:
-            raise DatabaseError(f"Unsupported database schema version: {version}")
+        with _migration_transaction(conn):
+            # Re-read under the write lock; another process may have upgraded.
+            version = _user_version(conn)
+            expected_schema = _EXPECTED_SCHEMAS_BY_VERSION.get(version)
+            if expected_schema is None:
+                raise DatabaseError(f"Unsupported database schema version: {version}")
 
-        _validate_schema(conn, expected_schema=expected_schema)
-        _ensure_schema_migrations(conn)
-        _backfill_schema_migrations(conn, version)
+            _validate_schema(conn, expected_schema=expected_schema)
+            _backfill_schema_migrations(conn, version)
         for target_version in range(version + 1, SCHEMA_VERSION + 1):
-            migration = _MIGRATIONS_BY_TARGET_VERSION[target_version]
-            migration(conn)
+            with _migration_transaction(conn):
+                if _user_version(conn) >= target_version:
+                    continue
+                migration = _MIGRATIONS_BY_TARGET_VERSION[target_version]
+                migration(conn)
         _validate_schema(conn)
         return
 
@@ -456,8 +461,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
         raise DatabaseError(f"Unsupported database schema version: {version}")
 
     _validate_existing_schema_objects(conn)
-    with conn:
-        conn.executescript(
+    with _migration_transaction(conn):
+        _execute_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY,
@@ -700,7 +706,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             );
             """
         )
-        conn.executescript(_SECURITY_SCAN_CACHE_SCHEMA_SQL)
+        _execute_script(conn, _SECURITY_SCAN_CACHE_SCHEMA_SQL)
         _validate_schema(conn)
         _backfill_schema_migrations(conn, SCHEMA_VERSION)
         conn.execute(  # nosemgrep: PRAGMA needs a literal internal version.
@@ -713,6 +719,44 @@ def utc_timestamp() -> str:
     """Return a stable UTC timestamp format for SQLite text comparisons."""
 
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+@contextmanager
+def _migration_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Run schema changes as one all-or-nothing SQLite transaction.
+
+    Python's legacy sqlite3 transaction control autocommits DDL and
+    ``executescript`` commits first, so ``with conn:`` alone does not make a
+    migration atomic. Inside this block use ``_execute_script`` instead of
+    ``executescript`` and do not nest ``with conn:``. Supports only
+    legacy-mode connections such as ``connect_db`` opens; the Python 3.12+
+    ``autocommit`` attribute must be left at its legacy default.
+    """
+
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def _execute_script(conn: sqlite3.Connection, script: str) -> None:
+    """Execute each statement in ``script`` inside the current transaction."""
+
+    statement = ""
+    for part in script.split(";"):
+        statement += part + ";"
+        if not sqlite3.complete_statement(statement):
+            continue
+        if statement.strip(" \t\r\n;"):
+            conn.execute(statement)
+        statement = ""
+    if statement.strip(" \t\r\n;"):
+        raise DatabaseError("Schema script ends with an incomplete SQL statement")
 
 
 def _user_version(conn: sqlite3.Connection) -> int:
@@ -854,45 +898,42 @@ def _ensure_schema_migrations(conn: sqlite3.Connection) -> None:
             EXPECTED_SCHEMA["schema_migrations"],
         )
         return
-    with conn:
-        conn.execute(
-            """
-            CREATE TABLE schema_migrations (
-                version INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                applied_at TEXT NOT NULL
-            )
-            """
+    conn.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
         )
+        """
+    )
 
 
 def _backfill_schema_migrations(conn: sqlite3.Connection, version: int) -> None:
     _ensure_schema_migrations(conn)
-    with conn:
-        for migration_version in range(1, version + 1):
-            name = MIGRATION_NAMES.get(
-                migration_version,
-                f"schema version {migration_version}",
-            )
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO schema_migrations (version, name, applied_at)
-                VALUES (?, ?, ?)
-                """,
-                (migration_version, name, utc_timestamp()),
-            )
-
-
-def _record_schema_migration(conn: sqlite3.Connection, version: int) -> None:
-    name = MIGRATION_NAMES.get(version, f"schema version {version}")
-    with conn:
+    for migration_version in range(1, version + 1):
+        name = MIGRATION_NAMES.get(
+            migration_version,
+            f"schema version {migration_version}",
+        )
         conn.execute(
             """
             INSERT OR IGNORE INTO schema_migrations (version, name, applied_at)
             VALUES (?, ?, ?)
             """,
-            (version, name, utc_timestamp()),
+            (migration_version, name, utc_timestamp()),
         )
+
+
+def _record_schema_migration(conn: sqlite3.Connection, version: int) -> None:
+    name = MIGRATION_NAMES.get(version, f"schema version {version}")
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO schema_migrations (version, name, applied_at)
+        VALUES (?, ?, ?)
+        """,
+        (version, name, utc_timestamp()),
+    )
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
@@ -903,37 +944,37 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
                 f"Expected pending_updates to be a table, found {object_type}"
             )
         _validate_table_columns(conn, "pending_updates", EXPECTED_SCHEMA["pending_updates"])
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS pending_updates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id INTEGER NOT NULL,
-                line_no INTEGER NOT NULL,
-                raw TEXT NOT NULL,
-                image TEXT NOT NULL,
-                target_digest TEXT NOT NULL DEFAULT '',
-                desired_tag TEXT NOT NULL DEFAULT '',
-                service_key TEXT NOT NULL DEFAULT '',
-                stack_name TEXT NOT NULL DEFAULT '',
-                service_name TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                status_reason TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                UNIQUE (run_id, line_no),
-                FOREIGN KEY (run_id) REFERENCES update_runs(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_pending_updates_run_id
-                ON pending_updates (run_id);
-            CREATE INDEX IF NOT EXISTS idx_pending_updates_status
-                ON pending_updates (status);
-            CREATE INDEX IF NOT EXISTS idx_pending_updates_service_key_status
-                ON pending_updates (service_key, status);
-            """
-        )
-        conn.execute("PRAGMA user_version = 2")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS pending_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            line_no INTEGER NOT NULL,
+            raw TEXT NOT NULL,
+            image TEXT NOT NULL,
+            target_digest TEXT NOT NULL DEFAULT '',
+            desired_tag TEXT NOT NULL DEFAULT '',
+            service_key TEXT NOT NULL DEFAULT '',
+            stack_name TEXT NOT NULL DEFAULT '',
+            service_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            status_reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (run_id, line_no),
+            FOREIGN KEY (run_id) REFERENCES update_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_updates_run_id
+            ON pending_updates (run_id);
+        CREATE INDEX IF NOT EXISTS idx_pending_updates_status
+            ON pending_updates (status);
+        CREATE INDEX IF NOT EXISTS idx_pending_updates_service_key_status
+            ON pending_updates (service_key, status);
+        """
+    )
+    conn.execute("PRAGMA user_version = 2")
     _record_schema_migration(conn, 2)
 
 
@@ -949,28 +990,28 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
             "tag_exclusion_rules",
             EXPECTED_SCHEMA["tag_exclusion_rules"],
         )
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS tag_exclusion_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scope TEXT NOT NULL,
-                image_repo TEXT NOT NULL,
-                service_key TEXT NOT NULL DEFAULT '',
-                match_type TEXT NOT NULL,
-                tag TEXT NOT NULL,
-                regex_fragment TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                UNIQUE (scope, image_repo, service_key, match_type, tag)
-            );
-            CREATE INDEX IF NOT EXISTS idx_tag_exclusion_rules_lookup
-                ON tag_exclusion_rules (status, image_repo, service_key, match_type);
-            """
-        )
-        conn.execute("PRAGMA user_version = 3")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS tag_exclusion_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope TEXT NOT NULL,
+            image_repo TEXT NOT NULL,
+            service_key TEXT NOT NULL DEFAULT '',
+            match_type TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            regex_fragment TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (scope, image_repo, service_key, match_type, tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tag_exclusion_rules_lookup
+            ON tag_exclusion_rules (status, image_repo, service_key, match_type);
+        """
+    )
+    conn.execute("PRAGMA user_version = 3")
     _record_schema_migration(conn, 3)
 
 
@@ -983,42 +1024,42 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
                     f"Expected {table_name} to be a table, found {object_type}"
                 )
             _validate_table_columns(conn, table_name, EXPECTED_SCHEMA[table_name])
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS web_users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'admin',
-                created_at TEXT NOT NULL,
-                password_updated_at TEXT NOT NULL,
-                disabled_at TEXT
-            );
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS web_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'admin',
+            created_at TEXT NOT NULL,
+            password_updated_at TEXT NOT NULL,
+            disabled_at TEXT
+        );
 
-            CREATE TABLE IF NOT EXISTS web_sessions (
-                id_hash TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                user_agent_hash TEXT NOT NULL DEFAULT '',
-                revoked_at TEXT,
-                FOREIGN KEY (user_id) REFERENCES web_users(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_web_sessions_user_id
-                ON web_sessions (user_id);
-            CREATE INDEX IF NOT EXISTS idx_web_sessions_expires_at
-                ON web_sessions (expires_at);
+        CREATE TABLE IF NOT EXISTS web_sessions (
+            id_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            user_agent_hash TEXT NOT NULL DEFAULT '',
+            revoked_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES web_users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_user_id
+            ON web_sessions (user_id);
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_expires_at
+            ON web_sessions (expires_at);
 
-            CREATE TABLE IF NOT EXISTS web_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute("PRAGMA user_version = 4")
+        CREATE TABLE IF NOT EXISTS web_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute("PRAGMA user_version = 4")
     _record_schema_migration(conn, 4)
 
 
@@ -1034,33 +1075,33 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
             "release_note_cache",
             EXPECTED_SCHEMA_V11["release_note_cache"],
         )
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS release_note_cache (
-                cache_key TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                image_repo TEXT NOT NULL DEFAULT '',
-                upstream_repo TEXT NOT NULL DEFAULT '',
-                current_tag TEXT NOT NULL DEFAULT '',
-                target_tag TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                release_tag TEXT NOT NULL DEFAULT '',
-                title TEXT NOT NULL DEFAULT '',
-                published_at TEXT NOT NULL DEFAULT '',
-                breaking INTEGER NOT NULL DEFAULT 0,
-                breaking_reasons_json TEXT NOT NULL DEFAULT '[]',
-                links_json TEXT NOT NULL DEFAULT '[]',
-                error TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}'
-            );
-            CREATE INDEX IF NOT EXISTS idx_release_note_cache_updated_at
-                ON release_note_cache (updated_at);
-            """
-        )
-        conn.execute("PRAGMA user_version = 5")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS release_note_cache (
+            cache_key TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            image_repo TEXT NOT NULL DEFAULT '',
+            upstream_repo TEXT NOT NULL DEFAULT '',
+            current_tag TEXT NOT NULL DEFAULT '',
+            target_tag TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            release_tag TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            published_at TEXT NOT NULL DEFAULT '',
+            breaking INTEGER NOT NULL DEFAULT 0,
+            breaking_reasons_json TEXT NOT NULL DEFAULT '[]',
+            links_json TEXT NOT NULL DEFAULT '[]',
+            error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_release_note_cache_updated_at
+            ON release_note_cache (updated_at);
+        """
+    )
+    conn.execute("PRAGMA user_version = 5")
     _record_schema_migration(conn, 5)
 
 
@@ -1081,52 +1122,51 @@ def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
             "auto_update_schedule_runs",
             EXPECTED_SCHEMA["auto_update_schedule_runs"],
         )
-    with conn:
-        conn.executescript(
-            """
-            ALTER TABLE service_policy
-                ADD COLUMN auto_update_time TEXT;
-            ALTER TABLE service_policy
-                ADD COLUMN auto_update_days_json TEXT NOT NULL DEFAULT '[]';
+    _execute_script(
+        conn,
+        """
+        ALTER TABLE service_policy
+            ADD COLUMN auto_update_time TEXT;
+        ALTER TABLE service_policy
+            ADD COLUMN auto_update_days_json TEXT NOT NULL DEFAULT '[]';
 
-            CREATE TABLE IF NOT EXISTS auto_update_schedule_runs (
-                schedule_key TEXT PRIMARY KEY,
-                service_key TEXT NOT NULL,
-                scheduled_for TEXT NOT NULL,
-                run_id INTEGER,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                FOREIGN KEY (run_id) REFERENCES update_runs(id) ON DELETE SET NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_auto_update_schedule_runs_service
-                ON auto_update_schedule_runs (service_key, scheduled_for);
-            """
-        )
-        conn.execute("PRAGMA user_version = 6")
+        CREATE TABLE IF NOT EXISTS auto_update_schedule_runs (
+            schedule_key TEXT PRIMARY KEY,
+            service_key TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            run_id INTEGER,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY (run_id) REFERENCES update_runs(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_auto_update_schedule_runs_service
+            ON auto_update_schedule_runs (service_key, scheduled_for);
+        """
+    )
+    conn.execute("PRAGMA user_version = 6")
     _record_schema_migration(conn, 6)
 
 
 def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     for table_name in ("pending_updates", "update_events", "known_images"):
         _validate_table_columns(conn, table_name, EXPECTED_SCHEMA_V6[table_name])
-    with conn:
-        for table_name in ("pending_updates", "update_events", "known_images"):
-            for column in DIGEST_PROVENANCE_SQL_COLUMNS:
-                statement = " ".join(
-                    (
-                        "ALTER TABLE",
-                        _quote_identifier(table_name),
-                        "ADD COLUMN",
-                        _quote_identifier(column),
-                        "TEXT NOT NULL DEFAULT ''",
-                    )
+    for table_name in ("pending_updates", "update_events", "known_images"):
+        for column in DIGEST_PROVENANCE_SQL_COLUMNS:
+            statement = " ".join(
+                (
+                    "ALTER TABLE",
+                    _quote_identifier(table_name),
+                    "ADD COLUMN",
+                    _quote_identifier(column),
+                    "TEXT NOT NULL DEFAULT ''",
                 )
-                conn.execute(  # nosemgrep: allowlisted tables, fixed columns.
-                    statement
-                )
-        conn.execute("PRAGMA user_version = 7")
+            )
+            conn.execute(  # nosemgrep: allowlisted tables, fixed columns.
+                statement
+            )
+    conn.execute("PRAGMA user_version = 7")
     _record_schema_migration(conn, 7)
 
 
@@ -1142,24 +1182,24 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
             "dependency_snoozes",
             EXPECTED_SCHEMA["dependency_snoozes"],
         )
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS dependency_snoozes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                service_key TEXT NOT NULL,
-                wait_for_service_key TEXT NOT NULL,
-                reason TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}'
-            );
-            CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_service_key
-                ON dependency_snoozes (service_key, created_at);
-            CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_wait_for_service_key
-                ON dependency_snoozes (wait_for_service_key, created_at);
-            """
-        )
-        conn.execute("PRAGMA user_version = 8")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS dependency_snoozes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_key TEXT NOT NULL,
+            wait_for_service_key TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_service_key
+            ON dependency_snoozes (service_key, created_at);
+        CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_wait_for_service_key
+            ON dependency_snoozes (wait_for_service_key, created_at);
+        """
+    )
+    conn.execute("PRAGMA user_version = 8")
     _record_schema_migration(conn, 8)
 
 
@@ -1175,9 +1215,8 @@ def _migrate_v8_to_v9(conn: sqlite3.Connection) -> None:
             "security_scan_cache",
             EXPECTED_SCHEMA_V9["security_scan_cache"],
         )
-    with conn:
-        conn.executescript(_SECURITY_SCAN_CACHE_SCHEMA_V9_SQL)
-        conn.execute("PRAGMA user_version = 9")
+    _execute_script(conn, _SECURITY_SCAN_CACHE_SCHEMA_V9_SQL)
+    conn.execute("PRAGMA user_version = 9")
     _record_schema_migration(conn, 9)
 
 
@@ -1187,14 +1226,13 @@ def _migrate_v9_to_v10(conn: sqlite3.Connection) -> None:
         "security_scan_cache",
         EXPECTED_SCHEMA_V9["security_scan_cache"],
     )
-    with conn:
-        conn.execute(
-            """
-            ALTER TABLE security_scan_cache
-                ADD COLUMN findings_json TEXT NOT NULL DEFAULT '[]'
-            """
-        )
-        conn.execute("PRAGMA user_version = 10")
+    conn.execute(
+        """
+        ALTER TABLE security_scan_cache
+            ADD COLUMN findings_json TEXT NOT NULL DEFAULT '[]'
+        """
+    )
+    conn.execute("PRAGMA user_version = 10")
     _record_schema_migration(conn, 10)
 
 
@@ -1210,24 +1248,24 @@ def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
             "release_notification_history",
             EXPECTED_SCHEMA["release_notification_history"],
         )
-    with conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS release_notification_history (
-                notification_key TEXT PRIMARY KEY,
-                mode TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                last_attempted_at TEXT NOT NULL,
-                last_sent_at TEXT NOT NULL DEFAULT '',
-                send_count INTEGER NOT NULL DEFAULT 0,
-                last_audit_run_id INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT NOT NULL DEFAULT '{}'
-            );
-            CREATE INDEX IF NOT EXISTS idx_release_notification_history_status
-                ON release_notification_history (status, last_sent_at);
-            """
-        )
-        conn.execute("PRAGMA user_version = 11")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS release_notification_history (
+            notification_key TEXT PRIMARY KEY,
+            mode TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            last_attempted_at TEXT NOT NULL,
+            last_sent_at TEXT NOT NULL DEFAULT '',
+            send_count INTEGER NOT NULL DEFAULT 0,
+            last_audit_run_id INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_release_notification_history_status
+            ON release_notification_history (status, last_sent_at);
+        """
+    )
+    conn.execute("PRAGMA user_version = 11")
     _record_schema_migration(conn, 11)
 
 
@@ -1237,14 +1275,13 @@ def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
         "release_note_cache",
         EXPECTED_SCHEMA_V11["release_note_cache"],
     )
-    with conn:
-        conn.execute(
-            """
-            ALTER TABLE release_note_cache
-                ADD COLUMN body TEXT NOT NULL DEFAULT ''
-            """
-        )
-        conn.execute("PRAGMA user_version = 12")
+    conn.execute(
+        """
+        ALTER TABLE release_note_cache
+            ADD COLUMN body TEXT NOT NULL DEFAULT ''
+        """
+    )
+    conn.execute("PRAGMA user_version = 12")
     _record_schema_migration(conn, 12)
 
 
@@ -1254,40 +1291,39 @@ def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
         "release_note_cache",
         EXPECTED_SCHEMA_V12["release_note_cache"],
     )
-    with conn:
-        conn.execute(
-            """
-            ALTER TABLE release_note_cache
-                ADD COLUMN target_digest TEXT NOT NULL DEFAULT ''
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_release_note_cache_identity_digest
-                ON release_note_cache (
-                    provider,
-                    image_repo,
-                    upstream_repo,
-                    current_tag,
-                    target_tag,
-                    target_digest
-                )
-            """
-        )
-        conn.execute("PRAGMA user_version = 13")
+    conn.execute(
+        """
+        ALTER TABLE release_note_cache
+            ADD COLUMN target_digest TEXT NOT NULL DEFAULT ''
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_release_note_cache_identity_digest
+            ON release_note_cache (
+                provider,
+                image_repo,
+                upstream_repo,
+                current_tag,
+                target_tag,
+                target_digest
+            )
+        """
+    )
+    conn.execute("PRAGMA user_version = 13")
     _record_schema_migration(conn, 13)
 
 
 def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
-    with conn:
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_update_events_service_latest "
-            "ON update_events (stack_name, service_name, id DESC)"
-        )
-        conn.execute("PRAGMA user_version = 14")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_update_events_service_latest "
+        "ON update_events (stack_name, service_name, id DESC)"
+    )
+    conn.execute("PRAGMA user_version = 14")
     _record_schema_migration(conn, 14)
 
 
+# init_schema runs each migration inside _migration_transaction.
 _MIGRATIONS_BY_TARGET_VERSION: dict[int, Migration] = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,

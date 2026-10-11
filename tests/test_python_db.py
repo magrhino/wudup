@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from collections.abc import Iterator, Mapping
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -47,6 +48,36 @@ class FakeConnection:
 
     def execute(self, statement: str) -> None:
         self.statements.append(statement)
+
+
+class FailingStatementConnection(sqlite3.Connection):
+    fail_on = ""
+    block_executescript = False
+
+    def execute(self, sql: str, *args: object) -> sqlite3.Cursor:
+        if self.fail_on and self.fail_on in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return super().execute(sql, *args)
+
+    def executescript(self, sql_script: str) -> sqlite3.Cursor:
+        if self.block_executescript:
+            raise AssertionError("executescript commits and breaks atomic migrations")
+        return super().executescript(sql_script)
+
+
+class RacingUpgradeConnection(sqlite3.Connection):
+    racer_path: Path | None = None
+    race_on_begin = 0
+    begin_count = 0
+
+    def execute(self, sql: str, *args: object) -> sqlite3.Cursor:
+        if sql == "BEGIN IMMEDIATE":
+            self.begin_count += 1
+            # Another process upgrades just before this connection takes the lock.
+            if self.begin_count == self.race_on_begin and self.racer_path is not None:
+                with db_connection(self.racer_path) as racer:
+                    init_db(racer)
+        return super().execute(sql, *args)
 
 
 def _downgrade_release_note_cache_to_v11(conn: sqlite3.Connection) -> None:
@@ -618,6 +649,153 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(version, SCHEMA_VERSION)
         self.assertEqual(row, ("github", ""))
         self.assertIn("idx_release_note_cache_identity_digest", indexes)
+
+    def test_interrupted_v12_migration_rolls_back_and_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "wudup.db"
+            with closing(
+                sqlite3.connect(db_path, factory=FailingStatementConnection)
+            ) as conn:
+                init_db(conn)
+                conn.execute("DROP INDEX idx_release_note_cache_identity_digest")
+                conn.execute("ALTER TABLE release_note_cache DROP COLUMN target_digest")
+                conn.execute("DELETE FROM schema_migrations WHERE version >= 13")
+                conn.execute("PRAGMA user_version = 12")
+                conn.commit()
+                conn.fail_on = "idx_release_note_cache_identity_digest"
+
+                with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                    init_db(conn)
+
+                self.assertFalse(conn.in_transaction)
+
+            with db_connection(db_path) as conn:
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+                columns = {
+                    column[1]
+                    for column in conn.execute("PRAGMA table_info(release_note_cache)")
+                }
+                self.assertEqual(version, 12)
+                self.assertNotIn("target_digest", columns)
+
+                init_db(conn)
+
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertEqual(version, SCHEMA_VERSION)
+
+    def test_interrupted_scripted_migration_rolls_back_every_statement(self) -> None:
+        with closing(
+            sqlite3.connect(":memory:", factory=FailingStatementConnection)
+        ) as conn:
+            conn.executescript(V5_SCHEMA_SQL)
+            conn.execute("PRAGMA user_version = 5")
+            conn.fail_on = "CREATE TABLE IF NOT EXISTS auto_update_schedule_runs"
+
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                init_db(conn)
+
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            columns = {
+                column[1] for column in conn.execute("PRAGMA table_info(service_policy)")
+            }
+            migrations = conn.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()[0]
+
+            conn.fail_on = ""
+            init_db(conn)
+            upgraded_version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertEqual(version, 5)
+        self.assertNotIn("auto_update_time", columns)
+        self.assertEqual(migrations, 5)
+        self.assertEqual(upgraded_version, SCHEMA_VERSION)
+
+    def test_concurrent_upgrade_skips_steps_applied_by_another_process(self) -> None:
+        # Lock 1 validates and backfills; lock 2 runs the first migration step.
+        for race_on_begin in (1, 2):
+            with self.subTest(race_on_begin=race_on_begin):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    db_path = Path(tmpdir) / "wudup.db"
+                    with db_connection(db_path) as conn:
+                        init_db(conn)
+                        conn.execute("DROP INDEX idx_release_note_cache_identity_digest")
+                        conn.execute(
+                            "ALTER TABLE release_note_cache DROP COLUMN target_digest"
+                        )
+                        conn.execute("DELETE FROM schema_migrations WHERE version >= 13")
+                        conn.execute("PRAGMA user_version = 12")
+                        conn.commit()
+
+                    with closing(
+                        sqlite3.connect(db_path, factory=RacingUpgradeConnection)
+                    ) as conn:
+                        conn.racer_path = db_path
+                        conn.race_on_begin = race_on_begin
+                        init_db(conn)
+                        version = conn.execute("PRAGMA user_version").fetchone()[0]
+                        migration_count = conn.execute(
+                            "SELECT COUNT(*) FROM schema_migrations WHERE version >= 13"
+                        ).fetchone()[0]
+
+                self.assertEqual(version, SCHEMA_VERSION)
+                self.assertEqual(migration_count, SCHEMA_VERSION - 12)
+
+    def test_init_db_commits_pending_caller_writes_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "wudup.db"
+            with db_connection(db_path) as conn:
+                init_db(conn)
+                conn.execute(
+                    "INSERT INTO web_settings (key, value, updated_at) "
+                    "VALUES ('pending', 'kept', 'now')"
+                )
+                self.assertTrue(conn.in_transaction)
+
+                init_db(conn)
+
+                self.assertFalse(conn.in_transaction)
+                with db_connection(db_path) as other:
+                    row = other.execute(
+                        "SELECT value FROM web_settings WHERE key = 'pending'"
+                    ).fetchone()
+
+        self.assertEqual(row, ("kept",))
+
+    def test_schema_creation_and_migrations_never_use_executescript(self) -> None:
+        with closing(
+            sqlite3.connect(":memory:", factory=FailingStatementConnection)
+        ) as conn:
+            conn.block_executescript = True
+            init_db(conn)
+        with closing(
+            sqlite3.connect(":memory:", factory=FailingStatementConnection)
+        ) as conn:
+            conn.executescript(V1_SCHEMA_SQL)
+            conn.execute("PRAGMA user_version = 1")
+            conn.block_executescript = True
+            init_db(conn)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertEqual(version, SCHEMA_VERSION)
+
+    def test_interrupted_initial_creation_leaves_empty_database(self) -> None:
+        with closing(
+            sqlite3.connect(":memory:", factory=FailingStatementConnection)
+        ) as conn:
+            conn.fail_on = "CREATE TABLE IF NOT EXISTS security_scan_cache"
+
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                init_db(conn)
+
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            tables = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+            ).fetchone()[0]
+
+        self.assertEqual(version, 0)
+        self.assertEqual(tables, 0)
 
     def test_init_db_rejects_v8_schema_with_conflicting_security_cache(self) -> None:
         with db_connection(":memory:") as conn:
