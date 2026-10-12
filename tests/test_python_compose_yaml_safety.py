@@ -82,6 +82,28 @@ class ComposeTagUpdateYamlSafetyTests(ComposeRewriteTestCase):
 
         self.assertEqual(compose_file.read_text(encoding="utf-8"), original)
 
+    def test_rejects_non_utf8_file_without_write(self) -> None:
+        # Docker Compose accepts UTF-16; the round-trip rewriter must refuse it
+        # as a per-stack rewrite failure instead of crashing the run.
+        original = "services:\n  app:\n    image: repo/app:1.0\n".encode("utf-16")
+        compose_file = self.root / "compose.yml"
+        compose_file.write_bytes(original)
+
+        with self.assertRaisesRegex(ComposeTagRewriteError, "not UTF-8 text"):
+            apply_compose_tag_updates(
+                compose_file,
+                (
+                    TagUpdate(
+                        old_image="repo/app:1.0",
+                        desired_tag="2.0",
+                        new_image="repo/app:2.0",
+                        services=("app",),
+                    ),
+                ),
+            )
+
+        self.assertEqual(compose_file.read_bytes(), original)
+
     def test_rejects_interpolated_image_without_write(self) -> None:
         original = "services:\n  app:\n    image: repo/app:${TAG}\n"
         compose_file = self.write_compose(original)

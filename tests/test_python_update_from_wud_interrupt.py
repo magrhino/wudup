@@ -17,12 +17,11 @@ from wudup import compose_rewrite
 from wudup.cli import _stop_signals_interrupt
 from wudup.command import CommandRunner
 from wudup.compose import ComposeCli
-from wudup.compose_source import _load_compose_yaml
 from wudup.locks import DirectoryLock, WudLockTimeout
 from wudup.updater import UpdateFromWudRunner
 from wudup.updater_lifecycle import StackLifecycleExecutor
 from wudup.updater_logging import Logger
-from wudup.updater_models import ComposeTagRewriteError, UpdaterError
+from wudup.updater_models import UpdaterError
 
 TAG_LINE = "repo/app:1.0 tag=2.0\n"
 OTHER_LINE = "repo/other:latest\n"
@@ -361,15 +360,6 @@ class UpdateFromWudInterruptTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), TAG_LINE)
         self.assertEqual(self._pending_rows()[1][0], "failed")
         self.assertEqual(self._pending_rows()[2][0], "resolved")
-
-
-class ComposeSourceDecodeTests(UpdateFromWudRunnerTestCase):
-    def test_non_utf8_compose_file_raises_rewrite_error(self) -> None:
-        compose_file = self.root / "docker-compose.yml"
-        compose_file.write_bytes("services:\n  app:\n    image: a:1\n".encode("utf-16"))
-
-        with self.assertRaisesRegex(ComposeTagRewriteError, "not UTF-8 text"):
-            _load_compose_yaml(compose_file)
 
 
 class StopSignalsInterruptTests(UpdateFromWudRunnerTestCase):
