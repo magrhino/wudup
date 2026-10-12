@@ -88,19 +88,17 @@ class ComposeTagUpdateYamlSafetyTests(ComposeRewriteTestCase):
         original = "services:\n  app:\n    image: repo/app:1.0\n".encode("utf-16")
         compose_file = self.root / "compose.yml"
         compose_file.write_bytes(original)
+        updates = (
+            TagUpdate(
+                old_image="repo/app:1.0",
+                desired_tag="2.0",
+                new_image="repo/app:2.0",
+                services=("app",),
+            ),
+        )
 
         with self.assertRaisesRegex(ComposeTagRewriteError, "not UTF-8 text"):
-            apply_compose_tag_updates(
-                compose_file,
-                (
-                    TagUpdate(
-                        old_image="repo/app:1.0",
-                        desired_tag="2.0",
-                        new_image="repo/app:2.0",
-                        services=("app",),
-                    ),
-                ),
-            )
+            apply_compose_tag_updates(compose_file, updates)
 
         self.assertEqual(compose_file.read_bytes(), original)
 
