@@ -9,9 +9,12 @@ IMAGE="${WUDUP_TEST_IMAGE:-}"
 cleanup_image=0
 REGISTRY_NAME=""
 REGISTRY_REF=""
+APP_REPO=""
 APP_IMAGE=""
 OLD_LOCAL_IMAGE=""
 NEW_LOCAL_IMAGE=""
+MOVED_LOCAL_IMAGE=""
+BROKEN_LOCAL_IMAGE=""
 NEW_APP_DIGEST=""
 PUSH_IMAGE_DIGEST=""
 STACK_DIR=""
@@ -19,6 +22,7 @@ COMPOSE_FILE=""
 OUT_VOLUME=""
 LOG_VOLUME=""
 DOCKER_WRAPPER_DIR=""
+LATEST_RUN_STATUS_QUERY="SELECT status FROM update_runs ORDER BY id DESC LIMIT 1"
 
 fail(){
   printf 'not ok - %s\n' "$*" >&2
@@ -51,6 +55,9 @@ cleanup(){
   if [[ -n "$APP_IMAGE" ]]; then
     docker image rm "$APP_IMAGE" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$APP_REPO" ]]; then
+    docker image rm "$APP_REPO:1.0" "$APP_REPO:2.0" "$APP_REPO:e2e-moved" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$OUT_VOLUME" ]]; then
     docker volume rm "$OUT_VOLUME" >/dev/null 2>&1 || true
   fi
@@ -62,6 +69,12 @@ cleanup(){
   fi
   if [[ -n "$NEW_LOCAL_IMAGE" ]]; then
     docker image rm "$NEW_LOCAL_IMAGE" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$MOVED_LOCAL_IMAGE" ]]; then
+    docker image rm "$MOVED_LOCAL_IMAGE" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$BROKEN_LOCAL_IMAGE" ]]; then
+    docker image rm "$BROKEN_LOCAL_IMAGE" >/dev/null 2>&1 || true
   fi
   if [[ "$cleanup_image" -eq 1 && -n "$IMAGE" ]]; then
     docker image rm "$IMAGE" >/dev/null 2>&1 || true
@@ -212,7 +225,8 @@ start_registry(){
   run docker run -d --name "$REGISTRY_NAME" -p 127.0.0.1::5000 registry:2
   registry_port="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}' "$REGISTRY_NAME")"
   REGISTRY_REF="127.0.0.1:${registry_port}"
-  APP_IMAGE="${REGISTRY_REF}/wud-e2e-app:latest"
+  APP_REPO="${REGISTRY_REF}/wud-e2e-app"
+  APP_IMAGE="${APP_REPO}:latest"
 }
 
 image_repo_digest(){
@@ -303,9 +317,55 @@ if [[ "${1:-}" == "manifest" && "${2:-}" == "inspect" ]]; then
   exec "$docker_path" manifest inspect --insecure "${@:3}"
 fi
 
+# Optionally move a registry tag once, right after the updater's Compose pull
+# and before it recreates services: "REGISTRY REPO SOURCE_TAG TARGET_TAG".
+if [[ "${1:-}" == "compose" && -n "${E2E_RETAG_AFTER_COMPOSE_PULL:-}" ]]; then
+  for arg in "${@:2}"; do
+    [[ "$arg" == "pull" ]] || continue
+    "$docker_path" "$@"
+    if [[ ! -e "${E2E_RETAG_MARKER:?}" ]]; then
+      read -r registry repo source_tag target_tag <<< "$E2E_RETAG_AFTER_COMPOSE_PULL"
+      python "$wrapper_dir/registry-retag.py" "$registry" "$repo" "$source_tag" "$target_tag"
+      : > "$E2E_RETAG_MARKER"
+    fi
+    exit 0
+  done
+fi
+
 exec "$docker_path" "$@"
 EOF
   chmod +x "$DOCKER_WRAPPER_DIR/docker"
+
+  cat > "$DOCKER_WRAPPER_DIR/registry-retag.py" <<'EOF'
+"""Point a registry tag at another tag's manifest without touching local images."""
+
+import sys
+import urllib.request
+
+registry, repo, source_tag, target_tag = sys.argv[1:5]
+accept = ", ".join(
+    (
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
+manifests = f"http://{registry}/v2/{repo}/manifests/"
+source = urllib.request.Request(manifests + source_tag, headers={"Accept": accept})
+with urllib.request.urlopen(source, timeout=30) as response:
+    manifest = response.read()
+    content_type = response.headers["Content-Type"]
+target = urllib.request.Request(
+    manifests + target_tag,
+    data=manifest,
+    method="PUT",
+    headers={"Content-Type": content_type},
+)
+with urllib.request.urlopen(target, timeout=30) as response:
+    digest = response.headers.get("Docker-Content-Digest", "")
+print(f"e2e: moved {repo}:{target_tag} to {source_tag} ({digest})", file=sys.stderr)
+EOF
 }
 
 build_fixture_image(){
@@ -390,6 +450,35 @@ services:
     image: ${APP_IMAGE}
     volumes:
       - ./data:/data
+YAML
+}
+
+write_pull_policy_compose_file(){
+  mkdir -p "$STACK_DIR"
+  cat > "$COMPOSE_FILE" <<YAML
+services:
+  app:
+    image: ${APP_IMAGE}
+    pull_policy: always
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /wud-e2e-version"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+YAML
+}
+
+write_tag_rollback_compose_file(){
+  mkdir -p "$STACK_DIR"
+  cat > "$COMPOSE_FILE" <<YAML
+services:
+  app:
+    image: ${APP_REPO}:1.0
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /wud-e2e-version && ! grep -qx broken /wud-e2e-version"]
+      interval: 1s
+      timeout: 1s
+      retries: 3
 YAML
 }
 
@@ -524,7 +613,7 @@ run_stack_recreate_label_e2e(){
   docker run --rm -v "$LOG_VOLUME:/mnt" "$IMAGE" test -s /mnt/e2e-stack-recreate.sqlite ||
     fail "expected stack recreate audit database to be created"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-stack-recreate.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     success
   log_name="$(latest_central_log_file_name "$LOG_VOLUME")"
   [[ -n "$log_name" ]] || fail "expected latest central log name"
@@ -590,11 +679,140 @@ run_preflight_failure_e2e(){
   docker run --rm -v "$LOG_VOLUME:/mnt" "$IMAGE" test -s /mnt/e2e-preflight.sqlite ||
     fail "expected preflight audit database to be created"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-preflight.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     failure
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-preflight.sqlite \
     "SELECT status || ':' || status_reason FROM pending_updates ORDER BY line_no LIMIT 1" \
     failed:bind-mount-path-invalid
+}
+
+run_registry_retag_guard_e2e(){
+  local retag_state="$TEST_TMP/retag-state" app_image_id new_image_id
+
+  MOVED_LOCAL_IMAGE="wudup-e2e-app-moved:${GITHUB_RUN_ID:-local}-$$"
+  build_fixture_image "$MOVED_LOCAL_IMAGE" moved
+  run docker tag "$MOVED_LOCAL_IMAGE" "$APP_REPO:e2e-moved"
+  push_image "$APP_REPO:e2e-moved"
+
+  # pull_policy: always would make a plain `compose up` pull the moved tag.
+  run compose down -v --remove-orphans
+  write_pull_policy_compose_file
+  run docker tag "$OLD_LOCAL_IMAGE" "$APP_IMAGE"
+  run compose up -d --pull never
+  wait_for_container_version old
+
+  mkdir -p "$retag_state"
+  write_volume_file "$OUT_VOLUME" images.todo "$APP_IMAGE"
+  run docker run --rm \
+    --network host \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$STACK_DIR:$STACK_DIR" \
+    -v "$OUT_VOLUME:/out" \
+    -v "$LOG_VOLUME:/logs" \
+    -v "$DOCKER_WRAPPER_DIR:/e2e-bin:ro" \
+    -v "$retag_state:/e2e-state" \
+    -e PATH=/e2e-bin:/app/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+    -e E2E_RETAG_AFTER_COMPOSE_PULL="$REGISTRY_REF wud-e2e-app e2e-moved latest" \
+    -e E2E_RETAG_MARKER=/e2e-state/registry-retagged \
+    -e WUDUP_BANNER=false \
+    -e WUD_DB_PATH=/logs/e2e-retag-guard.sqlite \
+    -e OUT_UID="$(id -u)" \
+    -e OUT_GID="$(id -g)" \
+    "$IMAGE" \
+    docker-update-from-wud \
+    --base "$STACK_DIR" \
+    --file /out/images.todo \
+    --log-dir /logs \
+    --mode live \
+    --max-wait 30 \
+    --yes \
+    --no-color
+
+  [[ -e "$retag_state/registry-retagged" ]] ||
+    fail "expected the registry tag to move between the updater's pull and recreate"
+  assert_volume_file_empty "$OUT_VOLUME" images.todo
+  wait_for_container_version new
+  app_image_id="$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")"
+  new_image_id="$(docker image inspect -f '{{.Id}}' "$NEW_LOCAL_IMAGE")"
+  [[ "$app_image_id" == "$new_image_id" ]] ||
+    fail "expected local $APP_IMAGE to stay on the pulled image $new_image_id, got $app_image_id"
+  assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-retag-guard.sqlite \
+    "$LATEST_RUN_STATUS_QUERY" \
+    success
+
+  # Put the registry tag back so later scenarios see the expected new image.
+  run docker tag "$NEW_LOCAL_IMAGE" "$APP_IMAGE"
+  push_image "$APP_IMAGE"
+}
+
+run_tag_update_rollback_e2e(){
+  local old_tag_image="$APP_REPO:1.0" broken_tag_image="$APP_REPO:2.0"
+  local compose_before="$TEST_TMP/tag-rollback-compose.before"
+  local output rc incident incident_content
+
+  BROKEN_LOCAL_IMAGE="wudup-e2e-app-broken:${GITHUB_RUN_ID:-local}-$$"
+  build_fixture_image "$BROKEN_LOCAL_IMAGE" broken
+  run docker tag "$OLD_LOCAL_IMAGE" "$old_tag_image"
+  push_image "$old_tag_image"
+  run docker tag "$BROKEN_LOCAL_IMAGE" "$broken_tag_image"
+  push_image "$broken_tag_image"
+  # Drop the local 2.0 tag so the updater has to pull it from the registry.
+  run docker image rm "$broken_tag_image"
+
+  run compose down -v --remove-orphans
+  write_tag_rollback_compose_file
+  cp "$COMPOSE_FILE" "$compose_before"
+  run compose up -d
+  wait_for_container_version old
+
+  write_volume_file "$OUT_VOLUME" images.todo "$old_tag_image tag=2.0"
+  set +e
+  output="$(
+    docker run --rm \
+      --network host \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v "$STACK_DIR:$STACK_DIR" \
+      -v "$OUT_VOLUME:/out" \
+      -v "$LOG_VOLUME:/logs" \
+      -v "$DOCKER_WRAPPER_DIR:/e2e-bin:ro" \
+      -e PATH=/e2e-bin:/app/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+      -e WUDUP_BANNER=false \
+      -e WUD_DB_PATH=/logs/e2e-tag-rollback.sqlite \
+      -e OUT_UID="$(id -u)" \
+      -e OUT_GID="$(id -g)" \
+      "$IMAGE" \
+      docker-update-from-wud \
+      --base "$STACK_DIR" \
+      --file /out/images.todo \
+      --log-dir /logs \
+      --mode live \
+      --max-wait 30 \
+      --allow-tag-updates \
+      --yes \
+      --no-color 2>&1
+  )"
+  rc=$?
+  set -e
+  printf '%s\n' "$output"
+
+  [[ "$rc" -eq 1 ]] || fail "expected unhealthy tag update to exit 1, got $rc"
+  assert_volume_file_equals "$OUT_VOLUME" images.todo "$old_tag_image tag=2.0"
+  cmp -s "$compose_before" "$COMPOSE_FILE" ||
+    fail "expected compose file to be restored after the failed tag update"
+  wait_for_container_version old
+
+  incident="$(find "$STACK_DIR" -maxdepth 1 -type f -name 'error-2.0-*.logs' -print | sort | tail -n 1)"
+  [[ -n "$incident" ]] || fail "expected a tag update incident log in $STACK_DIR"
+  incident_content="$(cat "$incident")"
+  [[ "$incident_content" == *"$old_tag_image -> $broken_tag_image"* ]] ||
+    fail "incident log missing attempted tag update"
+  [[ "$incident_content" == *"rollback=restored-and-healthy"* ]] ||
+    fail "incident log missing successful rollback"
+  [[ "$incident_content" == *"manual_review_required=no"* ]] ||
+    fail "incident log should not require manual review"
+  assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-tag-rollback.sqlite \
+    "$LATEST_RUN_STATUS_QUERY" \
+    failure
 }
 
 main(){
@@ -624,6 +842,8 @@ main(){
   run_digest_pin_e2e
   run_stack_recreate_label_e2e
   run_preflight_failure_e2e
+  run_registry_retag_guard_e2e
+  run_tag_update_rollback_e2e
 }
 
 main "$@"
