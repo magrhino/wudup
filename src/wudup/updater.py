@@ -679,9 +679,14 @@ def run_update_from_wud(
     options: UpdaterOptions,
     *,
     environ: Mapping[str, str] | None = None,
+    command_runner: CommandRunner | None = None,
 ) -> int:
     try:
-        return UpdateFromWudRunner(options, environ=environ).run()
+        return UpdateFromWudRunner(
+            options,
+            environ=environ,
+            command_runner=command_runner,
+        ).run()
     except (UpdaterError, OwnerConfigError, WudLockError) as exc:
         log_dir = options.log_dir
         try:

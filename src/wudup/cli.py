@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import os
+import signal
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from .banner import print_startup_banner
+from .command import CommandRunner
 from .doctor import run_doctor_from_namespace
 
 
@@ -92,6 +96,29 @@ def _add_init_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-color", action="store_true")
 
 
+def _raise_update_interrupt(_signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+@contextmanager
+def _handle_update_interrupts() -> Iterator[None]:
+    """Turn service-stop signals into the same cleanup path as Ctrl+C."""
+
+    handled_signals = [signal.SIGTERM]
+    if os.name == "posix" and hasattr(signal, "SIGHUP"):
+        handled_signals.append(signal.SIGHUP)
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in handled_signals
+    }
+    try:
+        for signum in handled_signals:
+            signal.signal(signum, _raise_update_interrupt)
+        yield
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+
+
 def _run_update_from_wud(args: argparse.Namespace) -> int:
     from .updater import run_update_from_wud
     from .updater_cli import options_from_namespace
@@ -103,7 +130,11 @@ def _run_update_from_wud(args: argparse.Namespace) -> int:
     except UpdaterError as exc:
         print(exc, file=sys.stderr)
         return 1
-    return run_update_from_wud(options)
+    with _handle_update_interrupts():
+        return run_update_from_wud(
+            options,
+            command_runner=CommandRunner(isolate_process_group=True),
+        )
 
 
 def _run_doctor(args: argparse.Namespace) -> int:
