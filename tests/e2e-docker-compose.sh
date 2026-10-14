@@ -747,7 +747,8 @@ run_registry_retag_guard_e2e(){
 
 run_tag_update_rollback_e2e(){
   local old_tag_image="$APP_REPO:1.0" broken_tag_image="$APP_REPO:2.0"
-  local compose_before output rc incident incident_content
+  local compose_before="$TEST_TMP/tag-rollback-compose.before"
+  local output rc incident incident_content
 
   BROKEN_LOCAL_IMAGE="wudup-e2e-app-broken:${GITHUB_RUN_ID:-local}-$$"
   build_fixture_image "$BROKEN_LOCAL_IMAGE" broken
@@ -760,7 +761,7 @@ run_tag_update_rollback_e2e(){
 
   run compose down -v --remove-orphans
   write_tag_rollback_compose_file
-  compose_before="$(cat "$COMPOSE_FILE")"
+  cp "$COMPOSE_FILE" "$compose_before"
   run compose up -d
   wait_for_container_version old
 
@@ -796,7 +797,7 @@ run_tag_update_rollback_e2e(){
 
   [[ "$rc" -eq 1 ]] || fail "expected unhealthy tag update to exit 1, got $rc"
   assert_volume_file_equals "$OUT_VOLUME" images.todo "$old_tag_image tag=2.0"
-  [[ "$(cat "$COMPOSE_FILE")" == "$compose_before" ]] ||
+  cmp -s "$compose_before" "$COMPOSE_FILE" ||
     fail "expected compose file to be restored after the failed tag update"
   wait_for_container_version old
 
