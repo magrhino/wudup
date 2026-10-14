@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from types import FrameType
 
 from .banner import print_startup_banner
+from .command import CommandRunner
 from .doctor import run_doctor_from_namespace
 
 
@@ -96,6 +97,37 @@ def _add_init_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-color", action="store_true")
 
 
+def _raise_update_interrupt(_signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+@contextmanager
+def _handle_update_interrupts() -> Iterator[None]:
+    """Turn service-stop signals into the same cleanup path as Ctrl+C."""
+
+    # Signal handlers can only be installed from the main thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    handled_signals = [signal.SIGTERM]
+    if os.name == "posix" and hasattr(signal, "SIGHUP"):
+        handled_signals.append(signal.SIGHUP)
+    # Keep a signal the operator chose to ignore, such as SIGHUP under nohup.
+    previous_handlers = {
+        signum: handler
+        for signum in handled_signals
+        if (handler := signal.getsignal(signum)) is not signal.SIG_IGN
+    }
+    try:
+        for signum in previous_handlers:
+            signal.signal(signum, _raise_update_interrupt)
+        yield
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+
+
 def _run_update_from_wud(args: argparse.Namespace) -> int:
     from .updater import run_update_from_wud
     from .updater_cli import options_from_namespace
@@ -107,36 +139,11 @@ def _run_update_from_wud(args: argparse.Namespace) -> int:
     except UpdaterError as exc:
         print(exc, file=sys.stderr)
         return 1
-    with _stop_signals_interrupt():
-        return run_update_from_wud(options)
-
-
-@contextmanager
-def _stop_signals_interrupt() -> Iterator[None]:
-    """Treat SIGTERM and SIGHUP like Ctrl-C so an update can clean up.
-
-    Without this the process exits at once, leaving a rewritten Compose file
-    and removed WUD entries behind.
-    """
-
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def interrupt(signum: int, _frame: FrameType | None) -> None:
-        raise KeyboardInterrupt(signal.Signals(signum).name)
-
-    previous = {}
-    for name in ("SIGTERM", "SIGHUP"):
-        signum = getattr(signal, name, None)
-        # Keep a signal the operator chose to ignore, such as SIGHUP under nohup.
-        if signum is not None and signal.getsignal(signum) is not signal.SIG_IGN:
-            previous[signum] = signal.signal(signum, interrupt)
-    try:
-        yield
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
+    with _handle_update_interrupts():
+        return run_update_from_wud(
+            options,
+            command_runner=CommandRunner(isolate_process_group=True),
+        )
 
 
 def _run_doctor(args: argparse.Namespace) -> int:

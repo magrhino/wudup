@@ -541,7 +541,7 @@ describe("settings mutation views", () => {
     expect(text).not.toContain("Delete settings");
     expect(
       wrapper.find(
-        'a[href="https://github.com/magrhino/wudup/blob/main/docs/DEPLOYMENT.md#environment-variables"]',
+        'a[href="https://github.com/magrhino/wudup/blob/main/docs/CONFIGURATION.md"]',
       ).exists(),
     ).toBe(true);
   });

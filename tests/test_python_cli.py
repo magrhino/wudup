@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from wudup.banner import current_tag
-from wudup.cli import main
+from wudup.cli import _handle_update_interrupts, _raise_update_interrupt, main
 from wudup.db import init_db, open_db, utc_timestamp
 from wudup.web_auth import PASSWORD_HASHER
 
@@ -449,6 +450,42 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("Interrupted.", stderr)
         self.assertNotIn("Traceback", stderr)
+
+    def test_update_signal_handler_uses_keyboard_interrupt_cleanup_path(self) -> None:
+        with self.assertRaises(KeyboardInterrupt):
+            _raise_update_interrupt(signal.SIGTERM, None)
+
+    def test_update_interrupt_handlers_are_restored(self) -> None:
+        handled_signals = [signal.SIGTERM]
+        if os.name == "posix" and hasattr(signal, "SIGHUP"):
+            handled_signals.append(signal.SIGHUP)
+        previous_handlers = {signum: object() for signum in handled_signals}
+
+        with (
+            mock.patch(
+                "wudup.cli.signal.getsignal",
+                side_effect=previous_handlers.__getitem__,
+            ),
+            mock.patch("wudup.cli.signal.signal") as signal_mock,
+        ):
+            with _handle_update_interrupts():
+                signal_mock.assert_has_calls(
+                    [mock.call(signum, _raise_update_interrupt) for signum in handled_signals]
+                )
+
+        self.assertEqual(
+            signal_mock.call_args_list,
+            [
+                *[
+                    mock.call(signum, _raise_update_interrupt)
+                    for signum in handled_signals
+                ],
+                *[
+                    mock.call(signum, previous_handlers[signum])
+                    for signum in handled_signals
+                ],
+            ],
+        )
 
     def test_removed_host_subcommands_are_rejected_by_parser(self) -> None:
         for command in ("updates", "truenas-status-export"):

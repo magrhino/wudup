@@ -204,7 +204,7 @@ def onboarding_checklist_response(
             docs=[
                 _onboarding_doc(
                     "Path mapping",
-                    f"{ONBOARDING_DOC_BASE}/DEPLOYMENT.md#docker-compose",
+                    f"{ONBOARDING_DOC_BASE}/DEPLOYMENT.md#start-the-webui",
                 )
             ],
         ),

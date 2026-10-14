@@ -12,7 +12,7 @@ import { ExternalLink } from "@lucide/vue";
     </div>
     <div class="settings-doc-links">
       <a
-        href="https://github.com/magrhino/wudup/blob/main/docs/DEPLOYMENT.md#environment-variables"
+        href="https://github.com/magrhino/wudup/blob/main/docs/CONFIGURATION.md"
         target="_blank"
         rel="noopener noreferrer"
         class="text-link"

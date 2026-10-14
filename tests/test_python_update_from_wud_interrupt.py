@@ -14,7 +14,7 @@ from unittest import mock
 from tests.update_from_wud_helpers import UpdateFromWudRunnerTestCase
 
 from wudup import compose_rewrite
-from wudup.cli import _stop_signals_interrupt
+from wudup.cli import _handle_update_interrupts
 from wudup.command import CommandRunner
 from wudup.compose import ComposeCli
 from wudup.locks import DirectoryLock, WudLockTimeout
@@ -366,7 +366,7 @@ class StopSignalsInterruptTests(UpdateFromWudRunnerTestCase):
     def test_sigterm_raises_keyboard_interrupt_and_restores_handler(self) -> None:
         previous = signal.getsignal(signal.SIGTERM)
 
-        with self.assertRaises(KeyboardInterrupt), _stop_signals_interrupt():
+        with self.assertRaises(KeyboardInterrupt), _handle_update_interrupts():
             os.kill(os.getpid(), signal.SIGTERM)
 
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
@@ -375,7 +375,7 @@ class StopSignalsInterruptTests(UpdateFromWudRunnerTestCase):
         previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
         self.addCleanup(signal.signal, signal.SIGHUP, previous)
 
-        with _stop_signals_interrupt():
+        with _handle_update_interrupts():
             # Under nohup a hang-up must not stop the update.
             self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
             os.kill(os.getpid(), signal.SIGHUP)

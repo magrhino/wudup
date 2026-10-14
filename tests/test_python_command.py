@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import unittest
 from pathlib import Path
@@ -10,6 +11,8 @@ from wudup.command import (
     CommandError,
     CommandResult,
     CommandRunner,
+    _signal_process,
+    _terminate_interrupted_process,
 )
 
 
@@ -255,6 +258,64 @@ class CommandRunnerTests(unittest.TestCase):
         self.assertTrue(result.ok)
         streaming_mock.assert_called_once()
 
+    @mock.patch("wudup.command.os.close")
+    @mock.patch("wudup.command.subprocess.Popen")
+    def test_run_in_pty_returns_error_when_child_cannot_start(
+        self,
+        popen_mock: mock.Mock,
+        close_mock: mock.Mock,
+    ) -> None:
+        import wudup.command
+
+        if getattr(wudup.command, "pty", None) is None:
+            self.skipTest("pty not available on this platform")
+
+        popen_mock.side_effect = FileNotFoundError("missing command")
+        with (
+            mock.patch("wudup.command.pty.openpty", return_value=(10, 11)),
+            mock.patch("wudup.command._copy_terminal_size"),
+        ):
+            result = CommandRunner().run_in_pty(["missing"], check=False)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.returncode, 127)
+        close_mock.assert_has_calls([mock.call(11), mock.call(10)], any_order=True)
+
+    @mock.patch("wudup.command.os.close")
+    @mock.patch("wudup.command.subprocess.Popen")
+    def test_run_in_pty_terminates_child_when_interrupted(
+        self,
+        popen_mock: mock.Mock,
+        close_mock: mock.Mock,
+    ) -> None:
+        import wudup.command
+
+        if getattr(wudup.command, "pty", None) is None:
+            self.skipTest("pty not available on this platform")
+
+        with mock.patch("wudup.command.pty.openpty") as openpty_mock:
+            openpty_mock.return_value = (10, 11)
+            read_mock = mock.Mock(side_effect=[b""])
+            process_mock = mock.Mock()
+            process_mock.poll.return_value = None
+            process_mock.wait.side_effect = [KeyboardInterrupt, 0]
+            popen_mock.return_value = process_mock
+
+            with (
+                mock.patch("wudup.command.os.read", read_mock),
+                mock.patch("wudup.command._copy_terminal_size"),
+                mock.patch("sys.stdout"),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                CommandRunner().run_in_pty(["some-command"])
+
+        process_mock.terminate.assert_called_once()
+        process_mock.kill.assert_not_called()
+        process_mock.wait.assert_has_calls(
+            [mock.call(), mock.call(timeout=2.0)],
+        )
+        close_mock.assert_has_calls([mock.call(11), mock.call(10)], any_order=True)
+
     @mock.patch("wudup.command.subprocess.Popen")
     def test_run_streaming_success(self, popen_mock: mock.Mock) -> None:
         process_mock = mock.Mock()
@@ -271,6 +332,26 @@ class CommandRunnerTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.stdout, "out1\nout2\n")
         self.assertEqual(result.stderr, "err1\n")
+        self.assertNotIn("start_new_session", popen_mock.call_args.kwargs)
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-only")
+    @mock.patch("wudup.command.subprocess.Popen")
+    def test_isolated_runner_starts_new_session(
+        self,
+        popen_mock: mock.Mock,
+    ) -> None:
+        process_mock = mock.Mock()
+        process_mock.stdout = []
+        process_mock.stderr = []
+        process_mock.wait.return_value = 0
+        popen_mock.return_value = process_mock
+
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            CommandRunner(isolate_process_group=True).run_streaming(
+                ["streaming_command"]
+            )
+
+        self.assertTrue(popen_mock.call_args.kwargs["start_new_session"])
 
     @mock.patch("wudup.command.subprocess.Popen")
     def test_run_streaming_oserror(self, popen_mock: mock.Mock) -> None:
@@ -281,6 +362,119 @@ class CommandRunnerTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(result.returncode, 127)
+
+    @mock.patch("wudup.command.subprocess.Popen")
+    def test_run_streaming_terminates_child_when_interrupted(
+        self,
+        popen_mock: mock.Mock,
+    ) -> None:
+        process_mock = mock.Mock()
+        process_mock.stdout = []
+        process_mock.stderr = []
+        process_mock.poll.return_value = None
+        process_mock.wait.side_effect = [KeyboardInterrupt, 0]
+        popen_mock.return_value = process_mock
+
+        with (
+            mock.patch("sys.stdout"),
+            mock.patch("sys.stderr"),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            CommandRunner().run_streaming(["streaming_command"])
+
+        process_mock.terminate.assert_called_once()
+        process_mock.kill.assert_not_called()
+        process_mock.wait.assert_has_calls(
+            [mock.call(), mock.call(timeout=2.0)],
+        )
+
+    @mock.patch("wudup.command.subprocess.Popen")
+    def test_run_streaming_kills_child_if_termination_times_out(
+        self,
+        popen_mock: mock.Mock,
+    ) -> None:
+        process_mock = mock.Mock()
+        process_mock.stdout = []
+        process_mock.stderr = []
+        process_mock.poll.return_value = None
+        process_mock.wait.side_effect = [
+            KeyboardInterrupt,
+            KeyboardInterrupt,
+            subprocess.TimeoutExpired(cmd=("streaming_command",), timeout=2),
+            KeyboardInterrupt,
+            0,
+        ]
+        popen_mock.return_value = process_mock
+
+        with (
+            mock.patch("sys.stdout"),
+            mock.patch("sys.stderr"),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            CommandRunner().run_streaming(["streaming_command"])
+
+        process_mock.terminate.assert_called_once()
+        process_mock.kill.assert_called_once()
+        process_mock.wait.assert_has_calls(
+            [
+                mock.call(),
+                mock.call(timeout=2.0),
+                mock.call(timeout=2.0),
+                mock.call(),
+                mock.call(),
+            ],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-only")
+    @mock.patch("wudup.command.os.killpg")
+    def test_interrupted_cleanup_signals_process_group(
+        self,
+        killpg_mock: mock.Mock,
+    ) -> None:
+        process_mock = mock.Mock(pid=1234)
+        process_mock.poll.return_value = None
+        process_mock.wait.return_value = 0
+
+        _terminate_interrupted_process(process_mock, process_group=True)
+
+        killpg_mock.assert_called_once_with(1234, signal.SIGTERM)
+        process_mock.terminate.assert_not_called()
+
+    def test_interrupted_cleanup_skips_already_exited_process(self) -> None:
+        process_mock = mock.Mock()
+        process_mock.poll.return_value = 0
+
+        _terminate_interrupted_process(process_mock)
+
+        process_mock.terminate.assert_not_called()
+        process_mock.kill.assert_not_called()
+        process_mock.wait.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-only")
+    @mock.patch("wudup.command.os.killpg", side_effect=OSError("group is gone"))
+    def test_signal_process_falls_back_when_group_signal_fails(
+        self,
+        killpg_mock: mock.Mock,
+    ) -> None:
+        process_mock = mock.Mock(pid=1234)
+
+        _signal_process(
+            process_mock,
+            signal.SIGTERM,
+            process_mock.terminate,
+            process_group=True,
+        )
+
+        killpg_mock.assert_called_once_with(1234, signal.SIGTERM)
+        process_mock.terminate.assert_called_once_with()
+
+    def test_signal_process_ignores_fallback_oserror(self) -> None:
+        process_mock = mock.Mock(pid=None)
+        fallback = mock.Mock(side_effect=OSError("already gone"))
+
+        _signal_process(process_mock, signal.SIGTERM, fallback)
+
+        fallback.assert_called_once_with()
 
     @mock.patch("wudup.command.subprocess.run")
     def test_cwd_and_env_passing(self, run_mock: mock.Mock) -> None:
