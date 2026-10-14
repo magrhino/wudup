@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageTransition, planChanges, resultSignals, runChanges, scopeTitle } from "../src/utils/updateSummary";
+import { imageTransition, planChanges, resultSignals, runAction, runChanges, scopeTitle } from "../src/utils/updateSummary";
 import { planResponse, runSummary, runVerification } from "./helpers/fixtures";
 import { mountWithApp } from "./helpers/mount";
 import RunResultSummary from "../src/components/RunResultSummary.vue";
@@ -215,6 +215,15 @@ describe("update summaries", () => {
     value.verification = null;
     expect(runChanges(value)).toEqual([]);
     expect(texts(value)).toBe("Action success");
+  });
+
+  it("labels a missed scheduled slot without treating it as an image update", () => {
+    const value = run();
+    value.mode = "auto-update-missed";
+    value.status = "missed";
+    value.verification = null;
+    expect(runAction(value)).toBe("Missed auto update");
+    expect(runChanges(value)).toEqual([]);
   });
 
   it("reuses the result summary with bounded History content and expandable full detail", () => {

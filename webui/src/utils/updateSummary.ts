@@ -157,6 +157,7 @@ export function runAction(run: RunSummary): string {
     case "stop": case "pause": case "live": return "Update";
     case "web-retag": return "Version change";
     case "auto-update": return "Auto update";
+    case "auto-update-missed": return "Missed auto update";
     case "cleanup": return "Cleanup";
     case "snooze-created": return "Snooze created";
     case "snooze-removed": return "Snooze removed";

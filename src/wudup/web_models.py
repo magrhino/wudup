@@ -436,6 +436,8 @@ class AutoUpdateSelection:
     schedule_keys: tuple[str, ...]
     scheduled_for: datetime
     update_mode: str
+    # Eligible slots in other update modes that must wait for this job.
+    deferred_schedule_keys: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class LogTail:
