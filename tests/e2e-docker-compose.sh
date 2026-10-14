@@ -22,6 +22,7 @@ COMPOSE_FILE=""
 OUT_VOLUME=""
 LOG_VOLUME=""
 DOCKER_WRAPPER_DIR=""
+LATEST_RUN_STATUS_QUERY="SELECT status FROM update_runs ORDER BY id DESC LIMIT 1"
 
 fail(){
   printf 'not ok - %s\n' "$*" >&2
@@ -612,7 +613,7 @@ run_stack_recreate_label_e2e(){
   docker run --rm -v "$LOG_VOLUME:/mnt" "$IMAGE" test -s /mnt/e2e-stack-recreate.sqlite ||
     fail "expected stack recreate audit database to be created"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-stack-recreate.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     success
   log_name="$(latest_central_log_file_name "$LOG_VOLUME")"
   [[ -n "$log_name" ]] || fail "expected latest central log name"
@@ -678,7 +679,7 @@ run_preflight_failure_e2e(){
   docker run --rm -v "$LOG_VOLUME:/mnt" "$IMAGE" test -s /mnt/e2e-preflight.sqlite ||
     fail "expected preflight audit database to be created"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-preflight.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     failure
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-preflight.sqlite \
     "SELECT status || ':' || status_reason FROM pending_updates ORDER BY line_no LIMIT 1" \
@@ -736,7 +737,7 @@ run_registry_retag_guard_e2e(){
   [[ "$app_image_id" == "$new_image_id" ]] ||
     fail "expected local $APP_IMAGE to stay on the pulled image $new_image_id, got $app_image_id"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-retag-guard.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     success
 
   # Put the registry tag back so later scenarios see the expected new image.
@@ -809,7 +810,7 @@ run_tag_update_rollback_e2e(){
   [[ "$incident_content" == *"manual_review_required=no"* ]] ||
     fail "incident log should not require manual review"
   assert_volume_sqlite_scalar "$LOG_VOLUME" e2e-tag-rollback.sqlite \
-    "SELECT status FROM update_runs ORDER BY id DESC LIMIT 1" \
+    "$LATEST_RUN_STATUS_QUERY" \
     failure
 }
 
