@@ -196,7 +196,7 @@ class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
         )
         self.assertEqual(self._backups(stack_dir), [])
 
-    def test_unexpected_error_keeps_written_backup_and_logs_its_path(self) -> None:
+    def test_unexpected_error_restores_compose_and_removes_backup(self) -> None:
         stack_dir = self._tag_update_stack()
         original = (stack_dir / "docker-compose.yml").read_text(encoding="utf-8")
         output = StringIO()
@@ -206,6 +206,36 @@ class UpdateFromWudComposeBackupTests(UpdateFromWudRunnerTestCase):
                 StackLifecycleExecutor,
                 "_pull_and_verify_images",
                 side_effect=RuntimeError("unexpected failure"),
+            ),
+            redirect_stdout(output),
+            redirect_stderr(output),
+            self.assertRaisesRegex(RuntimeError, "unexpected failure"),
+        ):
+            self.make_runner(allow_tag_updates=True).run()
+
+        self.assertEqual(
+            (stack_dir / "docker-compose.yml").read_text(encoding="utf-8"),
+            original,
+        )
+        self.assertEqual(self._backups(stack_dir), [])
+        self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "repo/app:1.0 tag=2.0\n")
+
+    def test_unexpected_error_with_failed_restore_keeps_backup_and_logs_its_path(
+        self,
+    ) -> None:
+        stack_dir = self._tag_update_stack()
+        original = (stack_dir / "docker-compose.yml").read_text(encoding="utf-8")
+        output = StringIO()
+
+        with (
+            mock.patch.object(
+                StackLifecycleExecutor,
+                "_pull_and_verify_images",
+                side_effect=RuntimeError("unexpected failure"),
+            ),
+            mock.patch(
+                "wudup.compose_rewrite.restore_compose_backup",
+                side_effect=OSError("disk full"),
             ),
             redirect_stdout(output),
             redirect_stderr(output),

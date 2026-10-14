@@ -41,6 +41,8 @@ class _StackUpdateState:
     compose_backup: Path | None = None
     compose_written_hashes: list[str] = field(default_factory=list)
     compose_restored: bool = False
+    health_verified: bool = False
+    """The rewritten Compose file passed the health gate and must be kept."""
     running_services: tuple[str, ...] = ()
     stopped_services: tuple[str, ...] = ()
     start_failed_services: tuple[str, ...] = ()

@@ -6,6 +6,7 @@ import argparse
 import os
 import signal
 import sys
+import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -104,14 +105,22 @@ def _raise_update_interrupt(_signum: int, _frame: object) -> None:
 def _handle_update_interrupts() -> Iterator[None]:
     """Turn service-stop signals into the same cleanup path as Ctrl+C."""
 
+    # Signal handlers can only be installed from the main thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
     handled_signals = [signal.SIGTERM]
     if os.name == "posix" and hasattr(signal, "SIGHUP"):
         handled_signals.append(signal.SIGHUP)
+    # Keep a signal the operator chose to ignore, such as SIGHUP under nohup.
     previous_handlers = {
-        signum: signal.getsignal(signum) for signum in handled_signals
+        signum: handler
+        for signum in handled_signals
+        if (handler := signal.getsignal(signum)) is not signal.SIG_IGN
     }
     try:
-        for signum in handled_signals:
+        for signum in previous_handlers:
             signal.signal(signum, _raise_update_interrupt)
         yield
     finally:

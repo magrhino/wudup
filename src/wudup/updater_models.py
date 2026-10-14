@@ -8,7 +8,7 @@ from pathlib import Path
 from .command import CommandError, CommandResult
 from .compose import ComposeStack
 from .config import DEFAULT_MAX_WAIT, DEFAULT_UPDATE_MODE
-from .wud_file import WudTarget
+from .wud_file import ParsedWudFile, WudTarget
 
 STALE_PENDING_DIGEST_REASON = "stale-pending-digest"
 DigestRequirementKey = tuple[int, int, str]
@@ -289,6 +289,21 @@ class DigestPinLabelRewriteApprovalRequired(ComposeTagRewriteError):
 class StackStatus:
     status: str
     reason: str
+
+
+@dataclass
+class InFlightPending:
+    """WUD entries removed before the update and the outcomes recorded so far.
+
+    The runner keeps this until the entries are reconciled, so an interrupted
+    run can still put back the entries that did not finish.
+    """
+
+    parsed: ParsedWudFile
+    matches: tuple[Match, ...]
+    exclusion_updates: tuple[TagExclusionUpdate, ...]
+    stack_statuses: dict[int, StackStatus] = field(default_factory=dict)
+    exclusion_statuses: dict[tuple[int, int], StackStatus] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

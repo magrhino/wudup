@@ -389,6 +389,7 @@ class _LifecycleRewriteMixin:
             status.status != "success"
             and state.compose_written_hashes
             and not state.compose_restored
+            and not state.health_verified
         ):
             self.log.error(
                 f"[{stack.name}] Kept the previous Compose file at {backup} because "
@@ -406,6 +407,41 @@ class _LifecycleRewriteMixin:
             )
             return
         state.compose_backup = None
+
+    def _restore_compose_after_abort(self, state: _StackUpdateState) -> None:
+        """Put the old Compose file back when the update stops unexpectedly.
+
+        Containers are left alone: the run is being interrupted, so only the
+        file is restored and the operator is told to check the services.
+        """
+
+        backup = state.compose_backup
+        if (
+            backup is None
+            or not state.compose_written_hashes
+            or state.compose_restored
+            or state.health_verified
+        ):
+            return
+        stack = state.stack
+        compose_path = stack.directory / stack.file
+        try:
+            state.compose_restored = compose_rewrite.restore_compose_backup(
+                backup,
+                compose_path,
+                expected_source_hash=state.compose_written_hashes[-1],
+            )
+        except (OSError, ComposeTagRewriteError) as exc:
+            self.log.error(
+                f"[{stack.name}] The update stopped before the health check, and "
+                f"{stack.file} could not be restored: {exc}"
+            )
+            return
+        self.log.error(
+            f"[{stack.name}] The update stopped before the health check; restored "
+            f"the previous {stack.file}. Check that the stack's containers run the "
+            "expected image before retrying."
+        )
 
     @staticmethod
     def _expected_compose_hash(state: _StackUpdateState) -> str:
