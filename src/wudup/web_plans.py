@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from collections.abc import Callable
 from dataclasses import asdict, replace
@@ -14,6 +15,7 @@ from . import (
     web_job_registry,
     web_jobs,
     web_pending_sources,
+    web_plan_staleness,
     web_scheduler,
     web_wud_refresh,
 )
@@ -44,6 +46,7 @@ from .web_models import (
 from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
 
+LOGGER = logging.getLogger(__name__)
 EffectiveConfigLoader = Callable[[WebSettings], UpdaterConfig]
 _effective_config_loader: EffectiveConfigLoader | None = None
 _PLAN_CREATE_ERROR = "could not create plan"
@@ -73,6 +76,7 @@ def api_create_plan(payload: PlanRequest, request: Request) -> PlanResponse:
             status_code=500,
             detail=_safe_exception_detail(settings, _PLAN_CREATE_ERROR, exc),
         ) from exc
+    web_plan_staleness.remember_reviewed_plan(request.app.state, plan)
     return plan_response(plan, settings, request)
 
 
@@ -103,7 +107,11 @@ def api_create_job(payload: ApplyPlanRequest, request: Request) -> ApplyJobRespo
             pending_source=pending_source,
         )
     except (PlanInputError, PlanFileMissing) as exc:
-        raise HTTPException(status_code=409, detail="plan is stale") from exc
+        details = _safe_exception_detail(settings, "details", exc).rstrip(".")
+        raise _stale_plan_error(
+            "The updates or approvals you reviewed no longer match WUD's current "
+            f"pending list ({details}). Review the plan again before applying."
+        ) from exc
     except ConfigError as exc:
         raise HTTPException(
             status_code=409,
@@ -124,7 +132,12 @@ def api_create_job(payload: ApplyPlanRequest, request: Request) -> ApplyJobRespo
         ) from exc
 
     if not secrets.compare_digest(plan.plan_id, payload.plan_id):
-        raise HTTPException(status_code=409, detail="plan is stale")
+        raise _stale_plan_error(
+            web_plan_staleness.stale_plan_reason(
+                web_plan_staleness.reviewed_plan(request.app.state, payload.plan_id),
+                plan,
+            )
+        )
     if not plan_can_apply(plan, settings):
         raise HTTPException(status_code=409, detail="plan is not ready to apply")
     apply_preflight = web_diagnostics.apply_preflight_response(
@@ -145,6 +158,14 @@ def api_create_job(payload: ApplyPlanRequest, request: Request) -> ApplyJobRespo
 
 def api_apply_plan(payload: ApplyPlanRequest, request: Request) -> ApplyJobResponse:
     return api_create_job(payload, request)
+
+
+def _stale_plan_error(reason: str) -> HTTPException:
+    LOGGER.warning("WebUI apply rejected because the plan is stale: %s", reason)
+    return HTTPException(
+        status_code=409,
+        detail=web_plan_staleness.stale_plan_detail(reason),
+    )
 
 
 def _resolve_pending_source_for_apply(

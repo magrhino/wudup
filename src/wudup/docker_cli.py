@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import request_scope
 from .command import CommandError, CommandResult, CommandRunner
 
 DEFAULT_CONTAINER_FORMAT = "{{.Names}}\t{{.Image}}"
@@ -100,6 +101,24 @@ class DockerCli:
         return self.runner.capture(
             [self.executable, "manifest", "inspect", image],
             check=True,
+        )
+
+    def check_manifest_available(self, image: str) -> None:
+        """Raise ``CommandError`` when the registry has no manifest for ``image``.
+
+        Inside a WebUI request a recent success may be reused; see
+        ``request_scope.reuse_registry_check``.
+        """
+
+        environment_key = getattr(self.runner, "environment_key", None)
+        request_scope.reuse_registry_check(
+            (
+                "manifest-available",
+                self.executable,
+                image,
+                environment_key() if callable(environment_key) else None,
+            ),
+            lambda: self.manifest_inspect(image),
         )
 
     def manifest_inspect_verbose(self, image: str) -> CommandResult:

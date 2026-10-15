@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, Check, CheckCircle2, Play, XCircle } from "@lucide/vue";
+import { AlertTriangle, Check, CheckCircle2, Play, RefreshCw, XCircle } from "@lucide/vue";
 import { NAlert, NButton, NTag } from "naive-ui";
 import { computed } from "vue";
 import UpdateScopeSummary from "../UpdateScopeSummary.vue";
@@ -91,7 +91,9 @@ const props = defineProps<{
   preflightSummary: string;
   preflightTagRewriteNotice: string;
   preflightTitle: string;
+  rebuildNotice: string;
   show: boolean;
+  staleApplyReason: string;
   visiblePlanIssues: PlanIssue[];
 }>();
 
@@ -101,6 +103,7 @@ const emit = defineEmits<{
   (event: "approve-tag-stream-label-rewrite", issue: PlanIssue): void;
   (event: "choose-tag-stream", issue: PlanIssue, decision: TagStreamDecision): void;
   (event: "close"): void;
+  (event: "rebuild"): void;
 }>();
 
 const changes = computed(() => planChanges(props.plan));
@@ -271,6 +274,10 @@ function tagStreamRulePreview(issue: PlanIssue): string {
         next-step="pending_apply"
         @advanced="emit('close')"
       />
+
+      <n-alert v-if="rebuildNotice" class="preflight-block" type="info">
+        {{ rebuildNotice }}
+      </n-alert>
 
       <n-alert
         v-if="mutationDisabledMessage"
@@ -701,6 +708,21 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       >
         <template #primary>
           <n-button
+            v-if="staleApplyReason"
+            type="primary"
+            size="small"
+            :disabled="loading"
+            :loading="loading"
+            aria-describedby="apply-blocked-reason"
+            @click="emit('rebuild')"
+          >
+            <template #icon>
+              <RefreshCw :size="16" />
+            </template>
+            Rebuild plan
+          </n-button>
+          <n-button
+            v-else
             type="primary"
             size="small"
             :disabled="applyDisabled"

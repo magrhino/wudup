@@ -75,6 +75,14 @@ export function usePendingPlanReviewState(
   const updates = useUpdatesStore();
   const auth = useAuthStore();
   const updateIntent = ref<PendingUpdateIntent | null>(null);
+  // Why the server refused to apply a reviewed plan, keyed by its plan ID so a
+  // metadata refresh that restores the same plan cannot re-enable Apply.
+  const stalePlan = ref<{ planId: string; reason: string } | null>(null);
+  const staleApplyReason = computed(() =>
+    stalePlan.value && stalePlan.value.planId === updates.plan?.plan_id
+      ? stalePlan.value.reason
+      : "",
+  );
   const retainedTagStreamDecisionIssues = ref<PlanIssue[]>([]);
 
   const mutationStateLabel = computed(() =>
@@ -228,7 +236,9 @@ export function usePendingPlanReviewState(
   const applyAvailable = computed(
     () => applyVisible.value && !!updates.plan?.can_apply,
   );
-  const applyDisabled = computed(() => !applyAvailable.value || updates.loading);
+  const applyDisabled = computed(
+    () => !applyAvailable.value || updates.loading || !!staleApplyReason.value,
+  );
   const applyButtonLabel = computed(() => {
     const count =
       (updates.plan?.selected_selections?.length ?? 0) ||
@@ -340,6 +350,9 @@ export function usePendingPlanReviewState(
   // The readiness card scrolls away; keep why a ready plan cannot apply next to the disabled button.
   // Read-only comes from the session, not from mutationDisabledMessage, which also carries other reasons.
   const applyBlockedReason = computed(() => {
+    if (staleApplyReason.value) {
+      return `This plan is out of date. ${staleApplyReason.value}`;
+    }
     if (updates.plan?.status !== "ready" || updates.plan.can_apply) {
       return "";
     }
@@ -498,6 +511,8 @@ export function usePendingPlanReviewState(
 
   function setUpdateIntent(intent: PendingUpdateIntent): void {
     retainedTagStreamDecisionIssues.value = [];
+    // A new review starts fresh, even if it rebuilds the same plan ID.
+    stalePlan.value = null;
     updateIntent.value = {
       ...intent,
       tagStreamDecisions: intent.tagStreamDecisions ?? [],
@@ -508,6 +523,7 @@ export function usePendingPlanReviewState(
 
   function clearUpdateIntent(): void {
     retainedTagStreamDecisionIssues.value = [];
+    stalePlan.value = null;
     updateIntent.value = null;
   }
 
@@ -631,7 +647,22 @@ export function usePendingPlanReviewState(
     );
   }
 
+  function markPlanStale(detail: string): void {
+    if (!updates.plan) {
+      return;
+    }
+    stalePlan.value = {
+      planId: updates.plan.plan_id,
+      reason:
+        detail.replace(/^plan is stale:?\s*/i, "").trim() ||
+        "Something changed since you reviewed this plan.",
+    };
+  }
+
   async function replanIntent(intent: PendingUpdateIntent): Promise<void> {
+    // A replan asks the server again, so a rejection of an earlier plan with
+    // the same content ID no longer applies.
+    stalePlan.value = null;
     const createArgs = [
       intent.lineNumbers,
       intent.allowTagUpdates,
@@ -656,6 +687,9 @@ export function usePendingPlanReviewState(
   return {
     applyButtonLabel,
     applyDisabled,
+    markPlanStale,
+    staleApplyReason,
+    updateIntent,
     applyPreflight,
     applyPreflightAttentionChecks,
     applyPreflightCheckDetail,

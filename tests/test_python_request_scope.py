@@ -281,3 +281,115 @@ def test_server_timing_header_is_built_from_a_locked_snapshot() -> None:
     scope._lock.release()
     thread.join(timeout=2)
     assert result == ['docker;dur=1.0;desc="1 calls"']
+
+
+def _registry_check(calls: list[str], *, fail: bool = False):
+    def check() -> None:
+        calls.append("checked")
+        if fail:
+            raise RuntimeError("registry unavailable")
+
+    return check
+
+
+def test_registry_checks_reuse_successes_across_web_requests() -> None:
+    request_scope.clear_registry_checks()
+    calls: list[str] = []
+    for _ in range(2):
+        token = request_scope.begin(reuse_reads=False, reuse_registry_checks=True)
+        try:
+            request_scope.reuse_registry_check("image", _registry_check(calls))
+        finally:
+            request_scope.end(token)
+
+    assert calls == ["checked"]
+    request_scope.clear_registry_checks()
+
+
+def test_registry_checks_retry_failures_and_skip_outside_requests() -> None:
+    request_scope.clear_registry_checks()
+    calls: list[str] = []
+    token = request_scope.begin(reuse_reads=True, reuse_registry_checks=True)
+    try:
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                request_scope.reuse_registry_check(
+                    "image", _registry_check(calls, fail=True)
+                )
+    finally:
+        request_scope.end(token)
+    # Background jobs and the CLI have no scope and always ask the registry.
+    request_scope.reuse_registry_check("other", _registry_check(calls))
+    request_scope.reuse_registry_check("other", _registry_check(calls))
+
+    assert calls == ["checked"] * 4
+    request_scope.clear_registry_checks()
+
+
+def test_registry_checks_expire(monkeypatch: pytest.MonkeyPatch) -> None:
+    request_scope.clear_registry_checks()
+    now = [1000.0]
+    monkeypatch.setattr(request_scope.time, "monotonic", lambda: now[0])
+    calls: list[str] = []
+    token = request_scope.begin(reuse_reads=False, reuse_registry_checks=True)
+    try:
+        request_scope.reuse_registry_check("image", _registry_check(calls))
+        now[0] += request_scope.REGISTRY_CHECK_TTL_SECONDS
+        request_scope.reuse_registry_check("image", _registry_check(calls))
+    finally:
+        request_scope.end(token)
+
+    assert calls == ["checked", "checked"]
+    request_scope.clear_registry_checks()
+
+
+def test_registry_checks_stop_when_the_request_scope_ends() -> None:
+    import contextvars
+
+    request_scope.clear_registry_checks()
+    calls: list[str] = []
+    token = request_scope.begin(reuse_reads=False, reuse_registry_checks=True)
+    outliving_context = contextvars.copy_context()
+    request_scope.end(token)
+    outliving_context.run(
+        request_scope.reuse_registry_check, "image", _registry_check(calls)
+    )
+    outliving_context.run(
+        request_scope.reuse_registry_check, "image", _registry_check(calls)
+    )
+
+    assert calls == ["checked", "checked"]
+    request_scope.clear_registry_checks()
+
+
+def test_registry_checks_are_not_reused_by_other_requests() -> None:
+    request_scope.clear_registry_checks()
+    calls: list[str] = []
+    for _ in range(2):
+        token = request_scope.begin(reuse_reads=True)
+        try:
+            request_scope.reuse_registry_check("image", _registry_check(calls))
+        finally:
+            request_scope.end(token)
+
+    assert calls == ["checked", "checked"]
+    request_scope.clear_registry_checks()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "reuses"),
+    [
+        ("POST", "/api/v1/plans", True),
+        ("POST", "/api/v1/plans/apply", True),
+        ("POST", "/api/v1/jobs", True),
+        ("POST", "/api/v1/self-update/prepare", False),
+        ("POST", "/api/v1/retags/apply", False),
+        ("GET", "/api/v1/plans", False),
+    ],
+)
+def test_only_plan_review_and_apply_reuse_registry_checks(
+    method: str,
+    path: str,
+    reuses: bool,
+) -> None:
+    assert web_request_scope.reuses_registry_checks(_request(method, path)) is reuses

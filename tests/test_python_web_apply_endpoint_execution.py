@@ -284,7 +284,9 @@ def test_apply_endpoint_requires_and_uses_digest_pin_label_rewrite_approval(
     job = _wait_apply_job(client, apply_response.json()["job_id"])
 
     assert stale_apply.status_code == 409
-    assert stale_apply.json()["detail"] == "plan is stale"
+    detail = stale_apply.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "Rechecking found a new problem: stack wud.tag.include" in detail
     assert apply_response.status_code == 202
     assert job["status"] == "success"
     content = compose_file.read_text(encoding="utf-8")
@@ -882,7 +884,9 @@ def test_apply_rejects_plan_when_selected_wud_container_identity_changes(
 
     assert plan["can_apply"] is True
     assert apply_response.status_code == 409
-    assert apply_response.json()["detail"] == "plan is stale"
+    detail = apply_response.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "A selected container was recreated or replaced since the review" in detail
     calls = _fake_docker_calls(fake_root)
     assert " pull " not in calls
     assert " up -d " not in calls
@@ -1037,7 +1041,9 @@ def test_apply_endpoint_rejects_stale_api_pending_source_without_editing_file(
     )
 
     assert apply_response.status_code == 409
-    assert apply_response.json()["detail"] == "plan is stale"
+    detail = apply_response.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "WUD no longer reports these selected updates: repo/app:latest@sha256:" in detail
     assert wud_file.read_text(encoding="utf-8") == "repo/file:latest\n"
     calls = _fake_docker_calls(fake_root)
     assert " pull " not in calls
@@ -1290,7 +1296,9 @@ def test_apply_endpoint_applies_stream_image_and_label_as_one_plan(
     job = _wait_apply_job(client, apply_response.json()["job_id"])
 
     assert stale_apply.status_code == 409
-    assert stale_apply.json()["detail"] == "plan is stale"
+    detail = stale_apply.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "Rechecking found a new problem: WUD proposed changing the update stream" in detail
     assert apply_response.status_code == 202
     assert job["status"] == "success"
     rendered = (compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
@@ -1717,7 +1725,9 @@ def test_apply_endpoint_rejects_stale_stream_label_approval(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "plan is stale"
+    detail = response.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "no longer match WUD's current pending list (details: tag_stream_label_rewrite_approvals" in detail
     rendered = compose_path.read_text(encoding="utf-8")
     assert "image: n8nio/runners:2.33.5-distroless" in rendered
     assert "wud.tag.include: ^beta-.+$$" in rendered
