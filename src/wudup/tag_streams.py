@@ -483,7 +483,7 @@ def _manifest_exists(
     if image in cache:
         return cache[image]
     try:
-        docker.manifest_inspect(image)
+        docker.check_manifest_available(image)
     except CommandError:
         cache[image] = False
     else:

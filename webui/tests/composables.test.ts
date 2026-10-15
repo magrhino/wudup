@@ -911,6 +911,45 @@ describe("usePendingPlanReviewState", () => {
     expect(state.digestPinLabelApprovalApproved(issue)).toBe(true);
   });
 
+  it("clears a stale apply rejection when an approval replans the same plan", async () => {
+    const { state, updates } = setupPendingPlanReview();
+    updates.plan = planResponse({ status: "ready", can_apply: true });
+    vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan = planResponse({ status: "ready", can_apply: true });
+    });
+    state.setUpdateIntent({
+      title: "Review media plan",
+      contextLabel: "media",
+      lineNumbers: [1],
+      selections: [{ line_no: 1, selection_id: "selection-media-app" }],
+      allowTagUpdates: true,
+      tagOverrides: [],
+      digestPinLabelRewriteApprovals: [],
+      tagStreamDecisions: [],
+      tagStreamLabelRewriteApprovals: [],
+    });
+    state.markPlanStale("plan is stale: WUD's list of pending updates changed.");
+    expect(state.staleApplyReason.value).toBe("WUD's list of pending updates changed.");
+
+    await state.chooseTagStream(
+      {
+        severity: "error",
+        code: "tag-stream-change",
+        message: "Choose a stream.",
+        line_no: 1,
+        stack: "media",
+        service: "app",
+        hint: "",
+        details: {},
+      },
+      "preserve",
+    );
+
+    // The replan returned the same content-derived plan ID; the old rejection must not stick.
+    expect(updates.plan?.plan_id).toBe("plan-test");
+    expect(state.staleApplyReason.value).toBe("");
+  });
+
   it("replans stream decisions and exact label approvals", async () => {
     const { state, updates } = setupPendingPlanReview();
     const createPlan = vi.spyOn(updates, "createPlan").mockResolvedValue(undefined);

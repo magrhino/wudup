@@ -156,7 +156,7 @@ def manifest_issues(
     issues: list[DryRunPlanIssue] = []
     for update in _tag_updates(matches):
         try:
-            docker.manifest_inspect(update.new_image)
+            docker.check_manifest_available(update.new_image)
         except CommandError as exc:
             detail = _first_error_line(exc)
             suffix = f": {detail}" if detail else ""

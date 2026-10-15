@@ -243,7 +243,9 @@ def test_apply_endpoint_rejects_stale_plan_without_mutation(tmp_path: Path) -> N
 
     assert plan["can_apply"] is True
     assert response.status_code == 409
-    assert response.json()["detail"] == "plan is stale"
+    detail = response.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "WUD's list of pending updates changed since the review" in detail
     assert " pull " not in _fake_docker_calls(fake_root)
 
 
@@ -431,7 +433,9 @@ def test_apply_endpoint_rejects_changed_tag_override_as_stale(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "plan is stale"
+    detail = response.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "The planned changes for stack stack changed" in detail
     assert " pull " not in _fake_docker_calls(fake_root)
 
 
@@ -476,3 +480,43 @@ def test_apply_endpoint_rejects_concurrent_jobs(tmp_path: Path) -> None:
     assert second.status_code == 409
     assert second.json()["detail"] == "an apply job is already running"
     assert job["status"] == "success"
+
+
+def test_apply_reuses_review_registry_check_for_unchanged_plan(
+    tmp_path: Path,
+) -> None:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **fake_env,
+        },
+    )
+    wud_file = tmp_path / "state" / "images.todo"
+    wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
+    _make_fake_stack(
+        tmp_path,
+        fake_root,
+        "stack",
+        [("app", "repo/app:1.0", "cid-app")],
+    )
+    headers = _csrf_headers(client)
+    request = {"line_numbers": [1], "allow_tag_updates": True}
+    plan = client.post("/api/v1/plans", json=request, headers=headers).json()
+    reviewed_checks = _fake_docker_calls(fake_root).count("manifest inspect repo/app:2.0")
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={**request, "plan_id": plan["plan_id"], "confirmation": "apply"},
+        headers=headers,
+    )
+    job = _wait_apply_job(client, response.json()["job_id"])
+
+    assert response.status_code == 202
+    assert job["status"] == "success"
+    assert reviewed_checks == 1
+    # The apply-time recheck reuses the review's successful lookup; only the
+    # background job's own preflight asks the registry again.
+    assert _fake_docker_calls(fake_root).count("manifest inspect repo/app:2.0") == 2

@@ -867,7 +867,9 @@ def test_scoped_apply_mutates_only_the_selected_stack(
     assert plan_response.status_code == 200
     assert [stack["name"] for stack in plan["stacks"]] == ["active"]
     assert stale_apply.status_code == 409
-    assert stale_apply.json()["detail"] == "plan is stale"
+    detail = stale_apply.json()["detail"]
+    assert detail.startswith("plan is stale: ")
+    assert "no longer match WUD's current pending list (details: selection for line 1 is stale" in detail
     assert apply_response.status_code == 202
     assert job["status"] == "success"
     assert job["selected_line_numbers"] == [1]

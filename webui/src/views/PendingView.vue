@@ -273,6 +273,9 @@ const {
   digestPinLabelApprovalIssues,
   mutationDisabledMessage,
   applyBlockedReason,
+  markPlanStale,
+  staleApplyReason,
+  updateIntent,
   mutationStateLabel,
   mutationStateType,
   pendingApplyTourDetail,
@@ -402,11 +405,14 @@ const {
   closePreflightModal,
   confirmApply,
   loadPendingAndReleaseNotes,
+  rebuildNotice,
+  rebuildStalePlan,
   retryPendingLoad,
   showPreflightModal,
   startSelectedUpdate,
   startStackUpdate,
 } = usePendingPlanActions({
+  allStackGroups: rawStackGroups,
   applyDisabled,
   applyJobSnapshot,
   applyPlanPayload,
@@ -414,6 +420,7 @@ const {
   createApplyJobSnapshot,
   focusApplyJobPanel,
   lineNumbersHaveTagUpdates,
+  markPlanStale,
   selectedSelections,
   selectedUpdateContext,
   stackGroups,
@@ -421,6 +428,7 @@ const {
   subscribeApplyJob,
   tagOverrideErrorForLines,
   tagOverridesForLines,
+  updateIntent,
 });
 
 clearPreflightHandler = clearPreflight;
@@ -505,6 +513,9 @@ onBeforeUnmount(() => {
   <section class="content-stack">
     <n-alert v-if="(updates.error || runs.error)" type="error">
       {{ (updates.error || runs.error) }}
+    </n-alert>
+    <n-alert v-if="rebuildNotice && !showPreflightModal" type="info">
+      {{ rebuildNotice }}
     </n-alert>
     <n-alert v-if="settings.pendingSafetyCueError" type="warning">
       Pending safety cues are unavailable: {{ settings.pendingSafetyCueError }}
@@ -863,6 +874,8 @@ onBeforeUnmount(() => {
       :loading="updates.loading"
       :mutation-disabled-message="mutationDisabledMessage"
       :apply-blocked-reason="applyBlockedReason"
+      :stale-apply-reason="staleApplyReason"
+      :rebuild-notice="rebuildNotice"
       :plan-actions="planActions"
       :plan-alert-type="planAlertType"
       :plan-digest-pin-label-rewrites="planDigestPinLabelRewrites"
@@ -889,6 +902,7 @@ onBeforeUnmount(() => {
       @approve-tag-stream-label-rewrite="approveTagStreamLabelRewrite"
       @choose-tag-stream="chooseTagStream"
       @close="closePreflightModal"
+      @rebuild="rebuildStalePlan"
     />
 
     <PendingReleaseNotificationModal

@@ -377,6 +377,11 @@ class CommandRunner:
             raise CommandError(result)
         return result
 
+    def environment_key(self) -> tuple[tuple[str, str], ...] | None:
+        """Hashable identity of this runner's base environment overrides."""
+
+        return None if self._env is None else tuple(sorted(self._env.items()))
+
     def _merged_env(self, env: Mapping[str, str] | None) -> dict[str, str] | None:
         if self._env is None and env is None:
             return None

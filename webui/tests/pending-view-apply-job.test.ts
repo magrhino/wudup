@@ -105,6 +105,17 @@ async function previewAndApplyFirstUpdate(
   await flushPromises();
 }
 
+function findButton(
+  wrapper: { findAll: (selector: string) => Array<{ text: () => string }> },
+  text: string,
+) {
+  const button = wrapper.findAll("button").find((candidate) => candidate.text().includes(text));
+  if (!button) {
+    throw new Error(`Missing button: ${text}`);
+  }
+  return button as ReturnType<ReturnType<typeof mountPendingView>["find"]>;
+}
+
 describe("pending view apply jobs", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -304,6 +315,207 @@ describe("pending view apply jobs", () => {
     );
     expect(showOutputButton.attributes("aria-expanded")).toBe("true");
     expect(wrapper.find(".batch-action-bar").text()).toContain("Select updates to review");
+  });
+
+  function pendingWithServices(
+    entries: {
+      line_no: number;
+      raw: string;
+      services: string[];
+      runtime_state?: "running" | "not-running";
+    }[],
+  ) {
+    const items = entries.map(({ line_no, raw }) => pendingItem({ line_no, raw }));
+    return {
+      ...pendingResponse(items),
+      grouping: pendingGrouping(
+        entries.map(({ line_no, raw, services, runtime_state }) =>
+          pendingGroupedItem({
+            ...pendingItem({ line_no, raw }),
+            services,
+            ...(runtime_state ? { runtime_state } : {}),
+          }),
+        ),
+      ),
+    };
+  }
+
+  function mountStalePlan(rebuiltPending: ReturnType<typeof pendingWithServices>) {
+    const { pinia, updates } = setupStores(true);
+    updates.pending = pendingWithServices([
+      { line_no: 1, raw: "repo/app:1.0 sha256=abc", services: ["app"] },
+      { line_no: 2, raw: "repo/worker:1.0 sha256=def", services: ["worker"] },
+    ]);
+    let wudChanged = false;
+    const loadPending = vi.spyOn(updates, "loadPending").mockImplementation(async () => {
+      if (wudChanged) {
+        updates.plan = null;
+        updates.pending = rebuiltPending;
+      }
+    });
+    vi.spyOn(updates, "loadReleaseNotes").mockResolvedValue();
+    vi.spyOn(updates, "refreshReleaseNotes").mockResolvedValue();
+    const [stack] = planResponse().stacks;
+    const reviewedPlan = planResponse({
+      stacks: [
+        {
+          ...stack,
+          lines: [
+            stack.lines[0],
+            { ...stack.lines[0], line_no: 2, raw: "repo/worker:1.0", service: "worker" },
+          ],
+        },
+      ],
+    });
+    const createPlan = vi.spyOn(updates, "createPlan").mockImplementation(async () => {
+      updates.plan =
+        createPlan.mock.calls.length > 1
+          ? planResponse({ plan_id: "plan-rebuilt" })
+          : reviewedPlan;
+    });
+    const applyPlan = vi.spyOn(updates, "applyPlan").mockImplementation(async () => {
+      if (wudChanged) {
+        const job = applyJobResponse();
+        updates.setApplyJob(job);
+        return job;
+      }
+      wudChanged = true;
+      updates.error =
+        "plan is stale: WUD no longer reports these selected updates: repo/worker:1.0. " +
+        "Review the plan again before applying.";
+      throw new ApiError(409, updates.error);
+    });
+    const wrapper = mountPendingView(pinia);
+    return { applyPlan, createPlan, loadPending, updates, wrapper };
+  }
+
+  it("keeps a stale plan open with the reason and rebuilds it for the same services", async () => {
+    const { applyPlan, createPlan, loadPending, updates, wrapper } = mountStalePlan(
+      pendingWithServices([
+        { line_no: 1, raw: "repo/other:1.0 sha256=999", services: ["other"] },
+        { line_no: 2, raw: "repo/app:1.0 sha256=new", services: ["app"] },
+      ]),
+    );
+    mockApplyJobStream();
+    const dialog = () => wrapper.find('[role="dialog"]');
+
+    await findButton(wrapper, "Review media plan").trigger("click");
+    await flushPromises();
+    expect(createPlan.mock.calls[0][4]).toEqual([
+      { line_no: 1, selection_id: "selection-1" },
+      { line_no: 2, selection_id: "selection-2" },
+    ]);
+    await findButton(dialog(), "Apply 1 update").trigger("click");
+    await flushPromises();
+
+    expect(applyPlan).toHaveBeenCalledTimes(1);
+    expect(updates.error).toBe("");
+    expect(dialog().find("#apply-blocked-reason").text()).toBe(
+      "This plan is out of date. WUD no longer reports these selected updates: " +
+        "repo/worker:1.0. Review the plan again before applying.",
+    );
+    expect(
+      dialog().findAll("button").some((button) => button.text().includes("Apply 1 update")),
+    ).toBe(false);
+
+    await findButton(dialog(), "Rebuild plan").trigger("click");
+    await flushPromises();
+
+    expect(loadPending).toHaveBeenLastCalledWith({ freshAfterCurrent: true });
+    // Line numbers shifted, so the reviewed app service is found again on its
+    // new line, and the worker that WUD no longer reports is left out.
+    expect(createPlan).toHaveBeenCalledTimes(2);
+    expect(createPlan.mock.calls[1][4]).toEqual([
+      { line_no: 2, selection_id: "selection-2" },
+    ]);
+    expect(updates.plan?.plan_id).toBe("plan-rebuilt");
+    expect(dialog().text()).toContain(
+      "WUD no longer reports a pending update for media/worker, so the rebuilt plan leaves it out.",
+    );
+    expect(dialog().find("#apply-blocked-reason").exists()).toBe(false);
+    expect(findButton(dialog(), "Apply 1 update").attributes("disabled")).toBeUndefined();
+
+    await findButton(dialog(), "Apply 1 update").trigger("click");
+    await flushPromises();
+
+    expect(applyPlan).toHaveBeenCalledTimes(2);
+    expect(dialog().exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("the rebuilt plan leaves");
+  });
+
+  it("rebuilds reviewed services that are stopped and hidden from the queue", async () => {
+    const { createPlan, wrapper } = mountStalePlan(
+      pendingWithServices([
+        { line_no: 1, raw: "repo/app:1.0 sha256=new", services: ["app"] },
+        {
+          line_no: 2,
+          raw: "repo/worker:1.0 sha256=def",
+          services: ["worker"],
+          runtime_state: "not-running",
+        },
+      ]),
+    );
+    const dialog = () => wrapper.find('[role="dialog"]');
+
+    await findButton(wrapper, "Review media plan").trigger("click");
+    await flushPromises();
+    await findButton(dialog(), "Apply 1 update").trigger("click");
+    await flushPromises();
+    await findButton(dialog(), "Rebuild plan").trigger("click");
+    await flushPromises();
+
+    expect(createPlan.mock.calls[1][4]).toEqual([
+      { line_no: 1, selection_id: "selection-1" },
+      { line_no: 2, selection_id: "selection-2" },
+    ]);
+    expect(dialog().text()).not.toContain("no longer reports");
+  });
+
+  it("keeps a stale plan blocked when a metadata refresh restores the same plan", async () => {
+    const { updates, wrapper } = mountStalePlan(
+      pendingWithServices([
+        { line_no: 1, raw: "repo/app:1.0 sha256=new", services: ["app"] },
+      ]),
+    );
+    const dialog = () => wrapper.find('[role="dialog"]');
+
+    await findButton(wrapper, "Review media plan").trigger("click");
+    await flushPromises();
+    await findButton(dialog(), "Apply 1 update").trigger("click");
+    await flushPromises();
+    const stalePlan = updates.plan;
+    updates.plan = null;
+    await flushPromises();
+    updates.plan = stalePlan;
+    await flushPromises();
+
+    expect(dialog().find("#apply-blocked-reason").text()).toContain("This plan is out of date.");
+    expect(findButton(dialog(), "Rebuild plan").exists()).toBe(true);
+    expect(
+      dialog().findAll("button").some((button) => button.text().includes("Apply 1 update")),
+    ).toBe(false);
+  });
+
+  it("closes the stale review and explains when none of its updates are still pending", async () => {
+    const { createPlan, wrapper } = mountStalePlan(
+      pendingWithServices([
+        { line_no: 1, raw: "repo/other:1.0 sha256=999", services: ["other"] },
+      ]),
+    );
+
+    await findButton(wrapper, "Review media plan").trigger("click");
+    await flushPromises();
+    await findButton(wrapper.find('[role="dialog"]'), "Apply 1 update").trigger("click");
+    await flushPromises();
+    await findButton(wrapper.find('[role="dialog"]'), "Rebuild plan").trigger("click");
+    await flushPromises();
+
+    expect(createPlan).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(
+      "WUD no longer reports a pending update for media/app, media/worker, so the rebuilt plan " +
+        "leaves them out.",
+    );
   });
 
   it("refreshes api-backed pending reads after successful apply without a second rescan", async () => {

@@ -553,6 +553,10 @@ export const useUpdatesStore = defineStore("updates", () => {
     plan.value = null;
   }
 
+  function clearError(): void {
+    error.value = "";
+  }
+
   async function reloadPending(): Promise<void> {
     plan.value = null;
     setPending(await webApi.pending());
@@ -883,6 +887,7 @@ export const useUpdatesStore = defineStore("updates", () => {
     securityScanFor,
     createPlan,
     rescanPending,
+    clearError,
     clearPlan,
     applyPlan,
     clearApplyJob,
