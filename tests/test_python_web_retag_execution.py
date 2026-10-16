@@ -285,7 +285,7 @@ def test_retag_rollback_keeps_service_stopped_before_apply_stopped(
         line.split("\t", 1)[1] for line in calls.splitlines() if " up -d " in line
     ]
     recreate = (
-        "compose -f docker-compose.yml up -d --remove-orphans --pull never "
+        "compose -f docker-compose.yml up -d --pull never "
         "--no-build --force-recreate --no-deps"
     )
     # Apply starts the service on the new image; rollback recreates it without starting.
@@ -354,8 +354,6 @@ class _RollbackCompose:
 def _restore_mixed_stack(
     tmp_path: Path,
     compose: _RollbackCompose,
-    *,
-    remove_orphans: bool = True,
 ) -> str:
     """Roll back a stack where db was stopped and web was running before apply."""
     stack = ComposeStack(
@@ -381,7 +379,6 @@ def _restore_mixed_stack(
         "job",
         original_error="health failed",
         expected_source_hash="hash",
-        remove_orphans=remove_orphans,
     )
 
 
@@ -411,15 +408,15 @@ def test_retag_rollback_restores_mixed_stopped_and_running_services(
 
 
 @pytest.mark.usefixtures("_no_compose_restore")
-def test_retag_rollback_keeps_orphans_when_project_name_is_shared(
+def test_retag_rollback_never_removes_orphans(
     tmp_path: Path,
 ) -> None:
     compose = _RollbackCompose()
 
-    _restore_mixed_stack(tmp_path, compose, remove_orphans=False)
+    _restore_mixed_stack(tmp_path, compose)
 
-    # Both the stopped and the running service group must avoid --remove-orphans,
-    # or Compose would delete the other file set's containers.
+    # Neither service group may pass --remove-orphans, or Compose could delete
+    # another file set's containers, WUDup itself, or its Docker endpoint.
     assert [call[0] for call in compose.calls if call[0].startswith("up")] == [
         "up-no-start",
         "up",
@@ -529,7 +526,7 @@ def test_retag_rollback_reports_backup_cleanup_failure_after_services_restored(
 
 def test_retag_runtime_revalidation_without_updates_reports_no_stopped_services() -> None:
     # No approved updates means no Compose or runtime lookups are needed.
-    stopped, _remove_orphans = web_retag_apply._revalidate_retag_runtime_before_apply(
+    stopped = web_retag_apply._revalidate_retag_runtime_before_apply(
         None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         (),

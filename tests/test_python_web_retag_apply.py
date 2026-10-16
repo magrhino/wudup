@@ -74,7 +74,8 @@ def test_retag_plan_and_apply_rewrites_pulls_recreates_and_audits(
     assert "wud.tag.include=^\\d+(?:\\.\\d+)+$$" in content
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
-    assert "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate --no-deps app" in calls
+    assert "compose -f docker-compose.yml up -d --pull never --no-build --force-recreate --no-deps app" in calls
+    assert "--remove-orphans" not in calls
 
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         run = conn.execute(
@@ -439,7 +440,7 @@ def test_retag_apply_allows_explicit_inactive_start_approval(tmp_path: Path) -> 
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" in calls
     assert (
-        "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build "
+        "compose -f docker-compose.yml up -d --pull never --no-build "
         "--force-recreate --no-deps app"
     ) in calls
 
@@ -644,15 +645,6 @@ def test_retag_apply_worker_fails_closed_when_compose_files_unreadable(
     assert compose_file.read_text(encoding="utf-8") == before
     calls = _fake_docker_calls(fixture.fake_root)
     assert "compose -f docker-compose.yml pull app" not in calls
-
-
-def test_retag_runtime_revalidation_without_updates_keeps_remove_orphans() -> None:
-    _stopped, remove_orphans = web_retag_apply._revalidate_retag_runtime_before_apply(
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        (),
-    )
-    assert remove_orphans is True
 
 
 def test_retag_apply_worker_rechecks_effective_project_before_mutation(
@@ -1211,7 +1203,7 @@ def test_retag_apply_unpauses_before_rollback_when_pause_mode_up_fails(
     assert job["status"] == "failure"
     assert (compose_dir / "docker-compose.yml").read_text(encoding="utf-8") == before
     calls = _fake_docker_calls(fixture.fake_root).splitlines()
-    up_call = "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --force-recreate --no-deps app"
+    up_call = "compose -f docker-compose.yml up -d --pull never --no-build --force-recreate --no-deps app"
 
     def call_index(needle: str, *, start: int = 0) -> int:
         return next(

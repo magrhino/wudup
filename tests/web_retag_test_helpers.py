@@ -131,8 +131,11 @@ def _make_retag_fixture(
     label_value: str = "^latest$$",
     resolved_tag: str = "2.0",
     retag_digest_pins: bool = False,
+    docker_host: str | None = None,
 ) -> _RetagFixture:
     fake_env, fake_root = _fake_docker_env(tmp_path)
+    if docker_host is not None:
+        fake_env["DOCKER_HOST"] = docker_host
     client = _client(
         tmp_path,
         {

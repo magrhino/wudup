@@ -132,7 +132,7 @@ def test_retag_plan_accepts_duplicate_service_keys_with_target_ids(
     assert apply_response.status_code == 202
     job = _wait_apply_job(client, apply_response.json()["job_id"])
     assert job["status"] == "success"
-    # Both stacks share the "stack" project, so --remove-orphans would let each
+    # Both stacks share the "stack" project; --remove-orphans would let each
     # recreate delete the other stack's containers.
     up_calls = [
         line for line in _fake_docker_calls(fake_root).splitlines()
