@@ -102,9 +102,14 @@ def test_inventory_includes_compose_service_without_wud(
         ("16", r"^16$", "exact-tag", ""),
         ("16-alpine", r"^16-alpine$", "exact-tag", ""),
         ("v1.36.2", r"^v1\.36\.2$", "frozen", r"^v\d+(?:\.\d+)+$"),
-        ("2.33.5-distroless", r"^2\.33\.5-distroless$", "frozen", r"^\d+\.\d+\.\d+-distroless$"),
+        ("2.33.5-distroless", r"^2\.33\.5-distroless$", "frozen", r"^\d+(?:\.\d+)+-distroless$"),
         ("2.7-alpine", r"^2\.7-alpine$", "frozen", r"^2(?:\.\d+)+-alpine$"),
-        ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
+        ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("10.11.11ubu2604-ls43", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$", "custom", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("12.2ubu2604-ls54", r"^12\.2ubu2604-ls54$", "frozen", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("1.0beta", r"^1\.0beta$", "frozen", r"^\d+(?:\.\d+)+beta$"),
+        ("v1.2rc", r"^v1\.2rc$", "frozen", r"^v\d+(?:\.\d+)+rc$"),
+        ("2026-07-24rc", r"^2026-07-24rc$", "exact-tag", ""),
         ("2026-07-24", r"^2026-07-24$", "frozen", r"^\d+-\d+-\d+$"),
         ("2026-07-24-r1", r"^2026-07-24-r1$", "frozen", r"^\d+-\d+-\d+-r\d+$"),
         ("2026-06-07-b2", r"^2026-06-07-b2$", "frozen", r"^\d+-\d+-\d+-b\d+$"),
@@ -345,6 +350,33 @@ def test_alpine_repair_preview_accepts_major_pinned_suggestion(tmp_path: Path) -
     assert compose_path.read_bytes() == original
 
 
+def test_three_part_locked_suffixed_rule_repairs_to_flexible_suggestion(tmp_path: Path) -> None:
+    client, _fake_root, compose_path = _tracking_fixture(
+        tmp_path, tag="10.11.11ubu2604-ls43", regex=r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"
+    )
+    original = compose_path.read_bytes()
+    item = client.get("/api/v1/tracked-containers").json()["items"][0]
+    assert item["tracking_health"] == "custom"
+    assert item["suggested_regex"] == r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"
+    response = client.post(
+        "/api/v1/tracking-repairs",
+        json={"target_id": item["target_id"], "regex": item["suggested_regex"]},
+        headers=_csrf_headers(client),
+    )
+    assert response.status_code == 200
+    assert response.json()["can_apply"] is True
+    assert compose_path.read_bytes() == original
+
+
+def test_flexible_suffixed_rule_counts_as_version_pattern() -> None:
+    # The fake Compose config mangles list labels containing ":", so check health directly.
+    tag = "10.11.11ubu2604-ls43"
+    suggested = web_tracking._suggested_regex(tag, f"repo/app:{tag}")
+    assert suggested == r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"
+    health, _detail, _suggested = web_tracking._tracking_health(f"repo/app:{tag}", tag, suggested, suggested)
+    assert health == "version-pattern"
+
+
 def test_date_release_repair_preview_accepts_suggestion(tmp_path: Path) -> None:
     client, _fake_root, compose_path = _tracking_fixture(
         tmp_path, tag="2026-07-24-r1", regex=r"^2026-07-24-r1$"
@@ -366,6 +398,7 @@ def test_date_release_repair_preview_accepts_suggestion(tmp_path: Path) -> None:
     ("tag", "release_shaped"),
     [("v1.2", True), ("1.2.3", True), ("v1.2.3rc", True),
      ("v1.2.3..foo", True), ("v1.2._foo", False), ("latest", False),
+     ("12.2ubu2604-ls54", True), ("v1.2rc", True),
      ("2026-07-24", True), ("2026-07-24-r1", True), ("2026-07-24-b2", True),
      ("2026-07-245", False), ("2026-7-24", False), ("20260724", False)],
 )
