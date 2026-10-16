@@ -276,3 +276,77 @@ def test_scope_fails_closed_when_wudup_identity_lookup_fails() -> None:
 
     with pytest.raises(RetagScopeBlocked, match=r"Could not verify the WUDup container"):
         validate_retag_recreate_scope(settings, compose, docker, [(stack, ("app",))])
+
+
+def test_scope_blocks_proxy_reached_through_published_host_port() -> None:
+    stack = _stack(("socket-proxy", "repo/socket-proxy:1"))
+    compose = _FakeCompose({"stack": ["cid-proxy"]})
+    docker = _FakeDocker(dns={"cid-proxy": {
+        "Id": "cid-proxy",
+        "Name": "/stack-socket-proxy-1",
+        "Service": "socket-proxy",
+        "Networks": {"stack": {"IPAddress": "172.18.0.5"}},
+        "Ports": {"2375/tcp": [{"HostIp": "0.0.0.0", "HostPort": "2375"}]},
+    }})
+
+    with pytest.raises(RetagScopeBlocked, match=r"socket-proxy, which serves"):
+        validate_retag_recreate_scope(
+            _settings("tcp://192.168.1.10:2375"), compose, docker,
+            [(stack, ("socket-proxy",))],
+        )
+
+
+def test_scope_blocks_proxy_sharing_provider_network() -> None:
+    stack = _stack(("socket-proxy", "repo/socket-proxy:1"))
+    compose = _FakeCompose({"stack": ["cid-proxy"]})
+    docker = _FakeDocker(dns={
+        "cid-proxy": {
+            "Id": "cid-proxy", "Name": "/stack-socket-proxy-1", "Service": "socket-proxy",
+            "Networks": {}, "NetworkMode": "container:cid-vpn",
+        },
+        "cid-vpn": {
+            "Id": "cid-vpn", "Name": "/vpn-gateway-1",
+            "Networks": {"wud": {"Aliases": ["vpn"], "IPAddress": "172.18.0.7"}},
+        },
+    })
+
+    with pytest.raises(RetagScopeBlocked, match=r"socket-proxy, which serves"):
+        validate_retag_recreate_scope(
+            _settings("tcp://vpn:2375"), compose, docker, [(stack, ("socket-proxy",))],
+        )
+
+
+def test_scope_resolves_endpoint_once_and_only_when_checked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def resolve(host: str) -> frozenset[str]:
+        calls.append(host)
+        return frozenset({"172.18.0.5"})
+
+    monkeypatch.setattr("wudup.container_identity.resolve_host_addresses", resolve)
+    idle = _stack(("app", "repo/app:1"))
+    settings = _settings("tcp://socket-proxy:2375")
+
+    validate_retag_recreate_scope(settings, _FakeCompose(), _FakeDocker(), [(idle, ("app",))])
+    assert calls == []
+
+    other = ComposeStack(
+        index=1,
+        directory=Path("/srv/other"),
+        file="docker-compose.yml",
+        name="other",
+        images=("repo/api:1",),
+        service_images=(ServiceImage("api", "repo/api:1"),),
+    )
+    compose = _FakeCompose({"stack": ["cid-app"], "other": ["cid-api"]})
+    docker = _FakeDocker(dns={
+        "cid-app": {"Id": "cid-app", "Name": "/stack-app-1", "Networks": {}},
+        "cid-api": {"Id": "cid-api", "Name": "/other-api-1", "Networks": {}},
+    })
+
+    validate_retag_recreate_scope(
+        settings, compose, docker, [(idle, ("app",)), (other, ("api",))],
+    )
+    assert calls == ["socket-proxy"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +15,7 @@ from .container_identity import (
     container_serves_docker_endpoint,
     docker_endpoint,
     network_mode_container,
+    resolve_docker_endpoint,
 )
 from .images import image_tag
 from .self_update import is_self_update_target
@@ -84,6 +86,15 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
     endpoint = docker_endpoint(runner.environ)
     if not protect_self and endpoint is None:
         return True
+
+    @functools.cache
+    def resolved_endpoint() -> DockerEndpoint:
+        # A slow resolver only delays runs that have a container to check.
+        if endpoint is None:
+            # Raised inside the guard's lookup handler, so the stack is blocked.
+            raise ValueError("DOCKER_HOST is not a network endpoint")
+        return resolve_docker_endpoint(endpoint)
+
     protected_id = ""
     identity_error = ""
     if runner.options.protected_container:
@@ -146,7 +157,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
             if endpoint is not None and not message and not protected_services:
                 try:
                     endpoint_services = _docker_endpoint_services(
-                        runner.docker, container_ids, endpoint,
+                        runner.docker, container_ids, resolved_endpoint,
                     )
                 except (CommandError, TypeError, ValueError):
                     message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
@@ -177,9 +188,9 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
 def _docker_endpoint_services(
     docker: Any,
     container_ids: Sequence[str],
-    endpoint: DockerEndpoint,
+    endpoint: Callable[[], DockerEndpoint],
 ) -> set[str]:
-    """Return services of scoped containers that may serve ``endpoint``.
+    """Return services of scoped containers that may serve ``endpoint()``.
 
     A container that shares another container's network (``network_mode``) is
     reached through that container's names, addresses, and published ports.
@@ -195,7 +206,8 @@ def _docker_endpoint_services(
     services: set[str] = set()
     for container_id in container_ids:
         details = inspect(container_id)
-        if container_serves_docker_endpoint(_network_owner_details(details, inspect), endpoint):
+        network_details = _network_owner_details(details, inspect)
+        if container_serves_docker_endpoint(network_details, endpoint()):
             service = details.get("Service")
             services.add(service if isinstance(service, str) and service else container_id)
     return services

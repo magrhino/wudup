@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 from tests.web_test_helpers import _fake_docker_env, _wait_apply_job
 
-from wudup.container_identity import docker_endpoint
+from wudup.container_identity import docker_endpoint, resolve_docker_endpoint
 
 
 class _Response:
@@ -47,7 +47,8 @@ def test_fake_docker_host_is_not_resolved(tmp_path) -> None:
 
     with mock.patch("socket.getaddrinfo", side_effect=AssertionError("real DNS lookup")):
         endpoint = docker_endpoint(env)
+        assert endpoint is not None
+        endpoint = resolve_docker_endpoint(endpoint)
 
-    assert endpoint is not None
     assert endpoint.host == "docker"
     assert endpoint.addresses == frozenset()

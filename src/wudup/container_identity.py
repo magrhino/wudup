@@ -6,7 +6,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -62,8 +62,8 @@ _NETWORK_MODE_CONTAINER_PREFIX = "container:"
 class DockerEndpoint:
     """Where a network ``DOCKER_HOST`` reaches Docker, as seen from WUDup.
 
-    ``addresses`` holds the IP addresses ``host`` resolved to; it is empty when
-    the host could not be resolved.
+    ``addresses`` holds the IP addresses ``host`` resolved to; it is empty until
+    ``resolve_docker_endpoint`` runs, or when the host could not be resolved.
     """
 
     host: str
@@ -100,12 +100,18 @@ def docker_endpoint_host(environ: Mapping[str, str]) -> str:
 
 
 def docker_endpoint(environ: Mapping[str, str]) -> DockerEndpoint | None:
-    """Return the network ``DOCKER_HOST`` endpoint, or None for local sockets."""
+    """Return the unresolved network ``DOCKER_HOST`` endpoint, or None for local sockets."""
 
     host, port = _split_docker_host(environ)
     if not host:
         return None
-    return DockerEndpoint(host=host, port=port, addresses=resolve_host_addresses(host))
+    return DockerEndpoint(host=host, port=port)
+
+
+def resolve_docker_endpoint(endpoint: DockerEndpoint) -> DockerEndpoint:
+    """Return ``endpoint`` with the addresses its host resolves to here."""
+
+    return replace(endpoint, addresses=resolve_host_addresses(endpoint.host))
 
 
 def resolve_host_addresses(host: str) -> frozenset[str]:

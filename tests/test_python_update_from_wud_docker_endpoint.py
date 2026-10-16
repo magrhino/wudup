@@ -18,6 +18,7 @@ from wudup.container_identity import (
     container_serves_docker_endpoint,
     docker_endpoint,
     docker_endpoint_host,
+    resolve_docker_endpoint,
     resolve_host_addresses,
 )
 
@@ -96,6 +97,30 @@ class DockerEndpointHostTests(unittest.TestCase):
                 self.assertEqual(endpoint.port, expected)
         self.assertIsNone(docker_endpoint({"DOCKER_HOST": "unix:///var/run/docker.sock"}))
 
+    def test_docker_endpoint_resolves_only_on_request(self) -> None:
+        with mock.patch(
+            "wudup.container_identity.resolve_host_addresses",
+            return_value=frozenset({"172.18.0.5"}),
+        ) as resolver:
+            endpoint = docker_endpoint({"DOCKER_HOST": "tcp://socket-proxy:2375"})
+            self.assertIsNotNone(endpoint)
+            self.assertEqual(endpoint.addresses, frozenset())
+            resolver.assert_not_called()
+
+            resolved = resolve_docker_endpoint(endpoint)
+
+        resolver.assert_called_once_with("socket-proxy")
+        self.assertEqual(resolved, DockerEndpoint("socket-proxy", 2375, frozenset({"172.18.0.5"})))
+
+    def test_ipv6_only_container_address_serves_endpoint(self) -> None:
+        details = {"Networks": {"v6": {"IPAddress": "", "GlobalIPv6Address": "FD00:0::5"}}}
+        self.assertTrue(container_serves_docker_endpoint(
+            details, DockerEndpoint("socket-proxy", 2375, frozenset({"fd00::5"})),
+        ))
+        self.assertFalse(container_serves_docker_endpoint(
+            details, DockerEndpoint("socket-proxy", 2375, frozenset({"fd00::6"})),
+        ))
+
     def test_resolve_host_addresses_normalizes_and_tolerates_failure(self) -> None:
         infos = [
             (2, 1, 6, "", ("172.18.0.5", 0)),
@@ -157,7 +182,7 @@ class UpdateFromWudDockerEndpointTests(UpdateFromWudRunnerTestCase):
             "wudup.container_identity.resolve_host_addresses",
             side_effect=lambda host: self.resolved.get(host, frozenset()),
         )
-        resolver.start()
+        self.resolver = resolver.start()
         self.addCleanup(resolver.stop)
 
     def _write_details(self, container_id: str, **details: object) -> None:
@@ -480,6 +505,97 @@ class UpdateFromWudDockerEndpointTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(result, 1)
         self.assertEqual(runner.failures[0].reason, "docker-endpoint-recreate-blocked")
         self.assertNotRegex(self.calls(), MUTATION_CALLS)
+
+    def test_network_mode_chain_within_hop_limit_is_followed(self) -> None:
+        self._endpoint_stack(docker_host="tcp://vpn:2375", proxy_details={
+            "Name": "/wud-socket-proxy-1", "Service": "socket-proxy",
+            "Networks": {}, "NetworkMode": "container:hop-1",
+        })
+        for hop in range(1, 5):
+            self._write_details(
+                f"hop-{hop}", Name=f"/hop-{hop}", Networks={},
+                NetworkMode=f"container:hop-{hop + 1}",
+            )
+        self._write_details(
+            "hop-5", Name="/vpn-gateway-1",
+            Networks={"wud": {"Aliases": ["vpn"], "IPAddress": "172.18.0.7"}},
+        )
+        self.wud_file.write_text(f"{PROXY_IMAGE}\n")
+
+        self._assert_proxy_blocked(self.make_runner(db_path=self.db_path))
+
+    def test_network_mode_chain_past_hop_limit_fails_closed(self) -> None:
+        self._endpoint_stack(docker_host="tcp://vpn:2375", proxy_details={
+            "Name": "/wud-socket-proxy-1", "Service": "socket-proxy",
+            "Networks": {}, "NetworkMode": "container:hop-1",
+        })
+        for hop in range(1, 6):
+            self._write_details(
+                f"hop-{hop}", Name=f"/hop-{hop}", Networks={},
+                NetworkMode=f"container:hop-{hop + 1}",
+            )
+        self._write_details(
+            "hop-6", Name="/vpn-gateway-1",
+            Networks={"wud": {"Aliases": ["vpn"], "IPAddress": "172.18.0.7"}},
+        )
+        self.wud_file.write_text(f"{PROXY_IMAGE}\n")
+        runner = self.make_runner(db_path=self.db_path)
+
+        result, stderr = self._run(runner)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(runner.failures[0].reason, "docker-endpoint-recreate-blocked")
+        self.assertIn("Could not check whether this update would stop the Docker endpoint", stderr)
+        self.assertNotIn("inspect hop-6", self.calls())
+        self.assertNotRegex(self.calls(), MUTATION_CALLS)
+
+    def test_configured_port_binding_alone_blocks_proxy(self) -> None:
+        self._endpoint_stack(docker_host="tcp://192.168.1.10:2375", proxy_details={
+            "Name": "/wud-socket-proxy-1",
+            "Service": "socket-proxy",
+            "Networks": {"wud": {"IPAddress": "172.18.0.5"}},
+            "Ports": None,
+            "PortBindings": {"2375/tcp": [{"HostIp": "", "HostPort": "2375"}]},
+        })
+        self.resolved = {"192.168.1.10": frozenset({"192.168.1.10"})}
+        self.wud_file.write_text(f"{PROXY_IMAGE}\n")
+
+        self._assert_proxy_blocked(self.make_runner(db_path=self.db_path))
+
+    def test_ipv6_only_proxy_address_is_blocked(self) -> None:
+        self._endpoint_stack(proxy_details={
+            "Name": "/wud-socket-proxy-1",
+            "Service": "socket-proxy",
+            "Networks": {"wud": {
+                "Aliases": [], "IPAddress": "", "GlobalIPv6Address": "fd00::5",
+            }},
+        })
+        self.resolved = {PROXY_HOST: frozenset({"fd00::5"})}
+        self.wud_file.write_text(f"{PROXY_IMAGE}\n")
+
+        self._assert_proxy_blocked(self.make_runner(db_path=self.db_path))
+
+    def test_endpoint_host_is_resolved_once_and_only_when_checked(self) -> None:
+        self.make_stack("idle", [("app", "repo/app:latest", None)])
+        self.set_image_state("repo/app:latest", "old")
+        self.set_image_after_pull("repo/app:latest", "new")
+        self._endpoint_stack()
+        self.wud_file.write_text("repo/app:latest\n")
+
+        result, stderr = self._run(self.make_runner(db_path=self.db_path))
+
+        self.assertEqual(result, 0, stderr)
+        self.resolver.assert_not_called()
+
+        self.make_stack("other", [("api", "repo/api:latest", "cid-api")])
+        self.set_image_state("repo/api:latest", "old")
+        self.set_image_after_pull("repo/api:latest", "new")
+        self.wud_file.write_text(f"{WUD_IMAGE}\nrepo/api:latest\n")
+
+        result, stderr = self._run(self.make_runner(db_path=self.db_path))
+
+        self.assertEqual(result, 0, stderr)
+        self.resolver.assert_called_once_with(PROXY_HOST)
 
     def test_same_named_service_on_another_network_is_not_blocked(self) -> None:
         # WUDup resolves the proxy name to a container on its own network, so a

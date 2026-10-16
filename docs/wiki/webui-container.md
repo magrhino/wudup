@@ -272,13 +272,16 @@ it has a network address that the `DOCKER_HOST` host resolves to from WUDup
 when it publishes the `DOCKER_HOST` port on the Docker host, which covers a
 LAN IP, `127.0.0.1`, or `host.docker.internal`. A container that shares
 another container's network with `network_mode` is checked through that
-container. Because the port is matched on its own, an unrelated service that
-publishes the same host port is also blocked. If those containers cannot be
-inspected, the update is blocked before mutation. The check does not recognize
-a proxy on the host network (`network_mode: host`) or an endpoint set through
-a Docker context; avoid selecting the proxy in those setups. Unix-socket
-`DOCKER_HOST` values skip this check, and WUD itself can still be updated
-because WUDup keeps Docker access while WUD restarts.
+container. WUDup cannot tell which container in a shared network serves the
+endpoint, so every service in the update that shares that network is blocked,
+even one whose restart would leave the proxy running. Because the port is
+matched on its own, an unrelated service that publishes the same host port is
+also blocked. In both cases, update the service from the host. If those
+containers cannot be inspected, the update is blocked before mutation. The
+check does not recognize a proxy on the host network (`network_mode: host`) or
+an endpoint set through a Docker context; avoid selecting the proxy in those
+setups. Unix-socket `DOCKER_HOST` values skip this check, and WUD itself can
+still be updated because WUDup keeps Docker access while WUD restarts.
 
 WebUI retag apply runs the same checks on the services it retags before it
 rewrites any Compose file. If a retag would recreate WUDup or the container
