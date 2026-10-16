@@ -262,6 +262,19 @@ Recreate-scope discovery also fails closed on lookup errors. Each approved
 scope is retained for execution, so a later label change cannot expand the
 services that the job stops or recreates.
 
+When `DOCKER_HOST` points WUDup at a network endpoint such as
+`tcp://socket-proxy:2375`, updates also reject a recreate scope that includes
+a running container whose name, network alias, or network address matches the
+`DOCKER_HOST` host. Stopping that container would cut WUDup off from Docker, so
+it could not finish or roll back the update; update the socket proxy from the
+host instead. If those containers cannot be inspected, the update is blocked
+before mutation. The check does not recognize an endpoint reached through a
+published host port (such as a LAN IP or `host.docker.internal`), a proxy that
+shares another container's network with `network_mode`, or an endpoint set
+through a Docker context; avoid selecting the proxy in those setups. Unix-socket
+`DOCKER_HOST` values skip this check, and WUD itself can still be updated
+because WUDup keeps Docker access while WUD restarts.
+
 WebUI self-update pulls prepare an image but do not treat `docker restart` as
 adoption. The response verifies the running container image ID after the pull
 and reports `prepared_only` until an external Compose recreate moves the

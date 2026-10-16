@@ -9,6 +9,7 @@ from typing import Any
 from . import compose_rewrite, updater_audit, updater_logging
 from .command import CommandError
 from .compose import ComposeBindMount, ComposeRuntimePortIssue, ComposeStack
+from .container_identity import container_dns_names, docker_endpoint_host
 from .images import image_tag
 from .self_update import is_self_update_target
 from .updater_digest_pin import _digest_pin_match_tag
@@ -55,8 +56,26 @@ _ComposePreflightValidator = Callable[
 ]
 
 
+_SELF_UPDATE_BLOCKED = "self-update-recreate-blocked"
+_DOCKER_ENDPOINT_BLOCKED = "docker-endpoint-recreate-blocked"
+_SELF_UPDATE_MESSAGE = (
+    "This update would stop or recreate WUDup itself. "
+    "Use the self-update action for WUDup, or update this stack from "
+    "the host. Remove it from this selection to update other services."
+)
+_DOCKER_ENDPOINT_LOOKUP_MESSAGE = (
+    "Could not check whether this update would stop the Docker endpoint "
+    "WUDup uses (DOCKER_HOST); no update was applied. Check Docker access "
+    "and the Compose configuration, then retry."
+)
+
+
 def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
-    if runner.options.protected_container is None:
+    """Block stacks whose recreate scope includes WUDup or its Docker endpoint."""
+
+    protect_self = runner.options.protected_container is not None
+    endpoint_host = docker_endpoint_host(runner.environ)
+    if not protect_self and not endpoint_host:
         return True
     protected_id = ""
     identity_error = ""
@@ -70,11 +89,15 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                 "Could not verify the WUDup container identity; no update was applied. "
                 "Check Docker access and WUD_WEB_RESTART_CONTAINER, then retry."
             )
-    records = _PreflightIssueRecords()
+    records_by_reason = {
+        _SELF_UPDATE_BLOCKED: _PreflightIssueRecords(),
+        _DOCKER_ENDPOINT_BLOCKED: _PreflightIssueRecords(),
+    }
     stacks = _stacks_to_update(matches)
     for stack in stacks:
         stack_matches = _matches_for_stack(matches, stack)
         message = identity_error
+        reason = _SELF_UPDATE_BLOCKED
         protected_services: set[str] = set()
         scope = None
         if not message:
@@ -85,46 +108,89 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                     "Could not verify the update's recreate scope; no update was applied. "
                     "Check Docker access and the Compose configuration, then retry."
                 )
+                if not protect_self:
+                    reason = _DOCKER_ENDPOINT_BLOCKED
         if scope is not None:
             services = set(runtime_services_for_scope(scope))
-            protected_services = {
-                item.service for item in stack.service_images
-                if item.service in services and is_self_update_target(item.image)
-            }
-            if protected_id:
+            if protect_self:
+                protected_services = {
+                    item.service for item in stack.service_images
+                    if item.service in services and is_self_update_target(item.image)
+                }
+            container_ids: list[str] = []
+            if protected_id or endpoint_host:
                 try:
                     container_ids = runner.compose.ps_quiet_checked(
                         stack.directory, stack.file, tuple(sorted(services)),
                         project_directory=stack.project_directory,
                     )
                 except CommandError:
-                    message = (
-                        "Could not verify whether this update includes the WUDup container; "
-                        "no update was applied. Check Docker access and the Compose "
-                        "configuration, then retry."
+                    if protected_id:
+                        message = (
+                            "Could not verify whether this update includes the WUDup "
+                            "container; no update was applied. Check Docker access and "
+                            "the Compose configuration, then retry."
+                        )
+                    else:
+                        message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
+                        reason = _DOCKER_ENDPOINT_BLOCKED
+            if protected_id and protected_id in container_ids:
+                protected_services.update(services)
+            if endpoint_host and not message and not protected_services:
+                try:
+                    endpoint_services = _docker_endpoint_services(
+                        runner, container_ids, endpoint_host,
                     )
+                except (CommandError, TypeError, ValueError):
+                    message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
+                    reason = _DOCKER_ENDPOINT_BLOCKED
                 else:
-                    if protected_id in container_ids:
-                        protected_services.update(services)
+                    if endpoint_services:
+                        protected_services = endpoint_services
+                        reason = _DOCKER_ENDPOINT_BLOCKED
+                        message = _docker_endpoint_message(endpoint_host, endpoint_services)
         if not message and not protected_services:
             runner.lifecycle.verified_update_scopes[(stack.index, _update_services(stack_matches))] = scope
             continue
-        message = f"[{stack.name}] " + (message or (
-            "This update would stop or recreate WUDup itself. "
-            "Use the self-update action for WUDup, or update this stack from "
-            "the host. Remove it from this selection to update other services."
-        ))
+        message = f"[{stack.name}] " + (message or _SELF_UPDATE_MESSAGE)
         runner.log.error(message)
         runner._progress(
             "preflight", "failure", message, stack=stack.name,
             services=tuple(sorted(protected_services)), matches=stack_matches,
         )
+        records = records_by_reason[reason]
         records.messages_by_stack[stack.index] = [message]
         records.services_by_stack[stack.index] = protected_services
-    _record_compose_preflight_failures(
-        runner, matches, stacks, records, reason="self-update-recreate-blocked",
+    for stack in stacks:
+        for reason, records in records_by_reason.items():
+            _record_compose_preflight_failures(runner, matches, (stack,), records, reason=reason)
+    return not any(records.messages_by_stack for records in records_by_reason.values())
+
+
+def _docker_endpoint_services(
+    runner: Any,
+    container_ids: Sequence[str],
+    endpoint_host: str,
+) -> set[str]:
+    """Return services of scoped containers that Docker DNS resolves as ``endpoint_host``."""
+
+    services: set[str] = set()
+    for container_id in container_ids:
+        details = runner.docker.container_dns_details(container_id)
+        if endpoint_host in container_dns_names(details):
+            service = details.get("Service")
+            services.add(service if isinstance(service, str) and service else container_id)
+    return services
+
+
+def _docker_endpoint_message(endpoint_host: str, services: Iterable[str]) -> str:
+    return (
+        f"This update would stop or recreate {', '.join(sorted(services))}, which serves "
+        f"the Docker endpoint WUDup uses (DOCKER_HOST host {endpoint_host}). WUDup would "
+        "lose Docker access and could not finish or roll back the update. Update that "
+        "service from the host instead, and remove it from this selection to update "
+        "other services."
     )
-    return not records.messages_by_stack
 
 
 def validate_tag_manifests(runner: Any, matches: Sequence[Match]) -> bool:

@@ -100,6 +100,7 @@ class FakeDockerTestCase(unittest.TestCase):
         (self.fake_root / "calls.log").write_text("", encoding="utf-8")
 
         self.env = os.environ.copy()
+        self.env.pop("DOCKER_HOST", None)
         self.env["FAKE_DOCKER_ROOT"] = str(self.fake_root)
         self.env["PATH"] = f"{self.repo_root / 'tests' / 'fakes'}:{self.env['PATH']}"
         self.env["PYTHONPATH"] = str(self.repo_root / "src")

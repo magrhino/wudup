@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from . import request_scope
@@ -13,6 +14,11 @@ IMAGE_DIGESTS_FORMAT = "{{range .RepoDigests}}{{println .}}{{end}}"
 CONTAINER_ID_FORMAT = "{{.Id}}"
 CONTAINER_IMAGE_ID_FORMAT = "{{.Image}}"
 CONTAINER_STATE_ERROR_FORMAT = "{{.State.Error}}"
+CONTAINER_DNS_FORMAT = (
+    '{"Id":{{json .Id}},"Name":{{json .Name}},'
+    '"Service":{{json (index .Config.Labels "com.docker.compose.service")}},'
+    '"Networks":{{json .NetworkSettings.Networks}}}'
+)
 
 
 @dataclass(frozen=True)
@@ -151,6 +157,17 @@ class DockerCli:
     def container_state_error(self, container: str) -> str:
         """Return the error from the container's last failed start, if any."""
         return _first_nonblank(self.inspect(container, CONTAINER_STATE_ERROR_FORMAT))
+
+    def container_dns_details(self, container: str) -> dict[str, object]:
+        """Return the container's name, Compose service, and network DNS details.
+
+        Raises ``CommandError`` when Docker fails and ``ValueError`` or ``TypeError``
+        when the output is not the expected JSON object.
+        """
+        details = json.loads(_first_nonblank(self.inspect(container, CONTAINER_DNS_FORMAT)))
+        if not isinstance(details, dict):
+            raise TypeError("unexpected docker inspect output")
+        return details
 
     def try_container_image_id(self, container: str) -> str:
         return _first_nonblank(
