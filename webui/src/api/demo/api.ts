@@ -26,7 +26,7 @@ async function rejectStaticDemoMutationAsync(): Promise<never> {
 }
 
 function demoSuggestedTrackingRegex(tag: string): string {
-  const dottedRelease = /^v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+  const dottedRelease = /^v?\d+(?:\.\d+)+(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*|[A-Za-z][A-Za-z0-9._-]*)?$/;
   const dateRelease = /^\d{4}-\d{2}-\d{2}(?:[-_.][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
   if (!dottedRelease.test(tag) && !dateRelease.test(tag)) return "";
   const alpineVersion = /^(v?\d+)(?:\.\d+)+-alpine$/.exec(tag);
@@ -36,9 +36,10 @@ function demoSuggestedTrackingRegex(tag: string): string {
   }
   const leadingVersion = /^v?\d+(?:\.\d+)+/.exec(tag)?.[0] ?? "";
   const keepPartCount = !leadingVersion || /^v?\d+\.\d+\.\d+\.\d+(?:-ls\d+)?$/.test(tag);
-  const head = keepPartCount ? "" : `${tag.startsWith("v") ? "v" : ""}\\d+(?:\\.\\d+)+`;
+  const versionPrefix = tag.startsWith("v") ? "v" : "";
+  const head = keepPartCount ? "" : String.raw`${versionPrefix}\d+(?:\.\d+)+`;
   const rest = keepPartCount ? tag : tag.slice(leadingVersion.length);
-  return `^${head}${rest.replace(/\d+/g, "\\d+").replaceAll(".", "\\.")}$`;
+  return `^${head}${rest.replace(/\d+/g, String.raw`\d+`).replaceAll(".", String.raw`\.`)}$`;
 }
 
 function demoTrackingHealth(regex: string, exact: string, suggested: string) {

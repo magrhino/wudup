@@ -23,6 +23,29 @@ describe("demo web API", () => {
     }
   });
 
+  it.each([
+    ["10.11.11ubu2604-ls43", String.raw`^\d+(?:\.\d+)+ubu\d+-ls\d+$`],
+    ["12.2ubu2604-ls54", String.raw`^\d+(?:\.\d+)+ubu\d+-ls\d+$`],
+    ["v1.6.0-ls357", String.raw`^v\d+(?:\.\d+)+-ls\d+$`],
+    ["1.2.3.4-ls5", String.raw`^\d+\.\d+\.\d+\.\d+-ls\d+$`],
+    ["1.0beta", String.raw`^\d+(?:\.\d+)+beta$`],
+    ["v1.2rc", String.raw`^v\d+(?:\.\d+)+rc$`],
+    ["2026-07-24rc", ""],
+  ])("keeps suffixed-release demo suggestion for %s aligned with the backend rule", async (tag, expected) => {
+    const api = createDemoWebApi();
+    const targets = await api.retagTargets();
+    const target = targets.items[0]!;
+    const stub = vi.spyOn(DemoApiState.prototype, "retagTargets").mockReturnValue({
+      ...targets, count: 1,
+      items: [{ ...target, current_tag: tag, label_value: tag }],
+    });
+    try {
+      expect((await api.trackedContainers()).items[0]?.suggested_regex).toBe(expected);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+
   it("keeps date-release demo suggestions aligned with the backend rule", async () => {
     const api = createDemoWebApi();
     const targets = await api.retagTargets();

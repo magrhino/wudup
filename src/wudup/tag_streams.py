@@ -132,8 +132,10 @@ def retag_tag_include_regex(tag: str) -> str:
     fragments: list[str] = []
     offset = 0
     # Let a suffixed release change its dotted-part count (e.g. LinuxServer
-    # Jellyfin 10.11.11ubu2604-ls43 -> 12.2ubu2604-ls54). Four-part tags keep
-    # their exact shape so the managed wud.tag.transform still matches them.
+    # Jellyfin 10.11.11ubu2604-ls43 -> 12.2ubu2604-ls54), like the plain dotted
+    # rule; a three-part rule may therefore also admit four-part tags. Installed
+    # four-part tags keep their exact shape so the managed wud.tag.transform
+    # still matches them.
     leading_version = _LEADING_DOTTED_VERSION_RE.match(tag)
     if leading_version is not None and not managed_wud_tag_transform(tag):
         fragments.append(rf"{leading_version.group(1)}\d+(?:\.\d+)+")

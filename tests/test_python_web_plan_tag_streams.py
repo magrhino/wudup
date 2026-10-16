@@ -661,6 +661,11 @@ def test_retag_regex_follows_suffixed_release_across_version_part_counts() -> No
         assert re.fullmatch(pattern, candidate) is None
 
 
+def test_retag_regex_three_part_suffixed_rule_admits_four_part_tags_like_plain_dotted() -> None:
+    for tag, candidate in (("1.6.0-ls357", "1.6.0.1-ls360"), ("v1.36.2", "v1.36.2.1")):
+        assert re.fullmatch(retag_tag_include_regex(tag), candidate) is not None
+
+
 def test_retag_regex_keeps_four_part_suffixed_shape_for_managed_transform() -> None:
     pattern = retag_tag_include_regex("4.0.19.2979-ls321")
     assert pattern == r"^\d+\.\d+\.\d+\.\d+-ls\d+$"

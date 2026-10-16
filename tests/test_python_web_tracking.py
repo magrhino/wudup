@@ -106,6 +106,10 @@ def test_inventory_includes_compose_service_without_wud(
         ("2.7-alpine", r"^2\.7-alpine$", "frozen", r"^2(?:\.\d+)+-alpine$"),
         ("10.11.11ubu2604-ls43", r"^10\.11\.11ubu2604-ls43$", "frozen", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
         ("10.11.11ubu2604-ls43", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$", "custom", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("12.2ubu2604-ls54", r"^12\.2ubu2604-ls54$", "frozen", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("1.0beta", r"^1\.0beta$", "frozen", r"^\d+(?:\.\d+)+beta$"),
+        ("v1.2rc", r"^v1\.2rc$", "frozen", r"^v\d+(?:\.\d+)+rc$"),
+        ("2026-07-24rc", r"^2026-07-24rc$", "exact-tag", ""),
         ("2026-07-24", r"^2026-07-24$", "frozen", r"^\d+-\d+-\d+$"),
         ("2026-07-24-r1", r"^2026-07-24-r1$", "frozen", r"^\d+-\d+-\d+-r\d+$"),
         ("2026-06-07-b2", r"^2026-06-07-b2$", "frozen", r"^\d+-\d+-\d+-b\d+$"),
@@ -394,6 +398,7 @@ def test_date_release_repair_preview_accepts_suggestion(tmp_path: Path) -> None:
     ("tag", "release_shaped"),
     [("v1.2", True), ("1.2.3", True), ("v1.2.3rc", True),
      ("v1.2.3..foo", True), ("v1.2._foo", False), ("latest", False),
+     ("12.2ubu2604-ls54", True), ("v1.2rc", True),
      ("2026-07-24", True), ("2026-07-24-r1", True), ("2026-07-24-b2", True),
      ("2026-07-245", False), ("2026-7-24", False), ("20260724", False)],
 )
