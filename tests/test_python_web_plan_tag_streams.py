@@ -618,7 +618,10 @@ def test_stream_regex_preserves_leading_v() -> None:
         ("v1.2.3", r"^v\d+(?:\.\d+)+$"),
         ("v1.36.2", r"^v\d+(?:\.\d+)+$"),
         ("1.2.3.4-ls5", r"^\d+\.\d+\.\d+\.\d+-ls\d+$"),
-        ("10.11.12ubu2404-ls44", r"^\d+\.\d+\.\d+ubu\d+-ls\d+$"),
+        ("10.11.12ubu2404-ls44", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("12.2ubu2604-ls54", r"^\d+(?:\.\d+)+ubu\d+-ls\d+$"),
+        ("v1.6.0-ls357", r"^v\d+(?:\.\d+)+-ls\d+$"),
+        ("2.33.5-distroless", r"^\d+(?:\.\d+)+-distroless$"),
         ("2026.8.3", r"^\d+(?:\.\d+)+$"),
         ("1", r"^\d+$"),
         ("2.7-alpine", r"^2(?:\.\d+)+-alpine$"),
@@ -634,6 +637,35 @@ def test_retag_regex_generalizes_numeric_parts(tag: str, expected: str) -> None:
 
 def test_retag_regex_covers_bindery_shorter_dotted_release() -> None:
     assert re.fullmatch(retag_tag_include_regex("v1.36.2"), "v1.37") is not None
+
+
+def test_retag_regex_follows_suffixed_release_across_version_part_counts() -> None:
+    pattern = retag_tag_include_regex("10.11.11ubu2604-ls43")
+    for candidate in (
+        "10.11.11ubu2604-ls47",
+        "12.0ubu2604-ls48",
+        "12.2ubu2604-ls54",
+        "12.2.1ubu2604-ls55",
+    ):
+        assert re.fullmatch(pattern, candidate) is not None
+    for candidate in (
+        "12ubu2604-ls54",
+        "12.2-ls54",
+        "12.2ubu2604",
+        "nightly-12.2ubu2604-ls54",
+        "version-12.2ubu2604-ls54",
+        "amd64-12.2ubu2604-ls54",
+        "12.2ubu2604-ls54-amd64",
+        "latest",
+    ):
+        assert re.fullmatch(pattern, candidate) is None
+
+
+def test_retag_regex_keeps_four_part_suffixed_shape_for_managed_transform() -> None:
+    pattern = retag_tag_include_regex("4.0.19.2979-ls321")
+    assert pattern == r"^\d+\.\d+\.\d+\.\d+-ls\d+$"
+    assert re.fullmatch(pattern, "4.0.20.3001-ls330") is not None
+    assert re.fullmatch(pattern, "4.1.0-ls330") is None
 
 
 @pytest.mark.parametrize("tag", ["2.7-alpine", "2.7.12-alpine"])

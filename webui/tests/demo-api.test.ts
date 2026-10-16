@@ -127,7 +127,7 @@ describe("demo web API", () => {
     expect(tracked.items.find((item) => item.service_key === "data/postgres")?.suggested_regex)
       .toBe("");
     expect(tracked.items.find((item) => item.service_key === "jarvis/task-runner")?.suggested_regex)
-      .toBe(String.raw`^\d+\.\d+\.\d+-distroless$`);
+      .toBe(String.raw`^\d+(?:\.\d+)+-distroless$`);
     expect(tracked.items.find((item) => item.service_key === "media/radarr")?.suggested_regex)
       .toBe("^\\d+(?:\\.\\d+)+$");
     expect(tracked.items.find((item) => item.service_key === "media/wudup")).toMatchObject({

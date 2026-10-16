@@ -34,7 +34,11 @@ function demoSuggestedTrackingRegex(tag: string): string {
   if (/^v?\d+(?:\.\d+)+$/.test(tag)) {
     return `^${tag.startsWith("v") ? "v" : ""}\\d+(?:\\.\\d+)+$`;
   }
-  return `^${tag.replace(/\d+/g, "\\d+").replaceAll(".", "\\.")}$`;
+  const leadingVersion = /^v?\d+(?:\.\d+)+/.exec(tag)?.[0] ?? "";
+  const keepPartCount = !leadingVersion || /^v?\d+\.\d+\.\d+\.\d+(?:-ls\d+)?$/.test(tag);
+  const head = keepPartCount ? "" : `${tag.startsWith("v") ? "v" : ""}\\d+(?:\\.\\d+)+`;
+  const rest = keepPartCount ? tag : tag.slice(leadingVersion.length);
+  return `^${head}${rest.replace(/\d+/g, "\\d+").replaceAll(".", "\\.")}$`;
 }
 
 function demoTrackingHealth(regex: string, exact: string, suggested: string) {
