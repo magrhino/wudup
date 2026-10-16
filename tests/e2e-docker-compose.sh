@@ -402,9 +402,23 @@ prepare_images(){
   run docker tag "$OLD_LOCAL_IMAGE" "$APP_IMAGE"
 }
 
+# Write the Compose file from a container, as write_volume_file does. On macOS
+# Docker VMs (seen with OrbStack), once a container has written a bind-mounted
+# file, later host-side rewrites can stay invisible to new containers for a few
+# seconds, so the updater would read the new contents cut off at the old size.
+# Writing from a container keeps every write on the updater's side of the file
+# share. The host creates the file once so it stays owned by the host user; the
+# container runs as its default user, like the updater, so rootless Docker can
+# write it, and truncating an existing file keeps that owner.
+write_stack_compose_file(){
+  [[ -e "$COMPOSE_FILE" ]] || : > "$COMPOSE_FILE"
+  docker run -i --rm -v "$STACK_DIR:$STACK_DIR" "$IMAGE" \
+    bash -c 'cat > "$1"' _ "$COMPOSE_FILE"
+}
+
 write_compose_file(){
   mkdir -p "$STACK_DIR"
-  cat > "$COMPOSE_FILE" <<YAML
+  write_stack_compose_file <<YAML
 services:
   app:
     image: ${APP_IMAGE}
@@ -418,7 +432,7 @@ YAML
 
 write_stack_recreate_compose_file(){
   mkdir -p "$STACK_DIR"
-  cat > "$COMPOSE_FILE" <<YAML
+  write_stack_compose_file <<YAML
 services:
   app:
     image: ${APP_IMAGE}
@@ -444,7 +458,7 @@ YAML
 
 write_preflight_failure_compose_file(){
   mkdir -p "$STACK_DIR/data"
-  cat > "$COMPOSE_FILE" <<YAML
+  write_stack_compose_file <<YAML
 services:
   app:
     image: ${APP_IMAGE}
@@ -455,7 +469,7 @@ YAML
 
 write_pull_policy_compose_file(){
   mkdir -p "$STACK_DIR"
-  cat > "$COMPOSE_FILE" <<YAML
+  write_stack_compose_file <<YAML
 services:
   app:
     image: ${APP_IMAGE}
@@ -470,7 +484,7 @@ YAML
 
 write_tag_rollback_compose_file(){
   mkdir -p "$STACK_DIR"
-  cat > "$COMPOSE_FILE" <<YAML
+  write_stack_compose_file <<YAML
 services:
   app:
     image: ${APP_REPO}:1.0
