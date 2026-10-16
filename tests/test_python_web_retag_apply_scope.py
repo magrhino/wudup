@@ -289,11 +289,11 @@ def test_scope_blocks_proxy_reached_through_published_host_port() -> None:
         "Ports": {"2375/tcp": [{"HostIp": "0.0.0.0", "HostPort": "2375"}]},
     }})
 
+    settings = _settings("tcp://192.168.1.10:2375")
+    stacks = [(stack, ("socket-proxy",))]
+
     with pytest.raises(RetagScopeBlocked, match=r"socket-proxy, which serves"):
-        validate_retag_recreate_scope(
-            _settings("tcp://192.168.1.10:2375"), compose, docker,
-            [(stack, ("socket-proxy",))],
-        )
+        validate_retag_recreate_scope(settings, compose, docker, stacks)
 
 
 def test_scope_blocks_proxy_sharing_provider_network() -> None:
@@ -310,10 +310,11 @@ def test_scope_blocks_proxy_sharing_provider_network() -> None:
         },
     })
 
+    settings = _settings("tcp://vpn:2375")
+    stacks = [(stack, ("socket-proxy",))]
+
     with pytest.raises(RetagScopeBlocked, match=r"socket-proxy, which serves"):
-        validate_retag_recreate_scope(
-            _settings("tcp://vpn:2375"), compose, docker, [(stack, ("socket-proxy",))],
-        )
+        validate_retag_recreate_scope(settings, compose, docker, stacks)
 
 
 def test_scope_resolves_endpoint_once_and_only_when_checked(
