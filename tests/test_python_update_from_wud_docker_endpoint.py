@@ -216,6 +216,38 @@ class UpdateFromWudDockerEndpointTests(UpdateFromWudRunnerTestCase):
         self.assertIn("Could not check whether this update would stop the Docker endpoint", stderr)
         self.assertNotRegex(self.calls(), MUTATION_CALLS)
 
+    def test_cli_scope_discovery_failure_uses_endpoint_reason(self) -> None:
+        self._endpoint_stack()
+        self.wud_file.write_text(f"{WUD_IMAGE}\n")
+        runner = self.make_runner(db_path=self.db_path)
+        update_scope = runner.lifecycle._update_scope
+        failure = CommandError(CommandResult(("docker", "compose"), None, 1))
+
+        def fail_strict_scope(*args, **kwargs):
+            if kwargs.get("strict"):
+                raise failure
+            return update_scope(*args, **kwargs)
+
+        with mock.patch.object(runner.lifecycle, "_update_scope", side_effect=fail_strict_scope):
+            result, stderr = self._run(runner)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(runner.failures[0].reason, "docker-endpoint-recreate-blocked")
+        self.assertIn("Could not verify the update's recreate scope", stderr)
+        self.assertNotRegex(self.calls(), MUTATION_CALLS)
+
+    def test_non_object_endpoint_details_fail_closed(self) -> None:
+        self._endpoint_stack()
+        (self.fake_root / "containers/cid-wud.dns.json").write_text("[]\n")
+        self.wud_file.write_text(f"{WUD_IMAGE}\n")
+        runner = self.make_runner(db_path=self.db_path)
+
+        result, _stderr = self._run(runner)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(runner.failures[0].reason, "docker-endpoint-recreate-blocked")
+        self.assertNotRegex(self.calls(), MUTATION_CALLS)
+
     def test_unreadable_endpoint_details_fail_closed(self) -> None:
         self._endpoint_stack()
         (self.fake_root / "containers/cid-wud.dns.json").write_text("not json\n")
