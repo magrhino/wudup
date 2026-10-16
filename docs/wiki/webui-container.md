@@ -280,8 +280,10 @@ also blocked. In both cases, update the service from the host. If those
 containers cannot be inspected, the update is blocked before mutation. The
 check does not recognize a proxy on the host network (`network_mode: host`) or
 an endpoint set through a Docker context; avoid selecting the proxy in those
-setups. Unix-socket `DOCKER_HOST` values skip this check, and WUD itself can
-still be updated because WUDup keeps Docker access while WUD restarts.
+setups. Unix-socket and `ssh://` `DOCKER_HOST` values skip this check, so if
+a container in the update serves an SSH endpoint, update it from the host.
+WUD itself can still be updated because WUDup keeps Docker access while WUD
+restarts.
 
 WebUI retag apply runs the same checks on the services it retags before it
 rewrites any Compose file. If a retag would recreate WUDup or the container

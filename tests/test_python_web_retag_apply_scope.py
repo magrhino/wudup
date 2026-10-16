@@ -351,3 +351,43 @@ def test_scope_resolves_endpoint_once_and_only_when_checked(
         settings, compose, docker, [(idle, ("app",)), (other, ("api",))],
     )
     assert calls == ["socket-proxy"]
+
+
+class _NonObjectInspectDocker(_FakeDocker):
+    def container_dns_details(self, container: str) -> dict[str, object]:
+        # DockerCli raises TypeError when inspect output is not a JSON object.
+        raise TypeError("unexpected docker inspect output")
+
+
+@pytest.mark.parametrize(
+    ("docker", "cause"),
+    [
+        pytest.param(
+            _FakeDocker(dns={
+                "cid-proxy": {
+                    "Id": "cid-proxy", "Name": "/stack-socket-proxy-1",
+                    "Networks": {}, "NetworkMode": "container:cid-a",
+                },
+                "cid-a": {"Id": "cid-a", "Networks": {}, "NetworkMode": "container:cid-b"},
+                "cid-b": {"Id": "cid-b", "Networks": {}, "NetworkMode": "container:cid-a"},
+            }),
+            ValueError,
+            id="network-mode-cycle",
+        ),
+        pytest.param(_NonObjectInspectDocker(), TypeError, id="non-object-inspect"),
+    ],
+)
+def test_scope_fails_closed_when_endpoint_details_are_unusable(
+    docker: _FakeDocker,
+    cause: type[Exception],
+) -> None:
+    stack = _stack(("socket-proxy", "repo/socket-proxy:1"))
+    compose = _FakeCompose({"stack": ["cid-proxy"]})
+    settings = _settings("tcp://socket-proxy:2375")
+    stacks = [(stack, ("socket-proxy",))]
+
+    with pytest.raises(RetagScopeBlocked, match=r"Could not check whether this update") as blocked:
+        validate_retag_recreate_scope(settings, compose, docker, stacks)
+
+    assert blocked.value.stack == "stack"
+    assert isinstance(blocked.value.__cause__, cause)
