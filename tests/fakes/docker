@@ -571,6 +571,16 @@ inspect_cmd(){
   target="${1:-}"
   log_call "inspect $target"
 
+  if [[ "$format" == *'.NetworkSettings.Networks'* ]]; then
+    local dns_file="$ROOT/containers/$target.dns.json"
+    if [[ -f "$dns_file" ]]; then
+      cat "$dns_file"
+    else
+      printf '{"Id":"%s","Name":"/%s","Service":"","Networks":{}}\n' "$target" "$target"
+    fi
+    return 0
+  fi
+
   if [[ "$format" == *'.Config.Labels'* ]]; then
     local labels_file="$ROOT/containers/$target.labels"
     if [[ -f "$labels_file" ]]; then
