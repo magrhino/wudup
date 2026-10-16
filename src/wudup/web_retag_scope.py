@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 
 from .command import CommandError
 from .compose import ComposeCli, ComposeStack
-from .container_identity import docker_endpoint_host
+from .container_identity import DockerEndpoint, docker_endpoint
 from .docker_cli import DockerCli
 from .self_update import is_self_update_target
 from .updater_preflight import (
@@ -47,12 +47,12 @@ def validate_retag_recreate_scope(
     ``updater_preflight.validate_self_update_scope``.
     """
     environ = settings.command_env if settings.command_env is not None else os.environ
-    endpoint_host = docker_endpoint_host(environ)
+    endpoint = docker_endpoint(environ)
     protected_id = _protected_container_id(settings, docker)
     for stack, services in stacks:
         scoped = set(services)
         _reject_self_images(stack, scoped)
-        if protected_id or endpoint_host:
+        if protected_id or endpoint is not None:
             container_ids = _scoped_container_ids(
                 compose, stack, scoped, protected_id=protected_id
             )
@@ -62,8 +62,8 @@ def validate_retag_recreate_scope(
                     stack=stack.name,
                     services=scoped,
                 )
-            if endpoint_host:
-                _reject_docker_endpoint(docker, stack, container_ids, endpoint_host)
+            if endpoint is not None:
+                _reject_docker_endpoint(docker, stack, container_ids, endpoint)
 
 
 def _protected_container_id(settings: WebSettings, docker: DockerCli) -> str:
@@ -125,17 +125,17 @@ def _reject_docker_endpoint(
     docker: DockerCli,
     stack: ComposeStack,
     container_ids: Sequence[str],
-    endpoint_host: str,
+    endpoint: DockerEndpoint,
 ) -> None:
     try:
-        endpoint_services = _docker_endpoint_services(docker, container_ids, endpoint_host)
+        endpoint_services = _docker_endpoint_services(docker, container_ids, endpoint)
     except (CommandError, TypeError, ValueError) as exc:
         raise RetagScopeBlocked(
             f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
         ) from exc
     if endpoint_services:
         raise RetagScopeBlocked(
-            f"[{stack.name}] " + _docker_endpoint_message(endpoint_host, endpoint_services),
+            f"[{stack.name}] " + _docker_endpoint_message(endpoint.host, endpoint_services),
             stack=stack.name,
             services=endpoint_services,
         )

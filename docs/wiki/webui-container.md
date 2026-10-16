@@ -264,14 +264,19 @@ services that the job stops or recreates.
 
 When `DOCKER_HOST` points WUDup at a network endpoint such as
 `tcp://socket-proxy:2375`, updates also reject a recreate scope that includes
-a running container whose name, network alias, or network address matches the
-`DOCKER_HOST` host. Stopping that container would cut WUDup off from Docker, so
-it could not finish or roll back the update; update the socket proxy from the
-host instead. If those containers cannot be inspected, the update is blocked
-before mutation. The check does not recognize an endpoint reached through a
-published host port (such as a LAN IP or `host.docker.internal`), a proxy that
-shares another container's network with `network_mode`, or an endpoint set
-through a Docker context; avoid selecting the proxy in those setups. Unix-socket
+a running container serving that endpoint. Stopping that container would cut
+WUDup off from Docker, so it could not finish or roll back the update; update
+the socket proxy from the host instead. A container serves the endpoint when
+it has a network address that the `DOCKER_HOST` host resolves to from WUDup
+(or, when the host does not resolve, a matching name or network alias), or
+when it publishes the `DOCKER_HOST` port on the Docker host, which covers a
+LAN IP, `127.0.0.1`, or `host.docker.internal`. A container that shares
+another container's network with `network_mode` is checked through that
+container. Because the port is matched on its own, an unrelated service that
+publishes the same host port is also blocked. If those containers cannot be
+inspected, the update is blocked before mutation. The check does not recognize
+a proxy on the host network (`network_mode: host`) or an endpoint set through
+a Docker context; avoid selecting the proxy in those setups. Unix-socket
 `DOCKER_HOST` values skip this check, and WUD itself can still be updated
 because WUDup keeps Docker access while WUD restarts.
 
