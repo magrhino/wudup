@@ -216,12 +216,12 @@ def _settings(docker_host: str = "", restart_container: str = "") -> SimpleNames
 def test_scope_blocks_wudup_image_without_container_identity() -> None:
     stack = _stack(("wud", "ghcr.io/magrhino/wudup:latest"), ("app", "repo/app:1"))
     compose = _FakeCompose()
+    settings = _settings()
+    docker = _FakeDocker()
 
     with pytest.raises(RetagScopeBlocked, match=r"would stop or recreate WUDup itself"):
-        validate_retag_recreate_scope(
-            _settings(), compose, _FakeDocker(), [(stack, ("wud",))]
-        )
-    validate_retag_recreate_scope(_settings(), compose, _FakeDocker(), [(stack, ("app",))])
+        validate_retag_recreate_scope(settings, compose, docker, [(stack, ("wud",))])
+    validate_retag_recreate_scope(settings, compose, docker, [(stack, ("app",))])
     assert compose.ps_calls == []
 
 
@@ -260,23 +260,19 @@ def test_scope_checks_every_stack_before_any_mutation() -> None:
         },
     })
 
+    settings = _settings("tcp://Socket-Proxy:2375")
+    stacks = [(safe, ("app",)), (proxy, ("socket-proxy",))]
+
     with pytest.raises(RetagScopeBlocked, match=r"^\[proxy\] .*socket-proxy, which serves"):
-        validate_retag_recreate_scope(
-            _settings("tcp://Socket-Proxy:2375"),
-            compose,
-            docker,
-            [(safe, ("app",)), (proxy, ("socket-proxy",))],
-        )
+        validate_retag_recreate_scope(settings, compose, docker, stacks)
     assert compose.ps_calls == [("app",), ("socket-proxy",)]
 
 
 def test_scope_fails_closed_when_wudup_identity_lookup_fails() -> None:
     stack = _stack(("app", "repo/app:1"))
+    settings = _settings(restart_container="wudup")
+    compose = _FakeCompose()
+    docker = _FakeDocker()
 
     with pytest.raises(RetagScopeBlocked, match=r"Could not verify the WUDup container"):
-        validate_retag_recreate_scope(
-            _settings(restart_container="wudup"),
-            _FakeCompose(),
-            _FakeDocker(),
-            [(stack, ("app",))],
-        )
+        validate_retag_recreate_scope(settings, compose, docker, [(stack, ("app",))])

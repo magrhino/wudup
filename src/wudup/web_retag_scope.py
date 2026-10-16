@@ -48,67 +48,94 @@ def validate_retag_recreate_scope(
     """
     environ = settings.command_env if settings.command_env is not None else os.environ
     endpoint_host = docker_endpoint_host(environ)
-    protected_id = ""
-    if settings.restart_container:
-        try:
-            protected_id = docker.container_id(settings.restart_container)
-        except CommandError:
-            pass
-        if not protected_id:
-            raise RetagScopeBlocked(
-                "Could not verify the WUDup container identity; no retag was applied. "
-                "Check Docker access and WUD_WEB_RESTART_CONTAINER, then retry."
-            )
+    protected_id = _protected_container_id(settings, docker)
     for stack, services in stacks:
         scoped = set(services)
-        self_services = {
-            item.service for item in stack.service_images
-            if item.service in scoped and is_self_update_target(item.image)
-        }
-        if self_services:
-            raise RetagScopeBlocked(
-                f"[{stack.name}] {_SELF_UPDATE_MESSAGE}",
-                stack=stack.name,
-                services=self_services,
+        _reject_self_images(stack, scoped)
+        if protected_id or endpoint_host:
+            container_ids = _scoped_container_ids(
+                compose, stack, scoped, protected_id=protected_id
             )
-        if not protected_id and not endpoint_host:
-            continue
-        try:
-            container_ids = compose.ps_quiet_checked(
-                stack.directory, stack.file, tuple(sorted(scoped)),
-                project_directory=stack.project_directory,
-            )
-        except CommandError as exc:
-            if protected_id:
+            if protected_id and protected_id in container_ids:
                 raise RetagScopeBlocked(
-                    f"[{stack.name}] Could not verify whether this retag includes the "
-                    "WUDup container; no retag was applied. Check Docker access and "
-                    "the Compose configuration, then retry.",
+                    f"[{stack.name}] {_SELF_UPDATE_MESSAGE}",
                     stack=stack.name,
-                ) from exc
+                    services=scoped,
+                )
+            if endpoint_host:
+                _reject_docker_endpoint(docker, stack, container_ids, endpoint_host)
+
+
+def _protected_container_id(settings: WebSettings, docker: DockerCli) -> str:
+    """Return the WUDup container ID, or "" when no restart container is configured."""
+    if not settings.restart_container:
+        return ""
+    protected_id = ""
+    try:
+        protected_id = docker.container_id(settings.restart_container)
+    except CommandError:
+        pass
+    if not protected_id:
+        raise RetagScopeBlocked(
+            "Could not verify the WUDup container identity; no retag was applied. "
+            "Check Docker access and WUD_WEB_RESTART_CONTAINER, then retry."
+        )
+    return protected_id
+
+
+def _reject_self_images(stack: ComposeStack, scoped: set[str]) -> None:
+    self_services = {
+        item.service for item in stack.service_images
+        if item.service in scoped and is_self_update_target(item.image)
+    }
+    if self_services:
+        raise RetagScopeBlocked(
+            f"[{stack.name}] {_SELF_UPDATE_MESSAGE}",
+            stack=stack.name,
+            services=self_services,
+        )
+
+
+def _scoped_container_ids(
+    compose: ComposeCli,
+    stack: ComposeStack,
+    scoped: set[str],
+    *,
+    protected_id: str,
+) -> list[str]:
+    try:
+        return compose.ps_quiet_checked(
+            stack.directory, stack.file, tuple(sorted(scoped)),
+            project_directory=stack.project_directory,
+        )
+    except CommandError as exc:
+        if protected_id:
             raise RetagScopeBlocked(
-                f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
-            ) from exc
-        if protected_id and protected_id in container_ids:
-            raise RetagScopeBlocked(
-                f"[{stack.name}] {_SELF_UPDATE_MESSAGE}",
+                f"[{stack.name}] Could not verify whether this retag includes the "
+                "WUDup container; no retag was applied. Check Docker access and "
+                "the Compose configuration, then retry.",
                 stack=stack.name,
-                services=scoped,
-            )
-        if not endpoint_host:
-            continue
-        try:
-            endpoint_services = _docker_endpoint_services(
-                docker, container_ids, endpoint_host
-            )
-        except (CommandError, TypeError, ValueError) as exc:
-            raise RetagScopeBlocked(
-                f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
             ) from exc
-        if endpoint_services:
-            raise RetagScopeBlocked(
-                f"[{stack.name}] "
-                + _docker_endpoint_message(endpoint_host, endpoint_services),
-                stack=stack.name,
-                services=endpoint_services,
-            )
+        raise RetagScopeBlocked(
+            f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
+        ) from exc
+
+
+def _reject_docker_endpoint(
+    docker: DockerCli,
+    stack: ComposeStack,
+    container_ids: Sequence[str],
+    endpoint_host: str,
+) -> None:
+    try:
+        endpoint_services = _docker_endpoint_services(docker, container_ids, endpoint_host)
+    except (CommandError, TypeError, ValueError) as exc:
+        raise RetagScopeBlocked(
+            f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
+        ) from exc
+    if endpoint_services:
+        raise RetagScopeBlocked(
+            f"[{stack.name}] " + _docker_endpoint_message(endpoint_host, endpoint_services),
+            stack=stack.name,
+            services=endpoint_services,
+        )

@@ -205,19 +205,11 @@ def _run_retag_apply_job(
             successful_updates = exc.successful_updates
             retained_known_image_updates = exc.retained_known_image_updates
         safe_error = _safe_retag_apply_error(settings, exc)
-        # A scope block stops the job before any change, so report it as preflight.
-        scope_block = exc if isinstance(exc, RetagScopeBlocked) else None
         web_job_registry._append_apply_job_progress(
             jobs,
             apply_condition,
             job_id,
-            UpdaterProgressEvent(
-                phase="preflight" if preflight or scope_block else "completion",
-                status="failure",
-                message=safe_error,
-                stack=scope_block.stack if scope_block else "",
-                services=scope_block.services if scope_block else (),
-            ),
+            _retag_failure_progress(exc, safe_error, preflight=preflight),
         )
         web_job_registry._update_apply_job(
             jobs,
@@ -238,6 +230,28 @@ def _run_retag_apply_job(
                 successful_updates=successful_updates,
                 retained_known_image_updates=retained_known_image_updates,
             )
+
+
+def _retag_failure_progress(
+    exc: Exception,
+    message: str,
+    *,
+    preflight: bool,
+) -> UpdaterProgressEvent:
+    if isinstance(exc, RetagScopeBlocked):
+        # A scope block stops the job before any change, so report it as preflight.
+        return UpdaterProgressEvent(
+            phase="preflight",
+            status="failure",
+            message=message,
+            stack=exc.stack,
+            services=exc.services,
+        )
+    return UpdaterProgressEvent(
+        phase="preflight" if preflight else "completion",
+        status="failure",
+        message=message,
+    )
 
 
 def _apply_retag_updates(
