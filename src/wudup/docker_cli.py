@@ -14,10 +14,15 @@ IMAGE_DIGESTS_FORMAT = "{{range .RepoDigests}}{{println .}}{{end}}"
 CONTAINER_ID_FORMAT = "{{.Id}}"
 CONTAINER_IMAGE_ID_FORMAT = "{{.Image}}"
 CONTAINER_STATE_ERROR_FORMAT = "{{.State.Error}}"
+# Only long-standing inspect fields, so the template parses on older engines;
+# newer per-network keys such as DNSNames simply appear inside "Networks".
 CONTAINER_DNS_FORMAT = (
     '{"Id":{{json .Id}},"Name":{{json .Name}},'
     '"Service":{{json (index .Config.Labels "com.docker.compose.service")}},'
-    '"Networks":{{json .NetworkSettings.Networks}}}'
+    '"Networks":{{json .NetworkSettings.Networks}},'
+    '"Ports":{{json .NetworkSettings.Ports}},'
+    '"PortBindings":{{json .HostConfig.PortBindings}},'
+    '"NetworkMode":{{json .HostConfig.NetworkMode}}}'
 )
 
 
@@ -159,7 +164,7 @@ class DockerCli:
         return _first_nonblank(self.inspect(container, CONTAINER_STATE_ERROR_FORMAT))
 
     def container_dns_details(self, container: str) -> dict[str, object]:
-        """Return the container's name, Compose service, and network DNS details.
+        """Return the container's name, Compose service, networks, ports, and network mode.
 
         Raises ``CommandError`` when Docker fails and ``ValueError`` or ``TypeError``
         when the output is not the expected JSON object.
