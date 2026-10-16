@@ -10,6 +10,7 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
+from wudup import compose as compose_module
 from wudup.command import CommandRunner, display_command
 from wudup.compose import (
     ComposeBindMount,
@@ -354,6 +355,83 @@ class ComposeCliTests(FakeDockerCase):
                 "compose -f docker-compose.yml config --images",
                 "compose -f docker-compose.yml config --services",
             ],
+        )
+
+    def test_config_services_order_is_stable_across_compose_runs(self) -> None:
+        config = json.dumps(
+            {
+                "services": {
+                    "gluetun": {"image": "qmcgaw/gluetun"},
+                    "qbittorrent": {
+                        "image": "lscr.io/linuxserver/qbittorrent",
+                        "network_mode": "service:gluetun",
+                        "depends_on": {"gluetun": {"condition": "service_healthy"}},
+                    },
+                    "thelounge": {"image": "thelounge", "network_mode": "service:gluetun"},
+                    "mousehole": {"image": "mousehole", "depends_on": ["qbittorrent"]},
+                    "speedtest": {"image": "speedtest", "ipc": "service:gluetun"},
+                },
+            }
+        )
+        # Compose lists dependencies first but shuffles independent services.
+        compose_orders = [
+            ["gluetun", "mousehole", "qbittorrent", "speedtest", "thelounge"],
+            ["gluetun", "thelounge", "speedtest", "qbittorrent", "mousehole"],
+            ["gluetun", "speedtest", "qbittorrent", "thelounge", "mousehole"],
+        ]
+        results = []
+        for order in compose_orders:
+            with (
+                mock.patch.object(self.runner, "capture_lines", return_value=order),
+                mock.patch.object(
+                    self.compose, "config_json", return_value=mock.Mock(stdout=config),
+                ),
+            ):
+                results.append(self.compose.config_services(self.base, "docker-compose.yml"))
+
+        expected = ["gluetun", "qbittorrent", "mousehole", "speedtest", "thelounge"]
+        self.assertEqual(results, [expected] * len(compose_orders))
+
+    def test_config_services_keeps_compose_order_without_a_readable_graph(self) -> None:
+        compose_order = ["db", "app", "worker"]
+        cycle = json.dumps(
+            {
+                "services": {
+                    "db": {"depends_on": ["worker"]},
+                    "app": {"depends_on": ["db"]},
+                    "worker": {"depends_on": ["app"]},
+                },
+            }
+        )
+        for config_json in (
+            mock.Mock(side_effect=ValueError("JSON output is unavailable")),
+            mock.Mock(return_value=mock.Mock(stdout="{")),
+            mock.Mock(return_value=mock.Mock(stdout=cycle)),
+        ):
+            with (
+                mock.patch.object(self.runner, "capture_lines", return_value=compose_order),
+                mock.patch.object(self.compose, "config_json", config_json),
+                self.assertLogs("wudup.compose", level="WARNING") as logs,
+            ):
+                self.assertEqual(
+                    self.compose.config_services(self.base, "docker-compose.yml"),
+                    compose_order,
+                )
+            self.assertIn("Could not read Compose service dependencies", logs.output[0])
+
+    def test_config_service_dependencies_follow_compose_relations(self) -> None:
+        self.assertEqual(
+            compose_module._service_dependencies(
+                {
+                    "depends_on": {"db": {}},
+                    "links": ["cache:redis"],
+                    "volumes_from": ["data:ro", "container:external"],
+                    "network_mode": "service:vpn",
+                    "ipc": "host",
+                    "pid": "service:tracer",
+                }
+            ),
+            {"db", "cache", "data", "vpn", "tracer"},
         )
 
     def test_try_config_project_name_returns_empty_for_invalid_json(self) -> None:

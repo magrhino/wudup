@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -26,6 +27,7 @@ COMPOSE_FILENAMES = frozenset(
     }
 )
 _WAIT_FLAG_RE = re.compile(r"(^|\s)--wait([=,\s]|$)")
+LOGGER = logging.getLogger(__name__)
 _COMPOSE_CONFIG_JSON_OBJECT_ERROR = "Compose config JSON is not an object."
 _COMPOSE_CONFIG_SERVICES_OBJECT_ERROR = "Compose config JSON has no services object."
 COMPOSE_RUNTIME_FORMAT = (
@@ -335,6 +337,48 @@ class ComposeCli:
         *,
         project_directory: str | Path | None = None,
     ) -> list[str]:
+        """Return the stack's services in a stable dependency order.
+
+        ``config --services`` lists dependencies first but orders independent
+        services differently from run to run, which made plans for the same
+        stack differ. Keep Compose's service set and rebuild the order with a
+        name tie-break; fall back to Compose's own order when the dependency
+        graph cannot be read.
+        """
+
+        services = self._config_service_names(
+            directory,
+            file,
+            project_directory=project_directory,
+        )
+        if len(services) < 2:
+            return services
+        try:
+            result = self.config_json(
+                directory,
+                file,
+                project_directory=project_directory,
+            )
+            return _dependency_ordered_services(services, result.stdout)
+        except (CommandError, ValueError) as exc:
+            LOGGER.warning(
+                "Could not read Compose service dependencies for %s, so WUDup is "
+                "using Compose's own service order. That order can change between "
+                "runs and make a reviewed plan look stale. Check that "
+                "`docker compose config --format json` works for this stack. "
+                "Details: %s",
+                Path(directory) / file,
+                exc,
+            )
+            return services
+
+    def _config_service_names(
+        self,
+        directory: str | Path,
+        file: str,
+        *,
+        project_directory: str | Path | None = None,
+    ) -> list[str]:
         return _nonblank_lines(
             self.runner.capture_lines(
                 self._compose_args(
@@ -533,7 +577,7 @@ class ComposeCli:
                     continue
                 service_images = ()
                 try:
-                    service_names = tuple(sorted(set(self.config_services(
+                    service_names = tuple(sorted(set(self._config_service_names(
                         directory, file_name, project_directory=project_directory,
                     ))))
                 except CommandError:
@@ -946,6 +990,63 @@ def _validated_project_directory_for_stack(
 
 def _nonblank_lines(lines: Iterable[str]) -> list[str]:
     return [line for line in lines if line]
+
+
+def _dependency_ordered_services(services: Sequence[str], config_json: str) -> list[str]:
+    """Order services dependencies-first, breaking ties by name.
+
+    Raises ``ValueError`` for unreadable config or a dependency cycle so the
+    caller keeps Compose's own order.
+    """
+
+    configs = _services_from_config_json(config_json)
+    names = set(services)
+    dependencies = {
+        service: _service_dependencies(configs.get(service)) & (names - {service})
+        for service in names
+    }
+    ordered: list[str] = []
+    ready = sorted(service for service in names if not dependencies[service])
+    while ready:
+        service = ready.pop(0)
+        ordered.append(service)
+        for dependent in names:
+            if service in dependencies[dependent]:
+                dependencies[dependent].discard(service)
+                if not dependencies[dependent]:
+                    ready.append(dependent)
+        ready.sort()
+    if len(ordered) != len(names):
+        raise ValueError("Compose service dependencies contain a cycle")
+    return ordered
+
+
+def _service_dependencies(config: object) -> set[str]:
+    """Services this one must start after, as Compose orders them."""
+
+    if not isinstance(config, dict):
+        return set()
+    dependencies: set[str] = set()
+    depends_on = config.get("depends_on")
+    if isinstance(depends_on, (dict, list)):
+        dependencies.update(name for name in depends_on if isinstance(name, str))
+    links = config.get("links")
+    if isinstance(links, list):
+        dependencies.update(
+            link.split(":", 1)[0] for link in links if isinstance(link, str)
+        )
+    volumes_from = config.get("volumes_from")
+    if isinstance(volumes_from, list):
+        dependencies.update(
+            source.split(":", 1)[0]
+            for source in volumes_from
+            if isinstance(source, str) and not source.startswith("container:")
+        )
+    for key in ("network_mode", "ipc", "pid"):
+        value = config.get(key)
+        if isinstance(value, str) and value.startswith("service:"):
+            dependencies.add(value.removeprefix("service:"))
+    return dependencies
 
 
 def _sorted_unique_nonblank(lines: Iterable[str]) -> list[str]:

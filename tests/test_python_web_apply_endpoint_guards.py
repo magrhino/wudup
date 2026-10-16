@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
+from unittest import mock
 
 from tests.web_test_helpers import (
     _client,
@@ -13,6 +15,7 @@ from tests.web_test_helpers import (
 )
 
 from wudup import web_plans as plans_module
+from wudup.compose import ComposeCli
 from wudup.config import ConfigError
 from wudup.locks import lock_dir_for
 
@@ -520,3 +523,55 @@ def test_apply_reuses_review_registry_check_for_unchanged_plan(
     # The apply-time recheck reuses the review's successful lookup; only the
     # background job's own preflight asks the registry again.
     assert _fake_docker_calls(fake_root).count("manifest inspect repo/app:2.0") == 2
+
+
+def test_apply_accepts_stack_recreate_plan_when_compose_shuffles_service_order(
+    tmp_path: Path,
+) -> None:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+            **fake_env,
+        },
+    )
+    wud_file = tmp_path / "state" / "images.todo"
+    wud_file.write_text("repo/app:latest\n", encoding="utf-8")
+    _make_fake_stack(
+        tmp_path,
+        fake_root,
+        "vpn",
+        [
+            ("gluetun", "repo/gluetun:1", "cid-gluetun"),
+            ("app", "repo/app:latest", "cid-app"),
+            ("worker", "repo/worker:1", "cid-worker"),
+        ],
+    )
+    (fake_root / "containers" / "cid-app.labels").write_text(
+        "WUD-UPDATER-RECREATE-STACK=true\n",
+        encoding="utf-8",
+    )
+    # `compose config --services` lists the same services in a new order on
+    # each call, as Compose does for services without a dependency between them.
+    orders = itertools.cycle(
+        [["gluetun", "app", "worker"], ["gluetun", "worker", "app"], ["worker", "gluetun", "app"]]
+    )
+    headers = _csrf_headers(client)
+    request = {"line_numbers": [1]}
+    with mock.patch.object(
+        ComposeCli,
+        "_config_service_names",
+        side_effect=lambda *_args, **_kwargs: list(next(orders)),
+    ):
+        plan = client.post("/api/v1/plans", json=request, headers=headers).json()
+        response = client.post(
+            "/api/v1/jobs",
+            json={**request, "plan_id": plan["plan_id"], "confirmation": "apply"},
+            headers=headers,
+        )
+
+    assert plan["stacks"][0]["stop_services"] == ["worker", "gluetun", "app"]
+    assert response.status_code == 202, response.json()
+    _wait_apply_job(client, response.json()["job_id"])
