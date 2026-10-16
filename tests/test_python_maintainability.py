@@ -650,6 +650,26 @@ def test_external_policy_is_only_allowed_for_explicit_report_only(repo):
     assert report["policy_source"] == "report-only external policy"
 
 
+def test_external_policy_must_stay_inside_repo(tmp_path):
+    (tmp_path / "repo").mkdir()
+    repo = Repository(tmp_path / "repo")
+    outside = tmp_path / "outside-policy.json"
+    outside.write_text(json.dumps(repo.policy))
+    link = repo.path / "linked-policy.json"
+    link.symlink_to(outside)
+    historical = repo.policy["baseline"]["commit"]
+    for path in (outside, link):
+        code, report = repo.check(
+            "--report-only",
+            "--policy-file",
+            str(path),
+            base=historical,
+            head=historical,
+        )
+        assert code == 2
+        assert "must be inside the --repo directory" in report["error"]
+
+
 def test_missing_committed_policy_is_an_error(repo):
     (repo.path / POLICY_PATH).unlink()
     repo.commit()

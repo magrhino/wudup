@@ -96,7 +96,8 @@ For current or historical inventory using the draft policy:
 python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT --report-only --policy-file maintainability-policy.json
 ```
 
-`--policy-file` is available only with `--report-only`. Such a report always says
+`--policy-file` is available only with `--report-only`, and the file must resolve
+inside the `--repo` directory (symlinks are followed first). Such a report always says
 `REPORT ONLY / NOT ENFORCED`; its successful command exit is not a passing gate.
 Report-only inventory may use a base older than the approved baseline; only
 enforcement requires that baseline to be an ancestor of the requested base.

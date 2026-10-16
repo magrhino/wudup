@@ -572,7 +572,15 @@ def review_category_moves(
 def read_policy(git: Git, head_tree: dict, policy_file: Path | None) -> dict:
     size_error = "policy exceeds 1 MiB; reduce its size before running the checker."
     if policy_file:
-        with policy_file.open("rb") as source:
+        # Resolve symlinks first so a link inside the repository cannot point outside it.
+        repo_prefix = os.path.join(os.path.realpath(git.repo), "")
+        policy_path = os.path.realpath(policy_file)
+        if not policy_path.startswith(repo_prefix):
+            raise ValueError(
+                "--policy-file must be inside the --repo directory; "
+                "copy the policy into the repository and pass that path."
+            )
+        with open(policy_path, "rb") as source:
             content = source.read(MAX_POLICY_BYTES + 1)
     else:
         entry = head_tree.get(POLICY_PATH)
