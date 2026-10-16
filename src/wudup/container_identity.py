@@ -6,7 +6,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -111,7 +111,11 @@ def docker_endpoint(environ: Mapping[str, str]) -> DockerEndpoint | None:
 def resolve_docker_endpoint(endpoint: DockerEndpoint) -> DockerEndpoint:
     """Return ``endpoint`` with the addresses its host resolves to here."""
 
-    return replace(endpoint, addresses=resolve_host_addresses(endpoint.host))
+    return DockerEndpoint(
+        host=endpoint.host,
+        port=endpoint.port,
+        addresses=resolve_host_addresses(endpoint.host),
+    )
 
 
 def resolve_host_addresses(host: str) -> frozenset[str]:
