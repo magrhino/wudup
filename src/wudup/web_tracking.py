@@ -333,6 +333,8 @@ def _release_shaped_tag(tag: str) -> bool:
     if prefix is None:
         return False
     suffix = tag[prefix.end():]
+    if suffix[:1].isalpha() and "." in prefix.group():
+        return True
     return not suffix or (len(suffix) > 1 and suffix[0] in "-_." and suffix[1].isalnum())
 
 

@@ -10,6 +10,7 @@ from .command import CommandError
 from .compose_rewrite import (
     WUD_TAG_INCLUDE_LABEL,
     compose_escape_dollars,
+    managed_wud_tag_transform,
     plan_compose_tag_stream_update,
 )
 from .docker_cli import DockerCli
@@ -30,6 +31,7 @@ _STRICT_VERSION_TAG_RE = re.compile(
     re.ASCII,
 )
 _NUMERIC_TAG_PART_RE = re.compile(r"\d+", re.ASCII)
+_LEADING_DOTTED_VERSION_RE = re.compile(r"(v?)\d+(?:\.\d+)+", re.ASCII)
 _REGEX_SPECIAL_RE = re.compile(r"([\\^$.*+?()[\]{}|])")
 
 
@@ -129,7 +131,16 @@ def retag_tag_include_regex(tag: str) -> str:
         return rf"^{dotted_version.group(1)}\d+(?:\.\d+)+$"
     fragments: list[str] = []
     offset = 0
-    for match in _NUMERIC_TAG_PART_RE.finditer(tag):
+    # Let a suffixed release change its dotted-part count (e.g. LinuxServer
+    # Jellyfin 10.11.11ubu2604-ls43 -> 12.2ubu2604-ls54), like the plain dotted
+    # rule; a three-part rule may therefore also admit four-part tags. Installed
+    # four-part tags keep their exact shape so the managed wud.tag.transform
+    # still matches them.
+    leading_version = _LEADING_DOTTED_VERSION_RE.match(tag)
+    if leading_version is not None and not managed_wud_tag_transform(tag):
+        fragments.append(rf"{leading_version.group(1)}\d+(?:\.\d+)+")
+        offset = leading_version.end()
+    for match in _NUMERIC_TAG_PART_RE.finditer(tag, offset):
         fragments.append(_REGEX_SPECIAL_RE.sub(r"\\\1", tag[offset : match.start()]))
         fragments.append(r"\d+")
         offset = match.end()
