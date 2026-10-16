@@ -1056,6 +1056,30 @@ test_recreate_stack_label_preserves_gluetun_network_stack(){
   add_service qbittorrent mamapi ghcr.io/elforkhead/mamapi:latest cid-mamapi
   add_service qbittorrent speedtest-tracker ghcr.io/linuxserver/speedtest-tracker:latest cid-speedtest
   add_service qbittorrent thelounge ghcr.io/linuxserver/thelounge:latest cid-thelounge
+  add_service qbittorrent autobrr ghcr.io/autobrr/autobrr:latest cid-autobrr
+  # Real Gluetun stacks route the other services through the VPN container.
+  # autobrr sorts before gluetun by name, so only a dependency-aware order
+  # keeps Gluetun stopping last and starting first.
+  cat > "$BASE/qbittorrent/docker-compose.yml" <<YAML
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+  qbittorrent:
+    image: $QBIT_IMAGE
+    network_mode: service:gluetun
+  mamapi:
+    image: ghcr.io/elforkhead/mamapi:latest
+    network_mode: service:gluetun
+  speedtest-tracker:
+    image: ghcr.io/linuxserver/speedtest-tracker:latest
+    network_mode: service:gluetun
+  thelounge:
+    image: ghcr.io/linuxserver/thelounge:latest
+    network_mode: service:gluetun
+  autobrr:
+    image: ghcr.io/autobrr/autobrr:latest
+    network_mode: service:gluetun
+YAML
   set_container_label cid-qbittorrent "$RECREATE_STACK_LABEL" true
   set_image_state "$QBIT_IMAGE" old-qbit sha256:old-qbit
   set_image_after_pull "$QBIT_IMAGE" new-qbit sha256:new-qbit
@@ -1069,8 +1093,9 @@ test_recreate_stack_label_preserves_gluetun_network_stack(){
   assert_calls_contain 'compose -f docker-compose.yml pull qbittorrent'
   assert_calls_not_contain 'compose -f docker-compose.yml pull gluetun'
   assert_calls_not_contain 'compose -f docker-compose.yml down'
-  assert_calls_contain 'compose -f docker-compose.yml stop thelounge speedtest-tracker mamapi qbittorrent gluetun'
-  assert_calls_contain 'compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps gluetun qbittorrent mamapi speedtest-tracker thelounge'
+  # Dependents stop before Gluetun, in a stable name order Compose does not guarantee.
+  assert_calls_contain 'compose -f docker-compose.yml stop thelounge speedtest-tracker qbittorrent mamapi autobrr gluetun'
+  assert_calls_contain 'compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps gluetun autobrr mamapi qbittorrent speedtest-tracker thelounge'
   assert_calls_not_contain 'compose -f docker-compose.yml up -d .*--force-recreate'
   teardown_case
 }
