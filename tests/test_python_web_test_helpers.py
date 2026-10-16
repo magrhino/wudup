@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
-from tests.web_test_helpers import _wait_apply_job
+from tests.web_test_helpers import _fake_docker_env, _wait_apply_job
+
+from wudup.container_identity import docker_endpoint
 
 
 class _Response:
@@ -36,3 +40,14 @@ def test_wait_apply_job_timeout_reports_last_status_and_progress() -> None:
     assert "apply job job-1 did not finish within 0.05s" in message
     assert "last status='running'" in message
     assert "health=running: Waiting." in message
+
+
+def test_fake_docker_host_is_not_resolved(tmp_path) -> None:
+    env, _fake_root = _fake_docker_env(tmp_path)
+
+    with mock.patch("socket.getaddrinfo", side_effect=AssertionError("real DNS lookup")):
+        endpoint = docker_endpoint(env)
+
+    assert endpoint is not None
+    assert endpoint.host == "docker"
+    assert endpoint.addresses == frozenset()
