@@ -113,7 +113,7 @@ def resolve_host_addresses(host: str) -> frozenset[str]:
 
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except (OSError, UnicodeError, ValueError):
+    except (OSError, ValueError):  # UnicodeError is a ValueError
         return frozenset()
     return frozenset(
         address for address in (_normalize_ip(info[4][0]) for info in infos) if address
@@ -217,20 +217,24 @@ def _published_tcp_ports(details: Mapping[str, object]) -> Iterator[tuple[str, i
 
     for key in ("Ports", "PortBindings"):
         port_map = details.get(key)
-        if not isinstance(port_map, Mapping):
+        if isinstance(port_map, Mapping):
+            for container_port, bindings in port_map.items():
+                if _is_tcp_port_key(container_port) and isinstance(bindings, list):
+                    yield from _host_port_bindings(bindings)
+
+
+def _is_tcp_port_key(value: object) -> bool:
+    return isinstance(value, str) and value.partition("/")[2].lower() in ("", "tcp")
+
+
+def _host_port_bindings(bindings: list[object]) -> Iterator[tuple[str, int]]:
+    for binding in bindings:
+        if not isinstance(binding, Mapping):
             continue
-        for container_port, bindings in port_map.items():
-            if not isinstance(container_port, str) or not isinstance(bindings, list):
-                continue
-            if container_port.partition("/")[2].lower() not in ("", "tcp"):
-                continue
-            for binding in bindings:
-                if not isinstance(binding, Mapping):
-                    continue
-                host_port = binding.get("HostPort")
-                if isinstance(host_port, str) and host_port.strip().isdigit():
-                    host_ip = binding.get("HostIp")
-                    yield (host_ip if isinstance(host_ip, str) else ""), int(host_port)
+        host_port = binding.get("HostPort")
+        if isinstance(host_port, str) and host_port.strip().isdigit():
+            host_ip = binding.get("HostIp")
+            yield (host_ip if isinstance(host_ip, str) else ""), int(host_port)
 
 
 def _host_binding_may_reach(host_ip: str, endpoint: DockerEndpoint) -> bool:
