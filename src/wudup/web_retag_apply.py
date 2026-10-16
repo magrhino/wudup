@@ -58,6 +58,7 @@ from .web_retag_runtime import (
     _retag_project_config_files,
     _running_retag_compose_service_keys,
 )
+from .web_retag_scope import validate_retag_recreate_scope
 
 LOGGER = logging.getLogger(__name__)
 
@@ -249,8 +250,19 @@ def _apply_retag_updates(
     compose = ComposeCli(runner=runner)
     docker = DockerCli(runner=runner)
     config = effective_config(settings)
+    stacks = _ordered_retag_stacks(build.updates)
+    # Check every stack before the first Compose rewrite, pull, stop, or recreate.
+    validate_retag_recreate_scope(
+        settings,
+        compose,
+        docker,
+        [
+            (stack, _retag_stack_services(build.updates, stack))
+            for stack in stacks
+        ],
+    )
     successful_updates: list[_RetagPlanUpdate] = []
-    for stack in _ordered_retag_stacks(build.updates):
+    for stack in stacks:
         stack_updates = [item for item in build.updates if item.stack.index == stack.index]
         _apply_retag_stack(
             settings,
@@ -285,15 +297,7 @@ def _apply_retag_stack(
     approved_source_hash: str,
 ) -> None:
     """Apply one stack, recording success only after persistence and cleanup."""
-    services = tuple(
-        sorted(
-            {
-                service
-                for item in stack_updates
-                for service in item.update.services
-            }
-        )
-    )
+    services = _retag_stack_services(stack_updates, stack)
     compose_path = stack.directory / stack.file
     backup: Path | None = None
     backup_hash = ""
@@ -459,6 +463,23 @@ def _apply_retag_stack(
             known_image_changes,
             rollback_summary=rollback_summary,
         ) from exc
+
+
+def _retag_stack_services(
+    updates: Sequence[_RetagPlanUpdate],
+    stack: ComposeStack,
+) -> tuple[str, ...]:
+    """Return the services one stack's retag pulls and recreates."""
+    return tuple(
+        sorted(
+            {
+                service
+                for item in updates
+                if item.stack.index == stack.index
+                for service in item.update.services
+            }
+        )
+    )
 
 
 def _retag_stack_failure(

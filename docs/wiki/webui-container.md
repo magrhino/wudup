@@ -275,6 +275,10 @@ through a Docker context; avoid selecting the proxy in those setups. Unix-socket
 `DOCKER_HOST` values skip this check, and WUD itself can still be updated
 because WUDup keeps Docker access while WUD restarts.
 
+WebUI retag apply runs the same checks on the services it retags before it
+rewrites any Compose file. If a retag would recreate WUDup or the container
+serving its `DOCKER_HOST` in any selected stack, no stack is retagged.
+
 WebUI self-update pulls prepare an image but do not treat `docker restart` as
 adoption. The response verifies the running container image ID after the pull
 and reports `prepared_only` until an external Compose recreate moves the

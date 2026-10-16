@@ -139,7 +139,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
             if endpoint_host and not message and not protected_services:
                 try:
                     endpoint_services = _docker_endpoint_services(
-                        runner, container_ids, endpoint_host,
+                        runner.docker, container_ids, endpoint_host,
                     )
                 except (CommandError, TypeError, ValueError):
                     message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
@@ -168,7 +168,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
 
 
 def _docker_endpoint_services(
-    runner: Any,
+    docker: Any,
     container_ids: Sequence[str],
     endpoint_host: str,
 ) -> set[str]:
@@ -176,7 +176,7 @@ def _docker_endpoint_services(
 
     services: set[str] = set()
     for container_id in container_ids:
-        details = runner.docker.container_dns_details(container_id)
+        details = docker.container_dns_details(container_id)
         if endpoint_host in container_dns_names(details):
             service = details.get("Service")
             services.add(service if isinstance(service, str) and service else container_id)
