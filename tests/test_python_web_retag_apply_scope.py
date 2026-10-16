@@ -43,8 +43,16 @@ def _assert_blocked_before_mutation(
     fixture: _RetagFixture,
     before: str,
     job: dict[str, object],
+    *,
+    services: list[str],
 ) -> None:
     assert job["status"] == "failure"
+    # Nothing was attempted, so the block is reported as a preflight failure.
+    progress = job["progress"][-1]
+    assert progress["phase"] == "preflight"
+    assert progress["status"] == "failure"
+    assert progress["stack"] == "stack"
+    assert progress["services"] == services
     assert (fixture.compose_dir / "docker-compose.yml").read_text(
         encoding="utf-8"
     ) == before
@@ -76,7 +84,7 @@ def test_retag_apply_blocks_service_serving_docker_endpoint(tmp_path: Path) -> N
 
     before, job = _apply(fixture)
 
-    _assert_blocked_before_mutation(tmp_path, fixture, before, job)
+    _assert_blocked_before_mutation(tmp_path, fixture, before, job, services=["app"])
     assert "[stack] This update would stop or recreate app, which serves" in job["error"]
     assert f"(DOCKER_HOST host {_FAKE_ENDPOINT_HOST})" in job["error"]
     assert "Update that service from the host instead" in job["error"]
@@ -95,7 +103,7 @@ def test_retag_apply_fails_closed_when_endpoint_inspect_fails(
 
     before, job = _apply(fixture)
 
-    _assert_blocked_before_mutation(tmp_path, fixture, before, job)
+    _assert_blocked_before_mutation(tmp_path, fixture, before, job, services=[])
     assert "Could not check whether this update would stop the Docker endpoint" in (
         job["error"]
     )
@@ -116,7 +124,7 @@ def test_retag_apply_blocks_wudup_container_identity(
 
     before, job = _apply(fixture)
 
-    _assert_blocked_before_mutation(tmp_path, fixture, before, job)
+    _assert_blocked_before_mutation(tmp_path, fixture, before, job, services=["app"])
     assert "[stack] This update would stop or recreate WUDup itself." in job["error"]
     assert "Use the self-update action for WUDup" in job["error"]
 
@@ -129,6 +137,34 @@ def test_retag_apply_unrelated_service_still_applies(tmp_path: Path) -> None:
     assert job["status"] == "success"
     calls = _fake_docker_calls(fixture.fake_root)
     assert "inspect cid-app" in calls
+    assert "compose -f docker-compose.yml pull app" in calls
+
+
+def test_retag_apply_unix_socket_docker_host_skips_endpoint_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _make_retag_fixture(
+        tmp_path,
+        env={**_LIVE_ENV, "WUD_WEB_RESTART_CONTAINER": "wudup"},
+        docker_host="unix:///var/run/docker.sock",
+    )
+    monkeypatch.setattr(
+        DockerCli,
+        "container_id",
+        lambda self, container: "cid-wudup" if container == "wudup" else "",
+    )
+
+    def unexpected_inspect(self: DockerCli, container: str) -> dict[str, object]:
+        raise AssertionError("a unix-socket DOCKER_HOST needs no endpoint inspect")
+
+    monkeypatch.setattr(DockerCli, "container_dns_details", unexpected_inspect)
+
+    _before, job = _apply(fixture)
+
+    assert job["status"] == "success"
+    calls = _fake_docker_calls(fixture.fake_root)
+    assert "compose -f docker-compose.yml ps -q app" in calls
     assert "compose -f docker-compose.yml pull app" in calls
 
 

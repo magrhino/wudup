@@ -58,7 +58,7 @@ from .web_retag_runtime import (
     _retag_project_config_files,
     _running_retag_compose_service_keys,
 )
-from .web_retag_scope import validate_retag_recreate_scope
+from .web_retag_scope import RetagScopeBlocked, validate_retag_recreate_scope
 
 LOGGER = logging.getLogger(__name__)
 
@@ -205,14 +205,18 @@ def _run_retag_apply_job(
             successful_updates = exc.successful_updates
             retained_known_image_updates = exc.retained_known_image_updates
         safe_error = _safe_retag_apply_error(settings, exc)
+        # A scope block stops the job before any change, so report it as preflight.
+        scope_block = exc if isinstance(exc, RetagScopeBlocked) else None
         web_job_registry._append_apply_job_progress(
             jobs,
             apply_condition,
             job_id,
             UpdaterProgressEvent(
-                phase="preflight" if preflight else "completion",
+                phase="preflight" if preflight or scope_block else "completion",
                 status="failure",
                 message=safe_error,
+                stack=scope_block.stack if scope_block else "",
+                services=scope_block.services if scope_block else (),
             ),
         )
         web_job_registry._update_apply_job(
