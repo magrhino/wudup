@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import functools
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 from .command import CommandError
 from .compose import ComposeCli, ComposeStack
-from .container_identity import docker_endpoint_host
+from .container_identity import DockerEndpoint, docker_endpoint, resolve_docker_endpoint
 from .docker_cli import DockerCli
 from .self_update import is_self_update_target
 from .updater_preflight import (
@@ -47,12 +48,17 @@ def validate_retag_recreate_scope(
     ``updater_preflight.validate_self_update_scope``.
     """
     environ = settings.command_env if settings.command_env is not None else os.environ
-    endpoint_host = docker_endpoint_host(environ)
+    endpoint = docker_endpoint(environ)
+    # Resolve the endpoint host at most once, and only when a container is checked.
+    resolved_endpoint = (
+        functools.cache(functools.partial(resolve_docker_endpoint, endpoint))
+        if endpoint is not None else None
+    )
     protected_id = _protected_container_id(settings, docker)
     for stack, services in stacks:
         scoped = set(services)
         _reject_self_images(stack, scoped)
-        if protected_id or endpoint_host:
+        if protected_id or endpoint is not None:
             container_ids = _scoped_container_ids(
                 compose, stack, scoped, protected_id=protected_id
             )
@@ -62,8 +68,8 @@ def validate_retag_recreate_scope(
                     stack=stack.name,
                     services=scoped,
                 )
-            if endpoint_host:
-                _reject_docker_endpoint(docker, stack, container_ids, endpoint_host)
+            if resolved_endpoint is not None:
+                _reject_docker_endpoint(docker, stack, container_ids, resolved_endpoint)
 
 
 def _protected_container_id(settings: WebSettings, docker: DockerCli) -> str:
@@ -125,17 +131,17 @@ def _reject_docker_endpoint(
     docker: DockerCli,
     stack: ComposeStack,
     container_ids: Sequence[str],
-    endpoint_host: str,
+    endpoint: Callable[[], DockerEndpoint],
 ) -> None:
     try:
-        endpoint_services = _docker_endpoint_services(docker, container_ids, endpoint_host)
+        endpoint_services = _docker_endpoint_services(docker, container_ids, endpoint)
     except (CommandError, TypeError, ValueError) as exc:
         raise RetagScopeBlocked(
             f"[{stack.name}] {_DOCKER_ENDPOINT_LOOKUP_MESSAGE}", stack=stack.name
         ) from exc
     if endpoint_services:
         raise RetagScopeBlocked(
-            f"[{stack.name}] " + _docker_endpoint_message(endpoint_host, endpoint_services),
+            f"[{stack.name}] " + _docker_endpoint_message(endpoint().host, endpoint_services),
             stack=stack.name,
             services=endpoint_services,
         )

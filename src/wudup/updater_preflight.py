@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +10,13 @@ from typing import Any
 from . import compose_rewrite, updater_audit, updater_logging
 from .command import CommandError
 from .compose import ComposeBindMount, ComposeRuntimePortIssue, ComposeStack
-from .container_identity import container_dns_names, docker_endpoint_host
+from .container_identity import (
+    DockerEndpoint,
+    container_serves_docker_endpoint,
+    docker_endpoint,
+    network_mode_container,
+    resolve_docker_endpoint,
+)
 from .images import image_tag
 from .self_update import is_self_update_target
 from .updater_digest_pin import _digest_pin_match_tag
@@ -63,6 +70,8 @@ _SELF_UPDATE_MESSAGE = (
     "Use the self-update action for WUDup, or update this stack from "
     "the host. Remove it from this selection to update other services."
 )
+# Bound on following network_mode container:<name> links before failing closed.
+_NETWORK_MODE_HOP_LIMIT = 5
 _DOCKER_ENDPOINT_LOOKUP_MESSAGE = (
     "Could not check whether this update would stop the Docker endpoint "
     "WUDup uses (DOCKER_HOST); no update was applied. Check Docker access "
@@ -74,9 +83,18 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
     """Block stacks whose recreate scope includes WUDup or its Docker endpoint."""
 
     protect_self = runner.options.protected_container is not None
-    endpoint_host = docker_endpoint_host(runner.environ)
-    if not protect_self and not endpoint_host:
+    endpoint = docker_endpoint(runner.environ)
+    if not protect_self and endpoint is None:
         return True
+
+    @functools.cache
+    def resolved_endpoint() -> DockerEndpoint:
+        # A slow resolver only delays runs that have a container to check.
+        if endpoint is None:
+            # Raised inside the guard's lookup handler, so the stack is blocked.
+            raise ValueError("DOCKER_HOST is not a network endpoint")
+        return resolve_docker_endpoint(endpoint)
+
     protected_id = ""
     identity_error = ""
     if runner.options.protected_container:
@@ -118,7 +136,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                     if item.service in services and is_self_update_target(item.image)
                 }
             container_ids: list[str] = []
-            if protected_id or endpoint_host:
+            if protected_id or endpoint is not None:
                 try:
                     container_ids = runner.compose.ps_quiet_checked(
                         stack.directory, stack.file, tuple(sorted(services)),
@@ -136,10 +154,10 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                         reason = _DOCKER_ENDPOINT_BLOCKED
             if protected_id and protected_id in container_ids:
                 protected_services.update(services)
-            if endpoint_host and not message and not protected_services:
+            if endpoint is not None and not message and not protected_services:
                 try:
                     endpoint_services = _docker_endpoint_services(
-                        runner.docker, container_ids, endpoint_host,
+                        runner.docker, container_ids, resolved_endpoint,
                     )
                 except (CommandError, TypeError, ValueError):
                     message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
@@ -148,7 +166,7 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                     if endpoint_services:
                         protected_services = endpoint_services
                         reason = _DOCKER_ENDPOINT_BLOCKED
-                        message = _docker_endpoint_message(endpoint_host, endpoint_services)
+                        message = _docker_endpoint_message(endpoint.host, endpoint_services)
         if not message and not protected_services:
             runner.lifecycle.verified_update_scopes[(stack.index, _update_services(stack_matches))] = scope
             continue
@@ -170,17 +188,44 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
 def _docker_endpoint_services(
     docker: Any,
     container_ids: Sequence[str],
-    endpoint_host: str,
+    endpoint: Callable[[], DockerEndpoint],
 ) -> set[str]:
-    """Return services of scoped containers that Docker DNS resolves as ``endpoint_host``."""
+    """Return services of scoped containers that may serve ``endpoint()``.
+
+    A container that shares another container's network (``network_mode``) is
+    reached through that container's names, addresses, and published ports.
+    """
+
+    details_by_container: dict[str, dict[str, object]] = {}
+
+    def inspect(container: str) -> dict[str, object]:
+        if container not in details_by_container:
+            details_by_container[container] = docker.container_dns_details(container)
+        return details_by_container[container]
 
     services: set[str] = set()
     for container_id in container_ids:
-        details = docker.container_dns_details(container_id)
-        if endpoint_host in container_dns_names(details):
+        details = inspect(container_id)
+        network_details = _network_owner_details(details, inspect)
+        if container_serves_docker_endpoint(network_details, endpoint()):
             service = details.get("Service")
             services.add(service if isinstance(service, str) and service else container_id)
     return services
+
+
+def _network_owner_details(
+    details: dict[str, object],
+    inspect: Callable[[str], dict[str, object]],
+) -> dict[str, object]:
+    """Follow ``network_mode: container:<name>`` to the container owning the network."""
+
+    seen: set[str] = set()
+    while provider := network_mode_container(details):
+        if provider in seen or len(seen) >= _NETWORK_MODE_HOP_LIMIT:
+            raise ValueError("network_mode container chain does not end")
+        seen.add(provider)
+        details = inspect(provider)
+    return details
 
 
 def _docker_endpoint_message(endpoint_host: str, services: Iterable[str]) -> str:

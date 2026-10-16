@@ -16,9 +16,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from wudup import (
+    container_identity,
+    web_pending_sources,
+    web_wud_api,
+    web_wud_transport,
+)
 from wudup import web as web_module
 from wudup import web_discord as discord_module
-from wudup import web_pending_sources, web_wud_api, web_wud_transport
 from wudup import web_release_notifications as notifications_module
 from wudup.db import (
     init_db,
@@ -199,6 +204,21 @@ def _file_backed_pending_source_seam() -> Iterator[None]:
             web_pending_sources,
             "resolve_pending_source",
             resolve_pending_source,
+        )
+        yield
+
+
+@contextmanager
+def _offline_docker_host_resolution() -> Iterator[None]:
+    """Keep the Docker endpoint guard from resolving test ``DOCKER_HOST`` names.
+
+    Fixtures such as ``tcp://docker:2375`` would otherwise make the guard query
+    the machine's real resolver, so results and timing depend on its network.
+    """
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            container_identity, "resolve_host_addresses", lambda _host: frozenset(),
         )
         yield
 
