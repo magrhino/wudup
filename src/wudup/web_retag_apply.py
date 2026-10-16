@@ -322,10 +322,9 @@ def _apply_retag_stack(
     written_hashes: list[str] = []
     known_image_changes: tuple[web_retag_audit.RetagKnownImageChange, ...] = ()
     stopped_services: tuple[str, ...] = ()
-    remove_orphans = True
     services_recreated = False
     try:
-        stopped_services, remove_orphans = _revalidate_retag_runtime_before_apply(
+        stopped_services = _revalidate_retag_runtime_before_apply(
             settings, compose, stack_updates, config=config
         )
         _progress(
@@ -420,7 +419,6 @@ def _apply_retag_stack(
             jobs,
             apply_condition,
             job_id,
-            remove_orphans=remove_orphans,
         )
         known_image_changes = web_retag_audit._record_successful_retag_known_images(
             settings, stack_updates
@@ -447,7 +445,6 @@ def _apply_retag_stack(
                         job_id,
                         original_error=str(exc),
                         expected_source_hash=written_hashes[-1],
-                        remove_orphans=remove_orphans,
                     )
                 except Exception as restore_exc:
                     raise _retag_stack_failure(
@@ -585,16 +582,13 @@ def _revalidate_retag_runtime_before_apply(
     updates: Sequence[_RetagPlanUpdate],
     *,
     config: UpdaterConfig | None = None,
-) -> tuple[tuple[str, ...], bool]:
+) -> tuple[str, ...]:
     """Revalidate runtime state before the apply.
 
-    Returns the approved services that are stopped, and whether
-    ``--remove-orphans`` is safe. It is unsafe when another Compose file set
-    shares the project name, because Compose would delete that file set's
-    containers as orphans.
+    Returns the approved services that are stopped.
     """
     if not updates:
-        return (), True
+        return ()
     stack = updates[0].stack
     project_name = compose.try_config_project_name(
         stack.directory,
@@ -619,7 +613,7 @@ def _revalidate_retag_runtime_before_apply(
     )
     if config_files is None:
         raise RuntimeError("retag runtime state could not be revalidated")
-    extra_files, project_shared = config_files
+    extra_files, _project_shared = config_files
     if extra_files:
         # WebUI errors redact absolute paths, so name the files by basename.
         extra_names = tuple(Path(path.name) for path in extra_files)
@@ -647,7 +641,7 @@ def _revalidate_retag_runtime_before_apply(
                 f"{item.service_key} is no longer running in the expected Compose project"
             )
         stopped_services.add(service)
-    return tuple(sorted(stopped_services)), not project_shared
+    return tuple(sorted(stopped_services))
 
 
 def _recreate_retag_services(
@@ -659,8 +653,6 @@ def _recreate_retag_services(
     jobs: dict[str, WebApplyJob],
     apply_condition: Condition,
     job_id: str,
-    *,
-    remove_orphans: bool = True,
 ) -> None:
     _progress(
         jobs,
@@ -696,9 +688,7 @@ def _recreate_retag_services(
 
     if config.update_mode == "pause":
         try:
-            wait_handled = _compose_up_retag_services(
-                compose, stack, services, config, remove_orphans=remove_orphans
-            )
+            wait_handled = _compose_up_retag_services(compose, stack, services, config)
         except Exception:
             compose.unpause(
                 stack.directory,
@@ -714,9 +704,7 @@ def _recreate_retag_services(
             project_directory=stack.project_directory,
         )
     else:
-        wait_handled = _compose_up_retag_services(
-            compose, stack, services, config, remove_orphans=remove_orphans
-        )
+        wait_handled = _compose_up_retag_services(compose, stack, services, config)
     if pre_up_error is not None:
         raise pre_up_error
 
@@ -759,9 +747,10 @@ def _compose_up_retag_services(
     stack: ComposeStack,
     services: Sequence[str],
     config: UpdaterConfig,
-    *,
-    remove_orphans: bool = True,
 ) -> bool:
+    # Retag never removes services from Compose, so it has no orphans of its
+    # own to clean up. Leaving orphans alone also means a retag can never
+    # remove an orphaned WUDup or the container serving its DOCKER_HOST.
     wait = (
         config.update_mode != "pause"
         and compose.up_wait_supported(
@@ -778,7 +767,7 @@ def _compose_up_retag_services(
         wait_timeout=config.max_wait if wait else None,
         force_recreate=True,
         no_deps=True,
-        remove_orphans=remove_orphans,
+        remove_orphans=False,
         project_directory=stack.project_directory,
     )
     return wait
@@ -853,7 +842,6 @@ def _restore_retag_compose(
     *,
     original_error: str,
     expected_source_hash: str,
-    remove_orphans: bool = True,
 ) -> str:
     """Restore Compose and return services to their state before the apply.
 
@@ -883,9 +871,7 @@ def _restore_retag_compose(
     first_exc: Exception | None = None
     if stopped:
         try:
-            _recreate_retag_services_stopped(
-                compose, stack, stopped, remove_orphans=remove_orphans
-            )
+            _recreate_retag_services_stopped(compose, stack, stopped)
         except Exception as exc:  # noqa: BLE001 - reported with the other groups.
             first_exc = exc
             failures.append(
@@ -894,9 +880,7 @@ def _restore_retag_compose(
             )
     if running:
         try:
-            wait_handled = _compose_up_retag_services(
-                compose, stack, running, config, remove_orphans=remove_orphans
-            )
+            wait_handled = _compose_up_retag_services(compose, stack, running, config)
             if not wait_handled:
                 _wait_for_retag_health(
                     compose,
@@ -980,8 +964,6 @@ def _recreate_retag_services_stopped(
     compose: ComposeCli,
     stack: ComposeStack,
     services: Sequence[str],
-    *,
-    remove_orphans: bool = True,
 ) -> None:
     """Recreate services from the restored Compose file and confirm they stay stopped."""
     names = ", ".join(services)
@@ -993,7 +975,7 @@ def _recreate_retag_services_stopped(
             force_recreate=True,
             no_deps=True,
             no_start=True,
-            remove_orphans=remove_orphans,
+            remove_orphans=False,
             project_directory=stack.project_directory,
         )
     except CommandError as exc:

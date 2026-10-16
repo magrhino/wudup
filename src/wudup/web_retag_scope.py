@@ -42,8 +42,8 @@ def validate_retag_recreate_scope(
 ) -> None:
     """Fail closed before any retag mutation that would stop WUDup or its Docker endpoint.
 
-    Retag recreates only the selected services (``--no-deps``), so each stack's
-    scope is exactly ``services``. Mirrors the pending-update preflight in
+    Retag recreates only the selected services (``--no-deps``) and never passes
+    ``--remove-orphans``, so each stack's scope is exactly ``services``. Mirrors the pending-update preflight in
     ``updater_preflight.validate_self_update_scope``.
     """
     environ = settings.command_env if settings.command_env is not None else os.environ

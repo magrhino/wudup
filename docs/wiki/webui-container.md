@@ -277,7 +277,9 @@ because WUDup keeps Docker access while WUD restarts.
 
 WebUI retag apply runs the same checks on the services it retags before it
 rewrites any Compose file. If a retag would recreate WUDup or the container
-serving its `DOCKER_HOST` in any selected stack, no stack is retagged.
+serving its `DOCKER_HOST` in any selected stack, no stack is retagged. Retag
+also never removes orphan containers, so a WUDup or socket-proxy container left
+running after its service was removed from the Compose file is not touched.
 
 WebUI self-update pulls prepare an image but do not treat `docker restart` as
 adoption. The response verifies the running container image ID after the pull
