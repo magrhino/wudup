@@ -407,9 +407,12 @@ prepare_images(){
 # file, later host-side rewrites can stay invisible to new containers for a few
 # seconds, so the updater would read the new contents cut off at the old size.
 # Writing from a container keeps every write on the updater's side of the file
-# share; running as the host user keeps the file owner unchanged.
+# share. The host creates the file once so it stays owned by the host user; the
+# container runs as its default user, like the updater, so rootless Docker can
+# write it, and truncating an existing file keeps that owner.
 write_stack_compose_file(){
-  docker run -i --rm --user "$(id -u):$(id -g)" -v "$STACK_DIR:$STACK_DIR" "$IMAGE" \
+  [[ -e "$COMPOSE_FILE" ]] || : > "$COMPOSE_FILE"
+  docker run -i --rm -v "$STACK_DIR:$STACK_DIR" "$IMAGE" \
     bash -c 'cat > "$1"' _ "$COMPOSE_FILE"
 }
 
