@@ -177,10 +177,11 @@ jobs:
           # runs for the same commit, and concurrency cancels all but one.
           for workflow in ci.yml security.yml codeql.yml; do
             runs_json="$(
-              gh api "repos/$GH_REPO/actions/workflows/$workflow/runs?event=pull_request&head_sha=$head_sha&per_page=100"
+              gh api --paginate --slurp \
+                "repos/$GH_REPO/actions/workflows/$workflow/runs?event=pull_request&head_sha=$head_sha&per_page=100"
             )"
             run_json="$(
-              jq '[.workflow_runs[] | select(.conclusion != "cancelled")] | max_by(.id)' <<<"$runs_json"
+              jq '[.[].workflow_runs[] | select(.conclusion != "cancelled")] | max_by(.id)' <<<"$runs_json"
             )"
             if ! jq -e \
               --arg sha "$head_sha" \

@@ -351,6 +351,10 @@ elif "/workflows/" in path and "/runs?" in path:
         data["workflow_runs"] = [{**run, "id": 9, "conclusion": "failure"}, run]
     if scenario == "cancelled-duplicate":
         data["workflow_runs"] = [{**run, "id": 9, "conclusion": "cancelled"}, run]
+    assert "--paginate" in args and "--slurp" in args
+    data = [data]
+    if scenario == "newer-failure-next-page":
+        data.append({"workflow_runs": [{**run, "id": 9, "conclusion": "failure"}]})
 elif "/jobs?" in path:
     names = {"1": ["python tests", "shell tests", "webui checks"],
              "2": ["dependency review", "workflow security"],
@@ -383,6 +387,7 @@ print(json.dumps(data))
             "retargeted", "security-failure", "codeql-pending",
             "skipped-core-2", "skipped-core-3",
             "retried-pass", "retried-failure", "cancelled-duplicate",
+            "newer-failure-next-page",
         ]
         for scenario in cases:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
