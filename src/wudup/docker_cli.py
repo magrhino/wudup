@@ -7,10 +7,12 @@ from dataclasses import dataclass
 
 from . import request_scope
 from .command import CommandError, CommandResult, CommandRunner
+from .platforms import ImagePlatform, platform_from_parts
 
 DEFAULT_CONTAINER_FORMAT = "{{.Names}}\t{{.Image}}"
 IMAGE_ID_FORMAT = "{{.Id}}"
 IMAGE_DIGESTS_FORMAT = "{{range .RepoDigests}}{{println .}}{{end}}"
+IMAGE_PLATFORM_FORMAT = "{{.Os}} {{.Architecture}} {{.Variant}}"
 CONTAINER_ID_FORMAT = "{{.Id}}"
 CONTAINER_IMAGE_ID_FORMAT = "{{.Image}}"
 CONTAINER_STATE_ERROR_FORMAT = "{{.State.Error}}"
@@ -88,6 +90,15 @@ class DockerCli:
             return _first_nonblank(self.image_inspect(image, IMAGE_ID_FORMAT))
         except CommandError:
             return ""
+
+    def image_platform(self, image: str) -> ImagePlatform | None:
+        try:
+            parts = _first_nonblank(self.image_inspect(image, IMAGE_PLATFORM_FORMAT)).split()
+        except CommandError:
+            return None
+        if len(parts) not in {2, 3}:
+            return None
+        return platform_from_parts(*parts)
 
     def image_repo_digests(self, image: str) -> list[str]:
         try:

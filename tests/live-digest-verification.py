@@ -121,6 +121,10 @@ class ProbeResult:
         # digest as the image ID instead of the config digest.
         return bool(self.tag_digest and self.local_image_id == self.tag_digest)
 
+    @property
+    def local_image_matches(self) -> bool:
+        return self.config_matches_local_image or self.image_id_matches_tag_digest
+
 
 class ProbeError(RuntimeError):
     """Raised when a live digest probe cannot be completed."""
@@ -156,9 +160,7 @@ def main() -> int:
                 f"[FAIL] {image}: tag digest was not present in Docker RepoDigests",
                 file=sys.stderr,
             )
-        if not (
-            result.config_matches_local_image or result.image_id_matches_tag_digest
-        ):
+        if not result.local_image_matches:
             failures += 1
             print(
                 f"[FAIL] {image}: local image id matched neither the tag digest "

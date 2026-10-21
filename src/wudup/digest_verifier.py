@@ -442,6 +442,7 @@ class DigestVerifier:
 
         if tag_document.is_index() and tag_document.child_digest(expected):
             return self._verify_expected_manifest(
+                image,
                 registry_image,
                 expected,
                 tag_document,
@@ -833,12 +834,26 @@ class DigestVerifier:
 
     def _verify_expected_manifest(
         self,
+        local_image: str,
         image: RegistryImageRef,
         expected: str,
         tag_document: ManifestDocument,
         repo_digests: tuple[str, ...],
         local_image_id: str,
     ) -> DigestCheckResult:
+        if self._local_index_selects_child(
+            local_image, tag_document, expected, local_image_id
+        ):
+            return DigestCheckResult(
+                ok=True,
+                status=_STATUS_VERIFIED,
+                reason=_reason(image, "platform-manifest-match"),
+                seen_repo_digests=repo_digests,
+                tag_digest=tag_document.digest,
+                matched_child_digest=expected,
+                local_image_id=local_image_id,
+                source=tag_document.source,
+            )
         try:
             expected_document = self._fetch(image, expected)
         except ManifestLookupError as exc:
@@ -854,9 +869,7 @@ class DigestVerifier:
                 error=str(exc),
             )
         expected_config = expected_document.config_digest()
-        if _image_id_matches(
-            local_image_id, expected_config, expected, tag_document.digest
-        ):
+        if _image_id_matches(local_image_id, expected_config, expected):
             return DigestCheckResult(
                 ok=True,
                 status=_STATUS_VERIFIED,
@@ -878,6 +891,30 @@ class DigestVerifier:
             expected_config_digest=expected_config,
             local_image_id=local_image_id,
             source=expected_document.source,
+        )
+
+    def _local_index_selects_child(
+        self,
+        local_image: str,
+        tag_document: ManifestDocument,
+        expected: str,
+        local_image_id: str,
+    ) -> bool:
+        """Return whether a containerd-store index image runs the expected child.
+
+        On Docker's containerd image store the local image ID is the pulled
+        index digest, so it only proves the index was pulled. Docker runs the
+        child matching the local image's platform, which must be ``expected``.
+        """
+        if not tag_document.digest or local_image_id != tag_document.digest:
+            return False
+        child_platform = tag_document.child_platform(expected)
+        if child_platform is None:
+            return False
+        local_platform = self.docker.image_platform(local_image)
+        return local_platform is not None and _same_local_platform(
+            child_platform,
+            local_platform,
         )
 
     def _verify_tag_document(
@@ -1245,6 +1282,15 @@ def _platform_matches(found: ImagePlatform, wanted: ImagePlatform) -> bool:
     if found.os != wanted.os or found.architecture != wanted.architecture:
         return False
     return found.variant == wanted.variant
+
+
+def _same_local_platform(child: ImagePlatform, local: ImagePlatform) -> bool:
+    if child.os != local.os or child.architecture != local.architecture:
+        return False
+    if child.variant == local.variant:
+        return True
+    # arm64 images often omit the implied v8 variant on one side only.
+    return child.architecture == "arm64" and {child.variant, local.variant} <= {"", "v8"}
 
 
 def _subject_error_status(error: str) -> IdentityStatus:

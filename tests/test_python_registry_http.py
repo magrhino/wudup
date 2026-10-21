@@ -535,5 +535,6 @@ def test_live_probe_accepts_either_image_store_id(
         )
         assert result.config_matches_local_image is config_match
         assert result.image_id_matches_tag_digest is tag_digest_match
+        assert result.local_image_matches is (config_match or tag_digest_match)
     finally:
         sys.modules.pop(spec.name, None)
