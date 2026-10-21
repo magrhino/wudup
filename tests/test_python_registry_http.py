@@ -504,3 +504,36 @@ def test_live_probe_uses_production_policy(image_ref):
         assert image.http_registry == "registry-1.docker.io"
     finally:
         sys.modules.pop(spec.name, None)
+
+
+@pytest.mark.parametrize(
+    ("local_image_id", "matched_config", "config_match", "tag_digest_match"),
+    [
+        # Classic image store: the image ID is the platform config digest.
+        ("sha256:config", "sha256:config", True, False),
+        # containerd image store: the image ID is the pulled index digest.
+        ("sha256:index", "", False, True),
+        ("sha256:other", "", False, False),
+    ],
+)
+def test_live_probe_accepts_either_image_store_id(
+    local_image_id, matched_config, config_match, tag_digest_match,
+):
+    path = Path(__file__).with_name("live-digest-verification.py")
+    spec = importlib.util.spec_from_file_location("digest_probe_store_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        result = module.ProbeResult(
+            image="alpine:3.20",
+            tag_digest="sha256:index",
+            repo_digests=("alpine@sha256:index",),
+            local_image_id=local_image_id,
+            matched_child_digest="sha256:child" if matched_config else "",
+            matched_config_digest=matched_config,
+        )
+        assert result.config_matches_local_image is config_match
+        assert result.image_id_matches_tag_digest is tag_digest_match
+    finally:
+        sys.modules.pop(spec.name, None)
