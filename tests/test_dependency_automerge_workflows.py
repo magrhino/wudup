@@ -128,9 +128,12 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         self.assertNotIn("matchDepNames", minor_rule)
         self.assertEqual(minor_rule["addLabels"], ["automerge"])
 
+        for rule in labelled:
+            # A datasource filter could silently stop Docker updates being labelled.
+            self.assertNotIn("matchDatasources", rule)
+            self.assertNotIn("major", rule["matchUpdateTypes"])
         for any_rule in rules:
             self.assertNotIn("automerge", any_rule)
-            self.assertNotIn("major", any_rule.get("matchUpdateTypes", []))
 
     def test_renovate_shortens_release_age_only_for_docker_cli(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
