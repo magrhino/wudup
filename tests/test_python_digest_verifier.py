@@ -20,6 +20,7 @@ from wudup.digest_verifier import (
     ManifestLookupError,
     RegistryHttpManifestResolver,
     _payload_digest,
+    _same_local_platform,
     parse_registry_image,
 )
 from wudup.docker_cli import DockerCli
@@ -588,6 +589,68 @@ class DigestVerifierTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(result.reason, "platform-mismatch")
+
+    def test_containerd_index_image_id_ignores_child_without_real_platform(self) -> None:
+        expected = "sha256:attestation"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): unknown_platform_index_doc(
+                    "sha256:index",
+                    expected,
+                ),
+                ("quay.io", "acme/app", expected): manifest_doc(expected, "sha256:empty"),
+            }
+        )
+        docker = FakeDocker(image_id="sha256:index")
+        verifier = DigestVerifier(
+            docker,
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "platform-mismatch")
+        self.assertEqual(docker.platform_calls, [])
+
+    def test_current_index_digest_fails_when_no_child_config_matches(self) -> None:
+        expected = "sha256:index"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): index_doc(
+                    expected,
+                    ("sha256:child", "sha256:missing"),
+                ),
+                ("quay.io", "acme/app", "sha256:child"): manifest_doc(
+                    "sha256:child",
+                    "sha256:config",
+                ),
+            }
+        )
+        verifier = DigestVerifier(
+            FakeDocker(image_id="sha256:old-index"),
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "platform-mismatch")
+        self.assertEqual(result.local_image_id, "sha256:old-index")
+
+    def test_same_local_platform_keeps_other_variants_strict(self) -> None:
+        def platform(value: str) -> ImagePlatform:
+            parsed = parse_platform(value)
+            assert parsed is not None
+            return parsed
+
+        self.assertTrue(_same_local_platform(platform("linux/arm/v7"), platform("linux/arm/v7")))
+        self.assertFalse(_same_local_platform(platform("linux/arm/v6"), platform("linux/arm/v7")))
+        self.assertFalse(_same_local_platform(platform("linux/arm"), platform("linux/arm/v7")))
+        self.assertFalse(_same_local_platform(platform("windows/amd64"), platform("linux/amd64")))
+        self.assertTrue(_same_local_platform(platform("linux/arm64/v8"), platform("linux/arm64")))
 
     def test_containerd_index_image_id_treats_arm64_v8_as_default_variant(self) -> None:
         expected = "sha256:arm64"
