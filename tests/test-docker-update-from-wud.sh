@@ -292,6 +292,31 @@ test_default_dispatch_uses_python_backend(){
   teardown_case
 }
 
+test_dispatch_rejects_python_older_than_3_11(){
+  setup_case
+  local real_python old_python
+  real_python="$(command -v python3)"
+  old_python="$TEST_TMP/python3.10"
+  # Report Python 3.10 to version checks; record any other invocation.
+  cat > "$old_python" <<EOF
+#!/bin/sh
+if [ "\$1" = "-c" ]; then
+  exec "$real_python" -c "import sys; sys.version_info = (3, 10, 14, 'final', 0)
+\$2"
+fi
+echo "old python ran: \$*" >> "$TEST_TMP/old-python.log"
+EOF
+  chmod +x "$old_python"
+  printf '%s\n' "$APP_LATEST_IMAGE" > "$WUD_FILE"
+
+  run_script "PYTHON_BIN=$old_python" --dry-run
+
+  assert_status 1
+  grep -q 'needs Python 3.11 or newer' "$TEST_TMP/output.log" || fail "dispatcher did not explain the Python version requirement"
+  [[ ! -e "$TEST_TMP/old-python.log" ]] || fail "dispatcher ran the CLI under Python 3.10"
+  teardown_case
+}
+
 test_dry_run_no_mutation(){
   setup_case
   printf '%s\n' "$APP_LATEST_IMAGE" > "$WUD_FILE"
@@ -1110,6 +1135,7 @@ run_test(){
 main(){
   run_test test_help_exits_successfully
   run_test test_default_dispatch_uses_python_backend
+  run_test test_dispatch_rejects_python_older_than_3_11
   run_test test_dry_run_no_mutation
   run_test test_default_base_uses_home_docker
   run_test test_confirm_required_blocks_mutation
