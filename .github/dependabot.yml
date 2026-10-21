@@ -36,7 +36,9 @@ updates:
         patterns:
           - "*"
     ignore:
-      # pydantic owns the compatible core pin; pip-compile refreshes it.
+      # pydantic pins an exact pydantic-core, so standalone core PRs cannot
+      # merge. Dependabot does not refresh core in pydantic PRs either (#646,
+      # #894): run `make lock` on each pydantic PR before merging.
       - dependency-name: "pydantic-core"
         update-types:
           - "version-update:semver-patch"
