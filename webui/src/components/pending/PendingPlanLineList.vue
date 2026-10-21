@@ -33,20 +33,17 @@ const props = defineProps<{
 
 type ListRow =
   | { kind: "line"; view: PlanLineView }
-  | { kind: "impact"; stack: string; impact: StackImpact };
+  | { kind: "impact"; key: string; stack: string; impact: StackImpact };
 
 const rows = computed<ListRow[]>(() => {
-  const impacts = new Map<string, StackImpact>();
-  for (const stack of props.stacks ?? []) {
+  if (!props.stacks) return props.planLines.map((view): ListRow => ({ kind: "line", view }));
+  // Group by stack position, not name: two Compose stacks can share a directory name.
+  return props.stacks.flatMap((stack, index): ListRow[] => {
+    const lines = stack.lines.map((line): ListRow => ({ kind: "line", view: { stack: stack.name, line } }));
     const impact = stackImpact(stack);
-    if (impact && stackImpactIsNotable(impact)) impacts.set(stack.name, impact);
-  }
-  return props.planLines.flatMap((view, index): ListRow[] => {
-    const impact = impacts.get(view.stack);
-    const lastInStack = props.planLines[index + 1]?.stack !== view.stack;
-    return impact && lastInStack
-      ? [{ kind: "line", view }, { kind: "impact", stack: view.stack, impact }]
-      : [{ kind: "line", view }];
+    return impact && lines.length && stackImpactIsNotable(impact)
+      ? [...lines, { kind: "impact", key: `impact-${index}`, stack: stack.name, impact }]
+      : lines;
   });
 });
 
@@ -67,7 +64,7 @@ function releaseNoteProps(lineNo: number) {
       v-for="row in rows"
       :key="row.kind === 'line'
         ? `${row.view.stack}-${row.view.line.line_no}-${row.view.line.service}`
-        : `impact-${row.stack}`"
+        : row.key"
     >
       <div
         v-if="row.kind === 'impact'"

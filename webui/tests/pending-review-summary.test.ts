@@ -393,4 +393,57 @@ describe("Pending review decision summary", () => {
     expect(row.find(".plan-impact-detail").text().replace(/\s+/g, "")).toBe(detail);
     list.unmount();
   });
+
+  it("counts every whole-stack service the backend discovered, whatever the update mode", () => {
+    const plan = planResponse();
+    const stack = plan.stacks[0]!;
+    stack.services = [];
+    stack.stop_services = ["worker", "app"];
+    // Pause mode has no stop step but still recreates the whole stack.
+    stack.actions = ["pause", "up", "unpause"].map(kind => ({ kind, args: [], description: "", cwd: "" }));
+    expect(stackImpact(stack)).toMatchObject({ mode: "recreate", wholeStack: true, alsoRestarted: ["worker"] });
+    expect(extraInterruptionLabel(plan)).toBe("Also interrupts 1 service");
+    // Without discovered services the header names the stack instead of counting nothing.
+    const unknown = planResponse().stacks[0]!;
+    unknown.name = "qbittorrent";
+    unknown.services = [];
+    unknown.stop_services = [];
+    unknown.actions = [{ kind: "up", args: ["up"], description: "", cwd: "" }];
+    plan.stacks.push(unknown);
+    expect(extraInterruptionLabel(plan)).toBe("Also interrupts 1 service and all of qbittorrent");
+    plan.stacks.shift();
+    expect(extraInterruptionLabel(plan)).toBe("Also interrupts all of qbittorrent");
+  });
+
+  it("sorts extra services alphabetically regardless of case", () => {
+    const stack = planResponse().stacks[0]!;
+    stack.services = ["app", "Zeta", "alpha"];
+    stack.actions = [{ kind: "up", args: ["up"], description: "", cwd: "" }];
+    expect(stackImpact(stack)!.alsoRestarted).toEqual(["alpha", "Zeta"]);
+  });
+
+  it("keeps impact rows with their own stack when two stacks share a name", () => {
+    const plan = planResponse();
+    const first = plan.stacks[0]!;
+    first.services = ["gluetun", "app"];
+    first.actions = [{ kind: "up", args: ["up"], description: "", cwd: "" }];
+    const second = planResponse().stacks[0]!;
+    second.directory = "/srv/other/media";
+    second.lines = [{ ...second.lines[0]!, line_no: 2 }];
+    second.services = ["redis", "app"];
+    second.actions = [{ kind: "up", args: ["up"], description: "", cwd: "" }];
+    plan.stacks.push(second);
+    const planLines = planLinesFromPlan(plan);
+    const list = mountWithApp({
+      components: { PendingPlanLineList },
+      setup: () => ({ plan, planLines }),
+      template: '<PendingPlanLineList :plan-lines="planLines" :stacks="plan.stacks" :stack-count="2" :release-notes="[]" :release-notes-loading="false" release-notes-error="" />',
+    });
+    const rows = list.findAll(".list-row");
+    expect(rows.map(row => row.classes().includes("plan-impact-row"))).toEqual([false, true, false, true]);
+    expect(rows[1]!.find(".plan-impact-detail").text()).toContain("gluetun");
+    expect(rows[1]!.find(".plan-impact-detail").text()).not.toContain("redis");
+    expect(rows[3]!.find(".plan-impact-detail").text()).toContain("redis");
+    list.unmount();
+  });
 });

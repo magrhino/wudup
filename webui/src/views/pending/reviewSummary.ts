@@ -35,18 +35,27 @@ export type StackImpact = {
   dependenciesMayStart: boolean;
 };
 
+function impactMode(stack: PlanStack): StackImpact["mode"] | null {
+  // Pause mode still runs `up`, so its services are recreated; a pause step alone is the only "pause" impact.
+  if (stack.actions.some(action => action.kind === "up")) return stack.force_recreate ? "force-recreate" : "recreate";
+  if (stack.actions.some(action => action.kind === "pause")) return "pause";
+  return null;
+}
+
 // Structured impact for a recreate or pause plan; null when the plan has no short form to trust.
 export function stackImpact(stack: PlanStack): StackImpact | null {
-  const has = (kind: string) => stack.actions.some(action => action.kind === kind);
-  const mode = has("up") ? (stack.force_recreate ? "force-recreate" : "recreate") : has("pause") ? "pause" : null;
+  const mode = impactMode(stack);
   if (!mode) return null;
+  const wholeStack = !stack.services.length;
   const updated = new Set(stack.lines.map(line => line.service));
-  const interrupted = [...stack.services, ...(has("stop") ? stack.stop_services : [])];
+  // A whole-stack plan's stop_services is every discovered service, whether or not the mode stops them first.
+  const hasStop = stack.actions.some(action => action.kind === "stop");
+  const interrupted = wholeStack || hasStop ? [...stack.services, ...stack.stop_services] : stack.services;
   return {
     mode,
-    wholeStack: !stack.services.length,
-    alsoRestarted: [...new Set(interrupted.filter(service => !updated.has(service)))].sort(),
-    dependenciesMayStart: has("up") && !!stack.services.length && !stack.up_no_deps,
+    wholeStack,
+    alsoRestarted: [...new Set(interrupted.filter(service => !updated.has(service)))].sort((a, b) => a.localeCompare(b)),
+    dependenciesMayStart: mode !== "pause" && !wholeStack && !stack.up_no_deps,
   };
 }
 
@@ -57,8 +66,19 @@ export function stackImpactIsNotable(impact: StackImpact): boolean {
 
 // Header label for services interrupted without their own update; "interrupts" covers both restart and pause.
 export function extraInterruptionLabel(plan: PlanResponse): string {
-  const count = plan.stacks.reduce((total, stack) => total + (stackImpact(stack)?.alsoRestarted.length ?? 0), 0);
-  return count ? `Also interrupts ${count} ${count === 1 ? "service" : "services"}` : "";
+  let count = 0;
+  // A whole-stack plan without discovered services still interrupts the stack; name it rather than count nothing.
+  const unnamedStacks: string[] = [];
+  for (const stack of plan.stacks) {
+    const impact = stackImpact(stack);
+    if (!impact) continue;
+    count += impact.alsoRestarted.length;
+    if (impact.wholeStack && !stack.stop_services.length) unnamedStacks.push(stack.name);
+  }
+  const parts: string[] = [];
+  if (count) parts.push(`${count} ${count === 1 ? "service" : "services"}`);
+  if (unnamedStacks.length) parts.push(`all of ${unnamedStacks.join(", ")}`);
+  return parts.length ? `Also interrupts ${parts.join(" and ")}` : "";
 }
 
 // Text fallback for stacks without a structured impact; the services list shows the rest.
