@@ -24,19 +24,17 @@ run_python_checks() {
       python_bin="python3.12"
     elif command -v python3.11 >/dev/null 2>&1; then
       python_bin="python3.11"
-    elif command -v python3.10 >/dev/null 2>&1; then
-      python_bin="python3.10"
     elif command -v python3 >/dev/null 2>&1; then
       python_bin="python3"
     else
       cat >&2 <<'EOF'
-Python 3.10 or newer is required to run the Python package tests.
+Python 3.11 or newer is required to run the Python package tests.
 EOF
       exit 127
     fi
   fi
 
-  run "$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else "Python 3.10 or newer is required")'
+  run "$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required")'
 
   if "$python_bin" -m ruff --version >/dev/null 2>&1; then
     run "$python_bin" -m ruff --version

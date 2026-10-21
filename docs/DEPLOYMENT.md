@@ -48,7 +48,7 @@ Existing deployments can delete the `wud-scripts` volume, its `/wud` and
 - Docker with the Compose plugin on the host.
 - A Compose stack root mounted where WUDup and the Docker daemon can both see
   the same paths.
-- Python 3.10 or newer only when running the `wudup` CLI, such as
+- Python 3.11 or newer only when running the `wudup` CLI, such as
   `wudup init`, outside the container.
 
 ## Image Tags

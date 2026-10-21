@@ -18,7 +18,7 @@ repo_dir="$(cd "$script_dir/.." && pwd -P)"
 python_has_runtime_deps() {
   "$1" - >/dev/null 2>&1 <<'PY'
 import sys
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 11):
     raise SystemExit(1)
 import rich
 import ruamel.yaml
@@ -31,6 +31,16 @@ if [[ -z "${PYTHON_BIN:-}" && -x "$venv_dir/bin/python" ]]; then
   if ! python_has_runtime_deps "$python_bin"; then
     python_bin="$venv_dir/bin/python"
   fi
+fi
+
+# Exit status 3 means the interpreter ran but is too old; other failures are
+# left for the exec below to report.
+python_version_status=0
+"$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)' \
+  >/dev/null 2>&1 || python_version_status=$?
+if [[ "$python_version_status" == 3 ]]; then
+  printf '%s\n' "docker-update-from-wud needs Python 3.11 or newer, but $python_bin is older. Install Python 3.11+ or set PYTHON_BIN to a Python 3.11+ interpreter, then run it again." >&2
+  exit 1
 fi
 
 if [[ -n "${PYTHONPATH:-}" ]]; then

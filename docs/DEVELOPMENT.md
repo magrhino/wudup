@@ -15,7 +15,7 @@ python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -
 python -m pip install --only-binary=:all: --no-deps --no-build-isolation -e '.[dev]'
 ```
 
-WUDup still supports Python 3.10 and newer. To work on another supported Python
+WUDup supports Python 3.11 and newer. To work on another supported Python
 version, create the venv with that interpreter and use
 `python -m pip install -e '.[dev]'`; this deliberately resolves dependencies for
 that interpreter rather than consuming the Python 3.14 CI lock. Regenerate the
