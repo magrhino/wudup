@@ -45,6 +45,7 @@ from .release_note_providers import (
     LSIO_RELEASE_SCAN_MAX_PAGES,  # noqa: F401 - compatibility re-export
     SECURITY_ADVISORY_FETCH_MAX,  # noqa: F401 - compatibility re-export
     SEMVER_RE,  # noqa: F401 - compatibility re-export
+    GitHubAuthenticationError,
     GitHubClient,
     _fetch_github_release_note,
     _fetch_lsio_release,  # noqa: F401 - compatibility re-export
@@ -172,6 +173,11 @@ def refresh_release_notes(
                         reason=(
                             "Existing release metadata was preserved, but GitHub "
                             "security evidence could not be checked."
+                            + (
+                                f" {exc}"
+                                if isinstance(exc, GitHubAuthenticationError)
+                                else ""
+                            )
                         ),
                     ),
                 )

@@ -48,6 +48,15 @@ GHSA_ID_RE = re.compile(
 )
 CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE | re.ASCII)
 SECURITY_ADVISORY_FETCH_MAX = 4
+GITHUB_TOKEN_REJECTED_MESSAGE = (
+    "GitHub rejected the configured GITHUB_TOKEN (expired, revoked, or mistyped). "
+    "Create a new token or remove GITHUB_TOKEN to use anonymous access, "
+    "then reload release notes."
+)
+
+
+class GitHubAuthenticationError(RuntimeError):
+    """GitHub rejected the configured token; the operator must replace or remove it."""
 
 
 class GitHubClient:
@@ -81,6 +90,11 @@ class GitHubClient:
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 return {"message": "Not Found"}
+            if exc.code == 401 and self.token:
+                raise GitHubAuthenticationError(
+                    f"{GITHUB_TOKEN_REJECTED_MESSAGE} Detail: GitHub API returned "
+                    f"HTTP 401 {exc.reason} for {url}."
+                ) from exc
             raise
 
     def repository_advisory(self, repo: str, advisory_id: str) -> object:
