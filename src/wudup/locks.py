@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Self
 
 _SECONDS_RE = re.compile(r"^\d+$", re.ASCII)
 
@@ -97,7 +98,7 @@ class DirectoryLock:
     def close(self) -> None:
         self.release()
 
-    def __enter__(self) -> DirectoryLock:
+    def __enter__(self) -> Self:
         self.acquire()
         return self
 

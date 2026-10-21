@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tests.web_scheduler_test_helpers import _auto_update_tick
@@ -74,7 +74,7 @@ def test_auto_update_scheduler_submits_after_reservation_commit(
         )
 
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", submit_after_commit)
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
 
@@ -135,7 +135,7 @@ def test_auto_update_scheduler_records_failed_policy_run(
         headers=_csrf_headers(client),
     )
 
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
     assert response is not None
@@ -233,7 +233,7 @@ def test_auto_update_scheduler_skips_previously_reserved_schedule(
                 """
             )
 
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
 
@@ -317,7 +317,7 @@ def test_auto_update_scheduler_rolls_back_partial_schedule_reservations(
         lambda _conn, _schedule_key: False,
     )
 
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
 
@@ -376,7 +376,7 @@ def test_auto_update_scheduler_rolls_back_reservation_when_queue_fails(
         raise RuntimeError("queue failed")
 
     monkeypatch.setattr(web_jobs, "_submit_apply_job_state", fail_submit)
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     try:
         _auto_update_tick(client, now)

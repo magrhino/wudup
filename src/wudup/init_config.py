@@ -10,7 +10,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from urllib.parse import urlparse
@@ -708,7 +708,7 @@ def _bool_text(value: bool) -> str:
 
 
 def _backup_path(path: Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     candidate = path.with_name(f"{path.name}.bak-{stamp}")
     index = 1
     while candidate.exists():

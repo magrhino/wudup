@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from wudup import web_scheduler
 
 
 def test_auto_update_selection_prefers_earliest_scheduled_mode() -> None:
-    earlier = datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 5, 30, 15, 0, tzinfo=timezone.utc)
+    earlier = datetime(2026, 5, 30, 14, 0, tzinfo=UTC)
+    later = datetime(2026, 5, 30, 15, 0, tzinfo=UTC)
     settings = SimpleNamespace(config=SimpleNamespace(update_mode="live"))
     grouping = SimpleNamespace(
         groups=(
@@ -64,7 +64,7 @@ def test_auto_update_selection_prefers_earliest_scheduled_mode() -> None:
 
 
 def test_auto_update_selection_excludes_unsatisfied_dependency_snoozes() -> None:
-    scheduled = datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc)
+    scheduled = datetime(2026, 5, 30, 14, 0, tzinfo=UTC)
     settings = SimpleNamespace(config=SimpleNamespace(update_mode="live"))
     grouping = SimpleNamespace(
         groups=(
@@ -135,9 +135,9 @@ def test_auto_update_selection_excludes_unsatisfied_dependency_snoozes() -> None
 
 
 def test_auto_update_selection_uses_eligible_candidate_schedule() -> None:
-    earliest = datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc)
-    selected = datetime(2026, 5, 30, 14, 2, tzinfo=timezone.utc)
-    later = datetime(2026, 5, 30, 14, 4, tzinfo=timezone.utc)
+    earliest = datetime(2026, 5, 30, 14, 0, tzinfo=UTC)
+    selected = datetime(2026, 5, 30, 14, 2, tzinfo=UTC)
+    later = datetime(2026, 5, 30, 14, 4, tzinfo=UTC)
     settings = SimpleNamespace(config=SimpleNamespace(update_mode="live"))
     grouping = SimpleNamespace(
         groups=(
@@ -205,7 +205,7 @@ def test_auto_update_selection_uses_eligible_candidate_schedule() -> None:
 
 
 def test_auto_update_selection_requires_complete_consistent_service_policies() -> None:
-    scheduled = datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc)
+    scheduled = datetime(2026, 5, 30, 14, 0, tzinfo=UTC)
     settings = SimpleNamespace(config=SimpleNamespace(update_mode="live"))
     grouping = SimpleNamespace(
         groups=(

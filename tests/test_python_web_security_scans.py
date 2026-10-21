@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from threading import Event, Lock, Thread
 from types import SimpleNamespace
+from typing import Self
 from unittest import mock
 
 import pytest
@@ -1693,7 +1694,7 @@ class QueuedExecutor:
 
 
 class NonBlockingLock:
-    def __enter__(self) -> NonBlockingLock:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -1717,7 +1718,7 @@ class TrackingLock:
     def __init__(self) -> None:
         self.entered = False
 
-    def __enter__(self) -> TrackingLock:
+    def __enter__(self) -> Self:
         self.entered = True
         return self
 

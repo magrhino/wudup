@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -52,7 +52,7 @@ def test_auto_update_scheduler_loop_runs_initial_tick_before_wait(
 def test_auto_update_scheduler_does_not_start_without_mutations(tmp_path: Path) -> None:
     client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true"})
 
-    response = _auto_update_tick(client, datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc))
+    response = _auto_update_tick(client, datetime(2026, 5, 30, 14, 30, tzinfo=UTC))
 
     assert client.app.state.web_auto_update_thread is None
     assert response is None

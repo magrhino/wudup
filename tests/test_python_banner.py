@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from io import StringIO
+from typing import Self
 from unittest import mock
 
 from wudup import banner
@@ -16,7 +17,7 @@ class FakeResponse:
     def __init__(self, payload: bytes) -> None:
         self.payload = payload
 
-    def __enter__(self) -> FakeResponse:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:

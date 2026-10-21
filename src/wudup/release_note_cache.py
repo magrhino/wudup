@@ -10,7 +10,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .lsio_updates import (
     LSIOUpdateClassification,
@@ -268,9 +268,9 @@ def _cache_stale(info: ReleaseNoteInfo, now: str) -> bool:
     except ValueError:
         return True
     if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
+        updated = updated.replace(tzinfo=UTC)
     if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
+        current = current.replace(tzinfo=UTC)
     retryable_security = info.security.reason_code in SECURITY_RETRYABLE_REASON_CODES
     ttl = (
         ERROR_CACHE_TTL_SECONDS

@@ -9,7 +9,7 @@ import socket
 import sqlite3
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import cache
 from typing import Annotated, Any
 from urllib.parse import urlencode
@@ -1226,7 +1226,7 @@ def _user_agent_hash(request: Request) -> str:
 
 def _utc_timestamp_after(seconds: int) -> str:
     return (
-        datetime.now(timezone.utc).replace(microsecond=0)
+        datetime.now(UTC).replace(microsecond=0)
         + timedelta(seconds=seconds)
     ).isoformat()
 

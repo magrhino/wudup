@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tests.web_test_helpers import (
@@ -48,7 +48,7 @@ def test_state_read_endpoints_list_existing_sqlite_rows(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "state" / "wud.sqlite"
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     past = (now - timedelta(hours=1)).isoformat()
     future = (now + timedelta(hours=1)).isoformat()
     with open_db(db_path) as conn:
@@ -305,7 +305,7 @@ def test_state_operations_write_rows_and_audit_entries(tmp_path: Path) -> None:
     )
     headers = _csrf_headers(client)
     future = (
-        datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=1)
+        datetime.now(UTC).replace(microsecond=0) + timedelta(hours=1)
     ).isoformat()
 
     policy = client.post(
@@ -664,6 +664,32 @@ def test_state_operation_uses_state_module_audit_seam(
     assert response.json()["detail"].startswith(
         "could not update database: web audit seam used"
     )
+
+
+def test_state_operations_accept_utc_z_suffix_snooze(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        {
+            "WUD_WEB_DEV_NO_AUTH": "true",
+            "WUD_WEB_MUTATIONS_ENABLED": "true",
+        },
+    )
+    headers = _csrf_headers(client)
+    future = datetime.now(UTC).replace(microsecond=0) + timedelta(hours=1)
+
+    snooze = client.post(
+        "/api/v1/state/operations",
+        json={
+            "kind": "create_snooze",
+            "service_key": "stack/app",
+            # The WebUI sends Date.toISOString() values, which end in "Z".
+            "snoozed_until": future.strftime("%Y-%m-%dT%H:%M:%S.123Z"),
+        },
+        headers=headers,
+    )
+
+    assert snooze.status_code == 200
+    assert snooze.json()["resource"]["snoozed_until"] == future.isoformat()
 
 
 def test_state_operations_validate_inputs(tmp_path: Path) -> None:

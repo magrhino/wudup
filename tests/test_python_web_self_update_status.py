@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Self
 
 from tests.web_test_helpers import (
     _client,
@@ -196,7 +197,7 @@ def test_self_update_release_notes_are_between_versions_and_capped(
     monkeypatch,
 ) -> None:
     class FakeResponse:
-        def __enter__(self) -> FakeResponse:
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, *_args: object) -> None:

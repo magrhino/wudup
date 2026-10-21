@@ -7,7 +7,7 @@ import logging
 import sqlite3
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from datetime import time as datetime_time
 from threading import Event, Thread
 from typing import Any, Protocol
@@ -71,7 +71,7 @@ class EffectiveConfigLoader(Protocol):
 
 
 def initialize_auto_update_scheduler_state(state: Any) -> None:
-    state.web_auto_update_started_at = datetime.now(timezone.utc)
+    state.web_auto_update_started_at = datetime.now(UTC)
     state.web_auto_update_stop = Event()
     state.web_auto_update_thread = None
     state.web_auto_update_held = {}
@@ -145,11 +145,11 @@ def _auto_update_tick(
 ) -> ApplyJobResponse | None:
     if not settings.mutations_enabled:
         return None
-    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now_utc = (now or datetime.now(UTC)).astimezone(UTC)
     started_at = app.state.web_auto_update_started_at
     if not isinstance(started_at, datetime):
         started_at = now_utc
-    started_at_utc = started_at.astimezone(timezone.utc)
+    started_at_utc = started_at.astimezone(UTC)
     held = _auto_update_held_slots(app.state)
 
     job_submitted = False
@@ -564,7 +564,7 @@ def _auto_update_latest_occurrence(
         day = AUTO_UPDATE_DAYS[scheduled_local.weekday()]
         if day not in days:
             continue
-        scheduled_for = scheduled_local.astimezone(timezone.utc)
+        scheduled_for = scheduled_local.astimezone(UTC)
         if scheduled_for <= now_utc:
             return scheduled_local, scheduled_for
     return None

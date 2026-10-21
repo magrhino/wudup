@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -494,7 +494,7 @@ def test_pending_endpoint_returns_hidden_wud_api_snoozed_candidates(
     state_dir.mkdir()
     db_path = state_dir / "wud.sqlite"
     future = (
-        datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=1)
+        datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
     ).isoformat()
     with open_db(db_path) as conn:
         init_db(conn)
