@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from wudup import compose as compose_module
-from wudup.command import CommandRunner, display_command
+from wudup.command import CommandError, CommandResult, CommandRunner, display_command
 from wudup.compose import (
     ComposeBindMount,
     ComposeCli,
@@ -210,6 +210,36 @@ class DockerCliTests(FakeDockerCase):
         self.assertEqual(docker.image_repo_digests("repo/web:latest"), [])
         self.assertEqual(docker.try_inspect("cid-web", "{{.Name}}"), [])
         self.assertEqual(docker.try_container_image_id("cid-web"), "")
+
+    def test_image_platform_parses_inspect_platform_fields(self) -> None:
+        runner = mock.Mock()
+        docker = DockerCli(runner=runner)
+
+        runner.capture_lines.return_value = ["linux arm64 v8"]
+        platform = docker.image_platform("repo/web:latest")
+        self.assertIsNotNone(platform)
+        assert platform is not None
+        self.assertEqual(platform.value, "linux/arm64/v8")
+        self.assertEqual(
+            runner.capture_lines.call_args.args[0],
+            [
+                "docker", "image", "inspect", "--format",
+                "{{.Os}} {{.Architecture}} {{.Variant}}", "repo/web:latest",
+            ],
+        )
+
+        runner.capture_lines.return_value = ["linux amd64 "]
+        platform = docker.image_platform("repo/web:latest")
+        assert platform is not None
+        self.assertEqual(platform.value, "linux/amd64")
+
+        runner.capture_lines.return_value = [""]
+        self.assertIsNone(docker.image_platform("repo/web:latest"))
+
+        runner.capture_lines.side_effect = CommandError(
+            CommandResult(args=("docker",), cwd=None, returncode=1)
+        )
+        self.assertIsNone(docker.image_platform("repo/web:latest"))
 
     def test_ps_image_inspect_and_inspect_use_shell_formats(self) -> None:
         (self.fake_root / "containers.tsv").write_text(

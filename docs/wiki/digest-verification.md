@@ -40,6 +40,13 @@ fetches the child manifest from the registry and compares its config digest to
 the local Docker image ID. If those match, the requested platform digest is
 verified.
 
+Docker's containerd image store, the default on new Docker 29 installs, reports
+the digest of the pulled index or manifest as the local image ID instead of the
+config digest. The updater accepts that too: an image ID equal to the requested
+manifest digest is verified. If the image ID is the tag's current index digest,
+the platform child the index lists for the local image's platform must be the
+requested digest. Otherwise verification fails with `platform-mismatch`.
+
 ## Registry Authentication
 
 The direct registry client requires TLS 1.2 or newer with certificate verification. Token
