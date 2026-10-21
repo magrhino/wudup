@@ -74,6 +74,7 @@ jobs:
           )
         }}
       docker: ${{ steps.filter.outputs.docker }}
+      python_versions: ${{ steps.filter.outputs.python_versions }}
       docker_e2e: ${{ steps.filter.outputs.docker_e2e }}
       webui_smoke: ${{ steps.filter.outputs.webui_smoke }}
       webui_demo: ${{ steps.filter.outputs.webui_demo }}
@@ -127,6 +128,16 @@ jobs:
               - 'src/wudup/*'
               - 'src/wud_updater/*'
               - 'tests/e2e-docker-compose.sh'
+            python_versions:
+              - '.github/workflows/ci.yml'
+              - 'pyproject.toml'
+              - 'src/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'wud/**'
+              - 'webui/scripts/**'
+              - 'docs/examples/**'
+              - 'maintainability-policy.json'
             webui_smoke:
               - 'webui/**'
               - '.github/actions/setup-node-env/**'
@@ -169,6 +180,59 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: python
+
+  python-versions:
+    name: python tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - changes
+    if: >-
+      ${{
+        needs.changes.outputs.skip_ci != 'true' &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          needs.changes.outputs.python_versions == 'true'
+        )
+      }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.14 runs in python tests against the hashed lock.
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Python dev dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          # The committed locks target Python 3.14; resolve for this interpreter.
+          python -m pip install -e '.[dev]'
+          python -m pip check
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        run: python -m pytest
 
   shell-tests:
     name: shell tests
