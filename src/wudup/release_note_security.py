@@ -21,7 +21,9 @@ from .release_note_models import (
 from .release_note_providers import (
     CVE_ID_RE,
     GHSA_ID_RE,
+    GITHUB_TOKEN_REJECTED_MESSAGE,
     SECURITY_ADVISORY_FETCH_MAX,
+    GitHubAuthenticationError,
     GitHubClient,
     _github_repo_valid,
     _github_source_repo,
@@ -90,12 +92,13 @@ def assess_release_security(
         or len(extracted_ids) > SECURITY_ADVISORY_FETCH_MAX
     )
     advisory_ids = extracted_ids[:SECURITY_ADVISORY_ID_MAX]
-    advisories, lookup_failed, fetch_truncated = _fetch_security_advisories(
+    advisories, lookup_failed, fetch_truncated, token_rejected = _fetch_security_advisories(
         client,
         context,
         advisory_ids[:SECURITY_ADVISORY_FETCH_MAX],
     )
     lookup_truncated = lookup_truncated or fetch_truncated
+    token_note = f" {GITHUB_TOKEN_REJECTED_MESSAGE}" if token_rejected else ""
     advisory_ids = _advisory_ids(advisory_ids, advisories)
     links = _advisory_links(advisories, advisory_ids)
     severity = _highest_advisory_severity(advisories)
@@ -123,7 +126,7 @@ def assess_release_security(
                 reason=(
                     f"Verified {verified_severity.title()} advisory {identifier} "
                     f"affects {current_version} and is patched by {target_version}."
-                    f"{incomplete}"
+                    f"{incomplete}{token_note}"
                 ),
                 advisory_ids=advisory_ids,
                 lookup_truncated=lookup_truncated,
@@ -139,6 +142,7 @@ def assess_release_security(
                 reason=(
                     "Security signals were found, but advisory lookup was capped; "
                     "review the linked advisories."
+                    f"{token_note}"
                 ),
                 advisory_ids=advisory_ids,
                 lookup_truncated=True,
@@ -154,6 +158,7 @@ def assess_release_security(
                 reason=(
                     "Security signals were found, but GitHub advisory evidence "
                     "could not be checked."
+                    f"{token_note}"
                 ),
                 advisory_ids=advisory_ids,
             ),
@@ -236,9 +241,10 @@ def _fetch_security_advisories(
     client: GitHubClient,
     context: ReleaseNoteContext,
     advisory_ids: Iterable[str],
-) -> tuple[list[_FetchedAdvisory], bool, bool]:
+) -> tuple[list[_FetchedAdvisory], bool, bool, bool]:
     advisories: list[_FetchedAdvisory] = []
     failed = False
+    token_rejected = False
     seen: set[str] = set()
     identifiers = list(advisory_ids)
     for index, advisory_id in enumerate(identifiers):
@@ -248,8 +254,9 @@ def _fetch_security_advisories(
                 context,
                 advisory_id,
             )
-        except Exception:  # noqa: BLE001 - failure becomes bounded review metadata.
+        except Exception as exc:  # noqa: BLE001 - failure becomes bounded review metadata.
             failed = True
+            token_rejected |= isinstance(exc, GitHubAuthenticationError)
             continue
         for advisory in fetched:
             key = _advisory_stable_id(advisory.payload)
@@ -259,10 +266,10 @@ def _fetch_security_advisories(
             advisories.append(advisory)
             if len(advisories) >= SECURITY_ADVISORY_FETCH_MAX:
                 remaining_ids = index < len(identifiers) - 1
-                return advisories, failed, item_truncated or remaining_ids
+                return advisories, failed, item_truncated or remaining_ids, token_rejected
         if item_truncated:
-            return advisories, failed, True
-    return advisories, failed, False
+            return advisories, failed, True, token_rejected
+    return advisories, failed, False, token_rejected
 
 
 def _fetch_security_advisory(

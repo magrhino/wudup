@@ -13,6 +13,10 @@ except ModuleNotFoundError:
     from test_python_db import V4_SCHEMA_SQL
 
 from wudup.db import SCHEMA_VERSION, init_db, open_db
+from wudup.release_note_providers import (
+    GITHUB_TOKEN_REJECTED_MESSAGE,
+    GitHubAuthenticationError,
+)
 from wudup.release_notes import (
     GitHubClient,
     ReleaseNoteInfo,
@@ -506,6 +510,52 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(assessment.outcome, "verified_critical_high")
         self.assertTrue(assessment.lookup_truncated)
         self.assertEqual(len(calls), 4)
+
+    def test_security_assessment_names_rejected_token_when_verified_or_capped(
+        self,
+    ) -> None:
+        context = release_note_contexts(
+            parse_wud_text("ghcr.io/acme/app:1.2.0 tag=1.2.1\n").targets,
+            {},
+        )[0]
+        capped_ids = [f"GHSA-AAAA-BBBB-{index:04d}" for index in range(5)]
+        cases = (
+            (
+                "verified_exposure",
+                ["GHSA-AAAA-BBBB-0000", "GHSA-AAAA-BBBB-1111"],
+                {"GHSA-AAAA-BBBB-0000"},
+            ),
+            ("advisory_lookup_truncated", capped_ids, set(capped_ids)),
+        )
+        for reason_code, advisory_ids, rejected in cases:
+            with self.subTest(reason_code=reason_code):
+
+                def fetch_json(url: str, rejected: set[str] = rejected) -> object:
+                    advisory_id = url.rsplit("/", 1)[-1]
+                    if advisory_id in rejected:
+                        raise GitHubAuthenticationError(GITHUB_TOKEN_REJECTED_MESSAGE)
+                    return security_advisory(advisory_id=advisory_id)
+
+                info = ReleaseNoteInfo(
+                    line_no=1,
+                    status="ready",
+                    provider="github",
+                    image_repo="acme/app",
+                    upstream_repo="acme/app",
+                    release_tag="v1.2.1",
+                    title="Security update",
+                    body=" ".join(advisory_ids),
+                )
+                assessment, _links = release_notes_module.assess_release_security(
+                    context,
+                    info,
+                    GitHubClient(fetch_json=fetch_json),
+                )
+
+                self.assertEqual(assessment.reason_code, reason_code)
+                self.assertTrue(
+                    assessment.reason.endswith(f" {GITHUB_TOKEN_REJECTED_MESSAGE}")
+                )
 
     def test_security_assessment_caps_cve_query_results(self) -> None:
         cve_id = "CVE-2026-12345"

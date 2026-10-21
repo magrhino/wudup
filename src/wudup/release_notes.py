@@ -42,9 +42,11 @@ from .release_note_providers import (
     DEFAULT_GITHUB_TIMEOUT_SECONDS,  # noqa: F401 - compatibility re-export
     GHSA_ID_RE,  # noqa: F401 - compatibility re-export
     GITHUB_REPO_RE,  # noqa: F401 - compatibility re-export
+    GITHUB_TOKEN_REJECTED_MESSAGE,
     LSIO_RELEASE_SCAN_MAX_PAGES,  # noqa: F401 - compatibility re-export
     SECURITY_ADVISORY_FETCH_MAX,  # noqa: F401 - compatibility re-export
     SEMVER_RE,  # noqa: F401 - compatibility re-export
+    GitHubAuthenticationError,
     GitHubClient,
     _fetch_github_release_note,
     _fetch_lsio_release,  # noqa: F401 - compatibility re-export
@@ -172,6 +174,11 @@ def refresh_release_notes(
                         reason=(
                             "Existing release metadata was preserved, but GitHub "
                             "security evidence could not be checked."
+                            + (
+                                f" {GITHUB_TOKEN_REJECTED_MESSAGE}"
+                                if isinstance(exc, GitHubAuthenticationError)
+                                else ""
+                            )
                         ),
                     ),
                 )
