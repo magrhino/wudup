@@ -130,9 +130,14 @@ jobs:
               - 'tests/e2e-docker-compose.sh'
             python_versions:
               - '.github/workflows/ci.yml'
+              - '.github/actions/setup-python-env/**'
               - 'pyproject.toml'
+              - 'requirements.txt'
+              - 'requirements-build.txt'
+              - 'requirements-dev.txt'
               - 'src/**'
               - 'tests/**'
+              - 'bin/**'
               - 'scripts/**'
               - 'wud/**'
               - 'webui/scripts/**'
@@ -198,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.14 runs in python tests against the hashed lock.
+        # python tests covers 3.14; these install the same hashed locks.
         python-version:
           - "3.11"
           - "3.12"
@@ -215,21 +220,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Set up Python environment
+        uses: ./.github/actions/setup-python-env
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install Python dev dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m venv .venv
-          . .venv/bin/activate
-          # The committed locks target Python 3.14; resolve for this interpreter.
-          python -m pip install -e '.[dev]'
-          python -m pip check
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
         run: python -m pytest

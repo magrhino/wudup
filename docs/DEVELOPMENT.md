@@ -16,11 +16,12 @@ python -m pip install --only-binary=:all: --no-deps --no-build-isolation -e '.[d
 ```
 
 WUDup supports Python 3.11 and newer. To work on another supported Python
-version, create the venv with that interpreter and use
-`python -m pip install -e '.[dev]'`; this deliberately resolves dependencies for
-that interpreter rather than consuming the Python 3.14 CI lock. Regenerate the
-committed locks with Python 3.14, since environment markers can change the
-dependency set on older interpreters.
+version, create the venv with that interpreter and run the same locked install
+commands. CI installs these locks on Python 3.11, 3.12, and 3.13 and runs the
+pytest suite there. Regenerate the committed locks with Python 3.14. Environment
+markers can change the dependency set on older interpreters; if a hashed install
+then reports a requirement that is not pinned, the locks need per-interpreter
+entries before that version can stay in CI.
 
 Run the full validation entrypoint:
 
@@ -316,6 +317,12 @@ the Docker build smoke test on Release Please PRs, and
 direct `docs:` or `chore:` commits to `main` skip CI and Release Please jobs.
 Merged Release Please PRs can still run the release automation needed to tag the
 release.
+
+Changes to Python sources, tests, scripts, or the hashed locks also run the
+pytest suite on Python 3.11, 3.12, and 3.13 (`python tests (3.11)` and so on),
+installing the same locks as the 3.14 `python tests` job. These jobs are not
+branch-required, but a failure fails the `ci` run, which blocks dependency
+auto-merge.
 
 Optional checks are available when broader coverage is useful:
 

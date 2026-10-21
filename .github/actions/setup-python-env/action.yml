@@ -1,13 +1,18 @@
 name: setup-python-env
 description: "Set up Python and install development dependencies in a virtual environment"
+inputs:
+  python-version:
+    description: "Python version to install the hashed locks into"
+    required: false
+    # Match the interpreter used to generate the CI lock.
+    default: "3.14"
 runs:
   using: "composite"
   steps:
     - name: Set up Python
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
-        # Match the interpreter used to generate the CI lock.
-        python-version: "3.14"
+        python-version: ${{ inputs.python-version }}
         cache: pip
         cache-dependency-path: |
           requirements.txt
