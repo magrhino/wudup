@@ -18,7 +18,7 @@ repo_dir="$(cd "$script_dir/.." && pwd -P)"
 python_has_runtime_deps() {
   "$1" - >/dev/null 2>&1 <<'PY'
 import sys
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 11):
     raise SystemExit(1)
 import rich
 import ruamel.yaml
