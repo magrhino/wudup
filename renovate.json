@@ -25,10 +25,12 @@
       "addLabels": ["automerge"]
     },
     {
-      "description": "Ship Docker CLI/Compose security fixes sooner; the bundled Go binaries are scanned on every edge and release publish",
+      "description": "Ship Docker CLI/Compose security fixes sooner: the bundled Go binaries are scanned on every edge and release publish. Open the PR any day and without waiting for branch checks, which never run on a bare Renovate branch",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["docker"],
-      "minimumReleaseAge": "1 day"
+      "minimumReleaseAge": "1 day",
+      "schedule": ["at any time"],
+      "prCreation": "immediate"
     }
   ],
   "pinDigests": true

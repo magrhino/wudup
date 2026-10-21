@@ -138,6 +138,8 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
     def test_renovate_shortens_release_age_only_for_docker_cli(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
         self.assertEqual(config["minimumReleaseAge"], "7 days")
+        self.assertEqual(config["schedule"], ["* 9-12 * * 1"])
+        self.assertEqual(config["prCreation"], "not-pending")
         overrides = [
             rule for rule in config["packageRules"] if "minimumReleaseAge" in rule
         ]
@@ -146,9 +148,20 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         self.assertEqual(rule["matchDatasources"], ["docker"])
         self.assertEqual(rule["matchPackageNames"], ["docker"])
         self.assertEqual(rule["minimumReleaseAge"], "1 day")
+        # Docker CLI fixes unblock edge and release publishing, so they skip
+        # the Monday window and open without waiting for branch checks.
+        self.assertEqual(rule["schedule"], ["at any time"])
+        self.assertEqual(rule["prCreation"], "immediate")
         self.assertEqual(
             set(rule),
-            {"description", "matchDatasources", "matchPackageNames", "minimumReleaseAge"},
+            {
+                "description",
+                "matchDatasources",
+                "matchPackageNames",
+                "minimumReleaseAge",
+                "schedule",
+                "prCreation",
+            },
         )
 
     def test_dependency_review_checks_all_scopes_and_missing_licenses(self) -> None:
