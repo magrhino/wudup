@@ -4,6 +4,82 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.66.0](https://github.com/magrhino/wudup/compare/v0.65.2...v0.66.0) (2026-10-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **wudup:** POST /api/v1/pending/cleanup, /api/v1/pending/removal-plan and /api/v1/pending/removal are removed, and plan responses no longer include cleanup.cleanup_id or cleanup.can_remove_unmatched.
+* **wudup:** POST /api/v1/pending/cleanup, /api/v1/pending/removal-plan and /api/v1/pending/removal are removed, and plan responses no longer include cleanup.cleanup_id or cleanup.can_remove_unmatched.
+* **wudup:** the `updates`, `sync-wud-scripts`, and `truenas-status-export` container commands, `wudup updates`, `wudup init --profile host`, bin/updates, install.sh, the WUD shell scripts, and TrueNAS status checks are removed. The legacy-file-mode tag marks the last release (v0.65.2) that shipped them.
+
+### refactor
+
+* **wudup:** make the WUD API the WebUI's only pending source ([#826](https://github.com/magrhino/wudup/issues/826)) ([0c0bf55](https://github.com/magrhino/wudup/commit/0c0bf552ecd2b734868f803e9810281aab1c8979))
+* **wudup:** remove shell callbacks, script sync, host CLI, and TrueNAS status ([#822](https://github.com/magrhino/wudup/issues/822)) ([3bd758d](https://github.com/magrhino/wudup/commit/3bd758d772a3e190251a2d45b3418ee94861bbf0))
+* **wudup:** remove WebUI pending cleanup and removal actions ([#825](https://github.com/magrhino/wudup/issues/825)) ([b76b871](https://github.com/magrhino/wudup/commit/b76b8710aca12c188836c90ff8d753175147e8a1))
+
+
+### Features
+
+* **edge:** delete edge images older than the newest 50 builds ([#848](https://github.com/magrhino/wudup/issues/848)) ([85f05c1](https://github.com/magrhino/wudup/commit/85f05c1f4bffb5149ca15b73d530b1189a06e8df)), closes [#844](https://github.com/magrhino/wudup/issues/844)
+* **release:** publish an edge image channel from main ([#843](https://github.com/magrhino/wudup/issues/843)) ([f64d490](https://github.com/magrhino/wudup/commit/f64d490ba1e12d90991a63a723d50d6c4af42b8a))
+* **webui:** show only decision-relevant lines in pending plan review ([#859](https://github.com/magrhino/wudup/issues/859)) ([b12e4ca](https://github.com/magrhino/wudup/commit/b12e4caf167b87a04bde9241a5ab7f9dfec050e5))
+
+
+### Bug Fixes
+
+* **compose:** order stack services deterministically so plans stay stable ([#885](https://github.com/magrhino/wudup/issues/885)) ([b7e3d62](https://github.com/magrhino/wudup/commit/b7e3d62459e7e756d03206c4a8b4d1247778da4e))
+* **compose:** refuse duplicate labels and keep comments on digest unpin ([#837](https://github.com/magrhino/wudup/issues/837)) ([9e8fb14](https://github.com/magrhino/wudup/commit/9e8fb1437206db584aa8798af533f9e715ee8cac))
+* **compose:** sync Compose rewrites and remove updater backups ([#838](https://github.com/magrhino/wudup/issues/838)) ([0ea0f37](https://github.com/magrhino/wudup/commit/0ea0f374fc7b73721856bcc440903047b78b7534))
+* **db:** make schema migrations all-or-nothing ([#866](https://github.com/magrhino/wudup/issues/866)) ([6f01bb7](https://github.com/magrhino/wudup/commit/6f01bb739ce4ca3e15de691cc43b12da1a6132d0))
+* **maintainability:** keep --policy-file inside the --repo directory ([#886](https://github.com/magrhino/wudup/issues/886)) ([f6201db](https://github.com/magrhino/wudup/commit/f6201db3436ba30f8f5c0bc4369e5db8cd3f9750))
+* **release:** publish each stable release's images once ([#849](https://github.com/magrhino/wudup/issues/849)) ([dd617df](https://github.com/magrhino/wudup/commit/dd617df3fe1208853ebed973f4e82385acb58a95))
+* **retag:** block retags that would stop WUDup or its Docker endpoint ([#889](https://github.com/magrhino/wudup/issues/889)) ([2a61857](https://github.com/magrhino/wudup/commit/2a61857b0c75dd14e38609118c24e6b9625fc136)), closes [#887](https://github.com/magrhino/wudup/issues/887)
+* **retag:** check approved Compose hash and keep stopped services stopped on rollback ([#835](https://github.com/magrhino/wudup/issues/835)) ([5e4cfc9](https://github.com/magrhino/wudup/commit/5e4cfc9d3f8fb10bf55b8a9ae38e383feee1a093))
+* **security:** patch open dependency, CodeQL, and Scorecard alerts ([#830](https://github.com/magrhino/wudup/issues/830)) ([c9a65fd](https://github.com/magrhino/wudup/commit/c9a65fdba651b9699fcf08a7020b3ac0225179a1))
+* **security:** unblock image scans and catch new CVEs daily ([#860](https://github.com/magrhino/wudup/issues/860)) ([ef133f1](https://github.com/magrhino/wudup/commit/ef133f1f0d80c1c8a197e7191e9f0734d1aea514))
+* **tag-streams:** let suffixed tracking rules follow version part-count changes ([#884](https://github.com/magrhino/wudup/issues/884)) ([067d9fa](https://github.com/magrhino/wudup/commit/067d9fab18dd9e63da2f1bc6c853ff833c17bb86))
+* terminate interrupted streaming commands ([#869](https://github.com/magrhino/wudup/issues/869)) ([82c2b74](https://github.com/magrhino/wudup/commit/82c2b740df5709ae5f4b7bc7e67410b37de7f145))
+* **updater:** block updates that would stop WUDup's Docker endpoint ([#888](https://github.com/magrhino/wudup/issues/888)) ([f59014f](https://github.com/magrhino/wudup/commit/f59014f7f14cb0267fca4bc4b314df1f8baebb28))
+* **updater:** clean up Compose, WUD entries and audit when a run is interrupted ([#872](https://github.com/magrhino/wudup/issues/872)) ([4937323](https://github.com/magrhino/wudup/commit/4937323310dae7fd4b728dae89432a70ecbafe37))
+* **updater:** fail health gate when a selected service has no container ([#836](https://github.com/magrhino/wudup/issues/836)) ([cef9b6d](https://github.com/magrhino/wudup/commit/cef9b6df8d4f70b7b736ece1cf774e6bab40db7a))
+* **updater:** keep tag exclusions from breaking variables or starting services ([#839](https://github.com/magrhino/wudup/issues/839)) ([3d7013f](https://github.com/magrhino/wudup/commit/3d7013fcadf268f7778af5078bfee84de0685431))
+* **updater:** recognize published-port and network_mode Docker endpoints ([#890](https://github.com/magrhino/wudup/issues/890)) ([734fee8](https://github.com/magrhino/wudup/commit/734fee81c93ac4a751094f77c7df351c5319a715))
+* **updater:** recreate or start containers on retry after a failed recreate ([#841](https://github.com/magrhino/wudup/issues/841)) ([b5156ab](https://github.com/magrhino/wudup/commit/b5156ab3134daa715ebc23d5d4346e4812f5da1f))
+* **updater:** refuse to recreate override-file Compose projects ([#840](https://github.com/magrhino/wudup/issues/840)) ([a72a705](https://github.com/magrhino/wudup/commit/a72a705c3ecd312217a909d426b74caababfe0c1))
+* **web-scheduler:** hold blocked auto-update slots and record missed runs ([#870](https://github.com/magrhino/wudup/issues/870)) ([6414152](https://github.com/magrhino/wudup/commit/6414152efc573586eded637b6c7ba29e6e899085))
+* **webui:** correct documentation links ([#865](https://github.com/magrhino/wudup/issues/865)) ([05c42ed](https://github.com/magrhino/wudup/commit/05c42eddfe4d86f6ce92dfffae3ed85dbd6b6360))
+* **webui:** drop duplicate image change and unscanned security noise from plan review ([#863](https://github.com/magrhino/wudup/issues/863)) ([8c5a69b](https://github.com/magrhino/wudup/commit/8c5a69bd8fb7231fcc21abe238990f1a8aebeb19))
+* **webui:** explain stale plan rejections and offer a rebuild ([#883](https://github.com/magrhino/wudup/issues/883)) ([27846bc](https://github.com/magrhino/wudup/commit/27846bcbd6c4d1a18b9288269642c234df59b1db))
+* **webui:** keep WUD API credentials off redirects and redact webhook errors ([#833](https://github.com/magrhino/wudup/issues/833)) ([96cb759](https://github.com/magrhino/wudup/commit/96cb759695f91c7e6c93216bedd39429a3f966b2))
+* **webui:** prefer proxy X-Forwarded-* headers and keep /readyz local ([#831](https://github.com/magrhino/wudup/issues/831)) ([7f6f036](https://github.com/magrhino/wudup/commit/7f6f036ce1f9dfc37c39f0a24fa2cb73ef397616))
+* **webui:** reserve login attempts and throttle bearer token guesses ([#832](https://github.com/magrhino/wudup/issues/832)) ([d11adf0](https://github.com/magrhino/wudup/commit/d11adf076a10cd422047213ab0c24163669b38f8))
+* **webui:** reserve the mutation gate for container restarts ([#834](https://github.com/magrhino/wudup/issues/834)) ([43bfdf4](https://github.com/magrhino/wudup/commit/43bfdf40ca5bba53d729c850c6624b9f693666da))
+
+
+### Performance Improvements
+
+* **web:** time WebUI requests and stop repeating Docker reads per request ([#845](https://github.com/magrhino/wudup/issues/845)) ([0a2158d](https://github.com/magrhino/wudup/commit/0a2158dc40710273d9423f2a7b7e2efa1215a801))
+
+
+### Dependencies
+
+* **deps-dev:** bump the npm-development group across 1 directory with 2 updates ([#877](https://github.com/magrhino/wudup/issues/877)) ([87b417b](https://github.com/magrhino/wudup/commit/87b417b92523ca4e763fd1eda88202d92a9becb4))
+* **deps-dev:** bump the npm-development group across 1 directory with 6 updates ([#862](https://github.com/magrhino/wudup/issues/862)) ([fd22796](https://github.com/magrhino/wudup/commit/fd227966503f10eaf12ad204c976193d16ae1e6c))
+* **deps-dev:** bump the python-development group across 1 directory with 2 updates ([#852](https://github.com/magrhino/wudup/issues/852)) ([5913ff5](https://github.com/magrhino/wudup/commit/5913ff56e7c266b5e1d496ffc77c3d943de8d1f2))
+* **deps-dev:** bump the python-development group across 1 directory with 2 updates ([#879](https://github.com/magrhino/wudup/issues/879)) ([7d16719](https://github.com/magrhino/wudup/commit/7d167190270e6daded66541e98ab4f1349be4c94))
+* **deps:** bump @lucide/vue ([#853](https://github.com/magrhino/wudup/issues/853)) ([7670d6e](https://github.com/magrhino/wudup/commit/7670d6e7a7602adac110385768601a9e0c80e24a))
+* **deps:** bump @vueuse/core from 14.4.0 to 15.0.0 in /webui ([#855](https://github.com/magrhino/wudup/issues/855)) ([99cca59](https://github.com/magrhino/wudup/commit/99cca59a6dc7f8384a03f505ffd07ca878eadee9))
+* **deps:** bump source-map-js from 1.2.1 to 1.2.2 in /webui ([#857](https://github.com/magrhino/wudup/issues/857)) ([c86ab68](https://github.com/magrhino/wudup/commit/c86ab6821fa336d2bc61693a1d57b77bd8e085a5))
+* **deps:** bump the github-actions group across 1 directory with 2 updates ([#880](https://github.com/magrhino/wudup/issues/880)) ([4630c30](https://github.com/magrhino/wudup/commit/4630c309bc5de1eef2ed61ac4b075ee7d09a1078))
+* **deps:** bump the github-actions group across 1 directory with 3 updates ([#856](https://github.com/magrhino/wudup/issues/856)) ([3d603e6](https://github.com/magrhino/wudup/commit/3d603e613276e02d518cedd28cfb54f29814837b))
+* **deps:** bump the npm-production group in /webui with 2 updates ([#875](https://github.com/magrhino/wudup/issues/875)) ([4ca3f6b](https://github.com/magrhino/wudup/commit/4ca3f6bf3ca86f3a5d47fad8de7b36dca79df992))
+* **deps:** bump the python-production group with 2 updates ([#851](https://github.com/magrhino/wudup/issues/851)) ([6977030](https://github.com/magrhino/wudup/commit/6977030c384f9c951cbb059be375390691ba2a9c))
+* **deps:** bump the python-production group with 2 updates ([#873](https://github.com/magrhino/wudup/issues/873)) ([56a1bb9](https://github.com/magrhino/wudup/commit/56a1bb970e4e5310c2d824e08f048cc15102514d))
+* **deps:** bump the python-production group with 2 updates ([#895](https://github.com/magrhino/wudup/issues/895)) ([caf9f02](https://github.com/magrhino/wudup/commit/caf9f0217114cb21d4532ba7fb86d33b7d1eb9f9))
+* **deps:** update aquasec/trivy docker tag to v0.75.0 ([#847](https://github.com/magrhino/wudup/issues/847)) ([388bc41](https://github.com/magrhino/wudup/commit/388bc415d6fd589aba2f85436ded62dcdf8e86de))
+
 ## [0.65.2](https://github.com/magrhino/wudup/compare/v0.65.1...v0.65.2) (2026-10-01)
 
 
