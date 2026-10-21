@@ -15,8 +15,10 @@ from wudup.release_note_providers import (
 )
 from wudup.release_notes import (
     GitHubClient,
+    ReleaseNoteInfo,
     ReleaseNoteLink,
     ReleaseSecurityAssessment,
+    assess_release_security,
     cached_release_notes,
     refresh_release_notes,
     release_note_contexts,
@@ -143,10 +145,45 @@ class GitHubTransportContractTests(unittest.TestCase):
                     client=GitHubClient(token="example-dead-token"),
                     now="2026-01-02T00:00:00+00:00",
                 )[0]
+            stored = cached_release_notes(conn, targets, {})[0]
 
         self.assertEqual(info.status, "ready")
-        self.assertIn(GITHUB_TOKEN_REJECTED_MESSAGE, info.security.reason)
-        self.assertNotIn("example-dead-token", info.security.reason)
+        self.assertEqual(
+            info.security.reason,
+            "Existing release metadata was preserved, but GitHub security evidence "
+            f"could not be checked. {GITHUB_TOKEN_REJECTED_MESSAGE}",
+        )
+        self.assertEqual(stored.security.reason, info.security.reason)
+
+    def test_rejected_token_is_named_when_advisory_lookup_fails(self) -> None:
+        context = release_note_contexts(
+            parse_wud_text("ghcr.io/acme/app:1.2.0 tag=1.2.1\n").targets,
+            {},
+        )[0]
+        info = ReleaseNoteInfo(
+            line_no=1,
+            status="ready",
+            provider="github",
+            image_repo="acme/app",
+            upstream_repo="acme/app",
+            release_tag="v1.2.1",
+            body="Fixes GHSA-aaaa-bbbb-cccc.",
+        )
+        error = urllib.error.HTTPError("https://api.github.com/", 401, "Unauthorized", {}, None)
+        self.addCleanup(error.close)
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            assessment, _links = assess_release_security(
+                context,
+                info,
+                GitHubClient(token="example-dead-token"),
+            )
+
+        self.assertEqual(assessment.reason_code, "advisory_lookup_failed")
+        self.assertEqual(
+            assessment.reason,
+            "Security signals were found, but GitHub advisory evidence could not "
+            f"be checked. {GITHUB_TOKEN_REJECTED_MESSAGE}",
+        )
 
 
 class ReleaseNoteCacheContractTests(unittest.TestCase):
