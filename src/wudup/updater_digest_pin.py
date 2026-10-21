@@ -134,6 +134,13 @@ def _digest_pin_resolve_error(
             f"Digest-pin target moved for {resolved_image}: "
             f"planned digest is no longer current{current}"
         )
+    if result.reason == "tag-digest-unavailable":
+        return (
+            f"Could not confirm digest-pin target for {resolved_image}: the "
+            "registry did not report which digest the tag points to, and the "
+            "planned digest could not be read for comparison. Check that the "
+            "registry is reachable and retry"
+        )
     return f"Could not resolve digest-pin target for {resolved_image}: {result.reason}"
 
 

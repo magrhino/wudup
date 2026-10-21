@@ -163,7 +163,11 @@ def test_apply_endpoint_applies_digest_unpin_plan_and_records_provenance(
     # The WebUI applies from a private copy and never edits the shared WUD file.
     assert wud_file.read_text(encoding="utf-8") == "repo/app:latest@sha256:new\n"
     calls = _fake_docker_calls(fake_root)
-    registry_fetch.assert_called_once()
+    # The tag lookup reports no digest, so preflight also reads the planned digest.
+    assert [call.args[1] for call in registry_fetch.call_args_list] == [
+        "latest",
+        "sha256:new",
+    ]
     assert "manifest inspect docker.io/repo/app:latest" in calls
     assert " pull app" in calls
     assert " up -d --remove-orphans --pull never --no-build --no-deps" in calls

@@ -572,6 +572,25 @@ class DigestVerifier:
                 digest=expected,
                 source=tag_document.source,
             )
+        if not tag_digest:
+            # `docker manifest inspect --verbose` omits an index's own digest,
+            # so compare the tag's manifest with the planned digest's instead.
+            expected_document = self._try_fetch(registry_image, expected)
+            if expected_document is None:
+                return DigestResolveResult(
+                    ok=False,
+                    status=_failure_status(registry_image),
+                    reason="tag-digest-unavailable",
+                    source=tag_document.source,
+                )
+            if _same_manifest(tag_document.payload, expected_document.payload):
+                return DigestResolveResult(
+                    ok=True,
+                    status=_STATUS_VERIFIED,
+                    reason="tag-manifest-current",
+                    digest=expected,
+                    source=tag_document.source,
+                )
         return DigestResolveResult(
             ok=False,
             status=_STATUS_FAILED,
