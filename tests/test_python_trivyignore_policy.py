@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -64,7 +64,7 @@ def test_every_entry_needs_id_statement_and_date(missing: str) -> None:
     [
         (date(2027, 1, 8), "more than 90 days away"),
         ("2026-11-08", "unquoted date"),
-        (datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc), "unquoted date"),
+        (datetime(2026, 11, 8, 12, 0, tzinfo=UTC), "unquoted date"),
     ],
 )
 def test_expiry_must_be_a_date_within_90_days(expires, message: str) -> None:

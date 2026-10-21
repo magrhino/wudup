@@ -10,7 +10,7 @@ See SECURITY.md#release-image-policy.
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +92,7 @@ def check_file(path: Path) -> int:
     except (OSError, YAMLError) as exc:
         print(f"Could not read the image scan ignore file {path.name}: {exc}", file=sys.stderr)
         return 1
-    errors, notices = validate(data, datetime.now(timezone.utc).date())
+    errors, notices = validate(data, datetime.now(UTC).date())
     for notice in notices:
         print(f"{path.name}: {notice}")
     if errors:

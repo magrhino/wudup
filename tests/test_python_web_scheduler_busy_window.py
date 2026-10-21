@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,7 @@ from tests.web_test_helpers import (
 from wudup import web_jobs, web_scheduler
 from wudup.db import open_db
 
-SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+SCHEDULED = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
 APP_KEY = "stack/app|2026-05-30|09:30|America/Chicago"
 APPLY_RUNNING = "an apply job is already running"
 

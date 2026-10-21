@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from datetime import time as datetime_time
 from typing import Any
 
@@ -889,7 +889,7 @@ def _required_state_text(value: str, field_name: str) -> str:
 def _future_iso_timestamp(value: str, field_name: str) -> str:
     raw = _required_state_text(value, field_name)
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -900,8 +900,8 @@ def _future_iso_timestamp(value: str, field_name: str) -> str:
             status_code=422,
             detail=f"{field_name} must include a timezone",
         )
-    normalized = parsed.astimezone(timezone.utc).replace(microsecond=0)
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    normalized = parsed.astimezone(UTC).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     if normalized <= now:
         raise HTTPException(
             status_code=422,

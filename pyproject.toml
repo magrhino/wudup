@@ -36,8 +36,7 @@ wud-updater = "wudup.cli:main"
 [tool.ruff]
 line-length = 88
 src = ["src", "tests"]
-# Stays at py310 until the py311 lint cleanup (UP017, PYI034, FURB162) lands.
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 extend-select = ["E4", "E7", "E9", "F"]

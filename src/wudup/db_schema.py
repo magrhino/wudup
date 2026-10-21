@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .digest_provenance import DIGEST_PROVENANCE_SQL_COLUMNS
 
@@ -718,7 +718,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 def utc_timestamp() -> str:
     """Return a stable UTC timestamp format for SQLite text comparisons."""
 
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 @contextmanager

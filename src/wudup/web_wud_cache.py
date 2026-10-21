@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 
 from . import web_wud_config, web_wud_observation_store, web_wud_transport
@@ -1003,4 +1003,4 @@ def _safe_cache_error(settings: WebSettings, exc: BaseException) -> str:
 
 
 def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()

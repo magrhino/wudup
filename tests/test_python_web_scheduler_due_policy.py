@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -88,7 +88,7 @@ def test_auto_update_scheduler_applies_due_policy_at_configured_local_time(
         headers=_csrf_headers(client),
     )
 
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
     assert response is not None
@@ -179,7 +179,7 @@ def test_auto_update_scheduler_applies_due_policy_within_grace_window(
         headers=_csrf_headers(client),
     )
 
-    now = datetime(2026, 5, 30, 14, 34, 59, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 34, 59, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
     assert response is not None
@@ -230,7 +230,7 @@ def test_auto_update_scheduler_applies_due_policy_after_local_midnight(
         headers=_csrf_headers(client),
     )
 
-    now = datetime(2026, 5, 31, 5, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 31, 5, 1, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
     assert response is not None
@@ -289,7 +289,7 @@ def test_auto_update_scheduler_does_not_apply_late_pending_after_grace_window(
         headers=_csrf_headers(client),
     )
 
-    scheduled = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    scheduled = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = scheduled - timedelta(minutes=30)
     empty_response = _auto_update_tick(client, scheduled)
     original = "repo/app:latest\n"
@@ -341,7 +341,7 @@ def test_auto_update_scheduler_skips_when_started_after_grace_window(
         headers=_csrf_headers(client),
     )
 
-    scheduled = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    scheduled = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = scheduled + timedelta(minutes=5)
     response = _auto_update_tick(client, scheduled + timedelta(minutes=6))
 
@@ -386,7 +386,7 @@ def test_auto_update_scheduler_skips_tag_updates_without_mutation(
         headers=_csrf_headers(client),
     )
 
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     client.app.state.web_auto_update_started_at = now - timedelta(minutes=30)
     response = _auto_update_tick(client, now)
 
@@ -413,7 +413,7 @@ def test_auto_update_candidate_reuses_effective_config_snapshot(
     )
     settings = web_config.load_web_settings(env)
     settings.config.wud_out_file.write_text("repo/app:latest\n", encoding="utf-8")
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     first_config = replace(settings.config, docker_base=tmp_path / "first")
     second_config = replace(settings.config, docker_base=tmp_path / "second")
     loaded_settings: list[object] = []
@@ -584,7 +584,7 @@ def test_auto_update_scheduler_uses_api_pending_source(
         },
         headers=_csrf_headers(client),
     )
-    now = datetime(2026, 5, 30, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 14, 30, tzinfo=UTC)
     settings = client.app.state.web_settings
     with open_db(settings.config.db_path) as conn:
         candidate = web_scheduler._auto_update_candidate(
