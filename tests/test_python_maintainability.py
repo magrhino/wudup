@@ -271,6 +271,20 @@ def test_comment_only_move_requires_review_when_git_misses_rename(
     assert report["category_move_candidates"] == [target]
 
 
+def test_deleting_an_unreviewed_file_while_docs_change_only_warns(repo):
+    repo.lines("source.py", 300)
+    repo.write("README.md", b"# Before\n")
+    repo.base = repo.commit()
+    (repo.path / "source.py").unlink()
+    repo.write("README.md", b"# After the removal\n")
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["failures"] == []
+    assert "Possible category move" in row(report, "source.py")["warnings"][0]
+    assert report["category_move_candidates"] == ["README.md"]
+
+
 @pytest.fixture
 def ambiguous_move(repo):
     repo.lines("source.py", 900)
@@ -805,13 +819,15 @@ def test_option_like_ref_does_not_become_git_option(repo):
     assert "rev-parse failed" in report["error"]
 
 
-def test_draft_policy_has_no_initial_ceilings_or_integration_baseline():
+def test_committed_baseline_is_ready_and_records_name_existing_files():
     policy = json.loads((ROOT / POLICY_PATH).read_text())
-    assert policy["baseline"]["status"] == "pending"
-    assert policy["baseline"]["commit"] is None
-    assert policy["ceilings"] == policy["allowances"] == {}
+    assert policy["baseline"]["status"] == "ready"
+    assert len(policy["baseline"]["commit"]) == 40
     assert policy["thresholds"] == {"warn": 500, "block": 800}
-    assert "not an integrated baseline" in policy["baseline"]["reason"]
+    records = {**policy["ceilings"], **policy["allowances"]}
+    assert records
+    # A renamed or deleted owner must take its record with it.
+    assert [path for path in records if not (ROOT / path).is_file()] == []
 
 
 def test_malformed_thresholds_and_unknown_fields_fail_closed(repo):

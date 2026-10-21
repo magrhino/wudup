@@ -3,6 +3,9 @@
 /.github/workflows/ @magrhino
 /dangerfile.js @magrhino
 
+/maintainability-policy.json @magrhino
+/scripts/check_maintainability.py @magrhino
+
 /.dockerignore @magrhino
 /Dockerfile @magrhino
 /entrypoint.sh @magrhino

@@ -64,7 +64,14 @@ tests/container-build.sh
 The deployment compose example uses the published GHCR image. The build compose
 artifact keeps the repository-local image build path used by smoke tests.
 
-## Maintainability Checker (Draft)
+## Maintainability Checker
+
+Maintainability is the goal; file size is only the signal that asks for a review.
+A module is maintainable when it has one clear reason to change and a reader can
+work on one task without loading unrelated behavior. A large cohesive owner is
+better than fragments that every task must read together, so the right answer to
+a size failure is sometimes a reviewed, higher ceiling rather than a split.
+Extract when a file has gained a second responsibility, not to get under a number.
 
 `scripts/check_maintainability.py` compares physical lines in committed Git blobs,
 including a final line without a newline. Enforcement uses
@@ -83,15 +90,13 @@ to 1 MiB before JSON parsing. Git object sizes are checked before loading policy
 contents, and external reads stop after the limit plus one byte. Oversized policies
 exit with status 2 and must be reduced before the checker can run.
 
-The policy is **baseline pending**. Enforcement exits with status 2 until the
-predecessor work under [#694](https://github.com/magrhino/wudup/issues/694) is
-integrated into main or explicitly deferred and the initial ceilings are reviewed.
-Validated pull requests do not establish that baseline. This draft adds no CI job
-or required status. The earlier local LOC audit script was not available to promote;
-the checker follows [#706](https://github.com/magrhino/wudup/issues/706) and synthetic
-Git repository tests.
+The baseline is **ready**: it was reviewed from main after the
+[#694](https://github.com/magrhino/wudup/issues/694) refactors, and the `maintainability`
+CI job enforces it on every pull request (see
+[Enforcement in CI](#enforcement-command-and-ci)). The checker follows
+[#706](https://github.com/magrhino/wudup/issues/706) and synthetic Git repository tests.
 
-For current or historical inventory using the draft policy:
+For current or historical inventory:
 
 ```bash
 python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT --report-only --policy-file maintainability-policy.json
@@ -108,15 +113,36 @@ counts, delta, Git rename origin, applicable ceiling, warnings, and violations.
 Deleted files remain visible. Tests, generated outputs, locks, other non-source
 files, symlinks, and submodules are reported separately without size enforcement.
 
-After integration, review the production inventory from post-refactor main, set
-`baseline.status` to `ready`, and record its full commit ID. Every remaining
-oversized production file needs an exact-path entry in `ceilings`. Exceptional
-declarative collections or fixture generators belong in `allowances`, also with an
-explicit ceiling; they remain visible and subject to growth checks. Each record
-has `ceiling`, `reason`, `deferred` (boolean), `follow_up` (linked issue when deferred,
-otherwise null or a link), and `re_review` (the condition for another review).
-Policy changes, including higher ceilings or category changes, require review.
-Never add broad source exclusions to solve a failure.
+Every production file above the block threshold has an exact-path entry in
+`ceilings`. Declarative collections and fixture generators (API models and types,
+the schema and its migrations, demo fixtures) have entries in `allowances`, also
+with an explicit ceiling; they remain visible and subject to growth checks. Each
+record has `ceiling`, `reason`, `deferred` (boolean), `follow_up` (linked issue when
+deferred, otherwise null or a link), and `re_review` (the condition for another
+review). Files below the block threshold need no record; the block threshold is
+their ceiling.
+
+How the baseline ceilings were set:
+
+- An owner reviewed as cohesive gets its baseline size plus 10% review headroom,
+  so the check asks for a review when growth accumulates, not on every small
+  change. Each `reason` records the baseline size.
+- An owner that gained a second responsibility is `deferred`, with a follow-up
+  issue for the extraction and no headroom.
+
+When a pull request reaches a ceiling, review the file's responsibilities before
+choosing a fix:
+
+- If the change brings a genuinely separate responsibility, extract it, moving
+  behavior unchanged.
+- If the file is still one cohesive owner, raise its ceiling in the same pull
+  request and update `reason` and `re_review` to say why. This is a normal,
+  reviewed outcome, not a failure to avoid.
+- Never compress code, drop safeguards, or split one responsibility across files
+  to stay under a ceiling.
+
+Policy changes, including higher ceilings or category changes, require code-owner
+review. Never add broad source exclusions to solve a failure.
 Exact production paths and reviewed records take precedence over directory
 categories, so an explicitly retained production owner cannot hide inside tests
 or generated output. Ordinary tests remain report-only.
@@ -144,10 +170,16 @@ modified, the checker reports **Possible category move** on the deleted source.
 The JSON `category_move_candidates` list identifies the changed non-enforced
 paths. This is a review tripwire, not proof that code moved. It includes shrinking
 files and tests, generated outputs, locks, and other excluded categories.
-Deleting production code while independently updating tests can trigger it too.
+Deleting production code while independently updating tests or docs can trigger it too.
 Pure deletions with unchanged excluded files and test additions alone still pass.
 
-Review the deleted responsibility and candidate paths together, then add an
+Only a file with a reviewed ceiling or allowance has anything to gain by moving
+out of enforcement, so the tripwire fails only for those files. Deleting any
+other production file while non-enforced paths change is reported as a warning,
+so ordinary feature removals are not blocked; reviewers should still check that
+the candidates did not receive the deleted code.
+
+For a failure, review the deleted responsibility and candidate paths together, then add an
 exact-source-path entry under `transitions` in `maintainability-policy.json`:
 
 ```json
@@ -185,20 +217,26 @@ ignored. The checker validates the declaration's scope and destinations, but it
 cannot authenticate human approval or prove semantic equivalence. Policy changes
 still require review through the repository's normal PR process.
 
-### Enforcement command and activation
+### Enforcement command and CI
 
-The future local/CI enforcement command is identical, using the actual PR base
-and head commit IDs (not a synthetic merge commit):
+Run the same comparison locally before opening a pull request, using the merge
+base with main and your committed head (not a synthetic merge commit):
 
 ```bash
-python3 scripts/check_maintainability.py --repo . --base BASE_COMMIT --head HEAD_COMMIT
+python3 scripts/check_maintainability.py --repo . --base "$(git merge-base origin/main HEAD)" --head HEAD
 ```
 
 It exits 0 for a passing enforced comparison, 1 for violations, or 2 for a pending
-baseline, invalid policy, or unavailable Git objects. Before wiring CI or requiring
-its status, validate representative PRs against the reviewed baseline and resolve
-false positives. Future CI must use a trusted checker and review policy changes;
-it must not execute candidate project code. Danger remains advisory, and
+baseline, invalid policy, or unavailable Git objects. A branch that starts before
+the baseline commit exits 2; rebase it onto main.
+
+The `maintainability` job in `.github/workflows/ci.yml` runs this comparison on
+every pull request. It runs the checker from the PR's merge base, so a pull
+request cannot change the checker that judges it, and reads the policy from the
+PR head, so every ceiling change is visible in the diff. Failures appear as
+annotations and in the job summary. `maintainability-policy.json` and the checker
+are code-owned, so ceiling changes get maintainer review. The job never executes
+candidate project code. Danger remains advisory, and
 `Danger: large-file-review-complete` cannot bypass this checker.
 
 ## WebUI Development

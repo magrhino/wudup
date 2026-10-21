@@ -552,11 +552,22 @@ def review_category_moves(
     for row in deleted:
         record = policy["transitions"].get(row["path"])
         if not record or record["base_commit"] != base:
-            if candidates:
+            if not candidates:
+                continue
+            # Only a file with a reviewed ceiling or allowance gains anything by
+            # moving out of enforcement; deleting any other file is a warning.
+            if row["path"] in base_policy["ceilings"].keys() | base_policy[
+                "allowances"
+            ].keys():
                 row["failures"].append(
                     "Possible category move: production disappeared while non-enforced paths "
                     "changed. Review category_move_candidates and add a transitions entry "
                     "for this source and comparison base, declaring destinations or a genuine deletion."
+                )
+            else:
+                row["warnings"].append(
+                    "Possible category move: production disappeared while non-enforced paths "
+                    "changed. Check that category_move_candidates did not receive this code."
                 )
             continue
         row["transition"] = record
