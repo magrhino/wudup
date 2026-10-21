@@ -114,16 +114,23 @@ class DependencyAutomergeWorkflowTests(unittest.TestCase):
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
         rules = config["packageRules"]
         labelled = [rule for rule in rules if "addLabels" in rule]
-        self.assertEqual(len(labelled), 1)
-        rule = labelled[0]
+        self.assertEqual(len(labelled), 2)
+        patch_rule, minor_rule = labelled
 
-        self.assertEqual(
-            rule["matchUpdateTypes"], ["minor", "patch", "pin", "digest"]
-        )
-        self.assertNotIn("matchDepNames", rule)
-        self.assertEqual(rule["addLabels"], ["automerge"])
+        self.assertEqual(patch_rule["matchUpdateTypes"], ["patch", "pin", "digest"])
+        self.assertNotIn("matchPackageNames", patch_rule)
+        self.assertNotIn("matchDepNames", patch_rule)
+        self.assertEqual(patch_rule["addLabels"], ["automerge"])
+
+        # Python minor releases (3.14 -> 3.15) need a maintainer merge.
+        self.assertEqual(minor_rule["matchUpdateTypes"], ["minor"])
+        self.assertEqual(minor_rule["matchPackageNames"], ["!python"])
+        self.assertNotIn("matchDepNames", minor_rule)
+        self.assertEqual(minor_rule["addLabels"], ["automerge"])
+
         for any_rule in rules:
             self.assertNotIn("automerge", any_rule)
+            self.assertNotIn("major", any_rule.get("matchUpdateTypes", []))
 
     def test_renovate_shortens_release_age_only_for_docker_cli(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))

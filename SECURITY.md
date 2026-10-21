@@ -185,7 +185,8 @@ Verified Dependabot minor/patch updates and eligible Renovate Docker updates can
 merge without a separate human sign-off when all of these conditions hold:
 
 - The current PR contains only the verified dependency bot commit and is not a
-  draft. Major Dependabot updates are not eligible.
+  draft. Major Dependabot updates are not eligible, and neither are minor
+  Renovate updates to the `python` base image.
 - The latest `ci`, `security`, and `CodeQL Advanced` PR runs for that exact head
   commit have completed successfully. Core Python, shell, WebUI, dependency
   review, workflow auditing, and all three CodeQL analysis jobs must actually
