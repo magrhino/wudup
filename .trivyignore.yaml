@@ -6,7 +6,7 @@
 #   statement:  why it is safe to ship meanwhile and what fixes it
 #   expired_at: unquoted date at most 90 days ahead; Trivy stops applying the
 #               entry at 00:00 UTC that day, so a finding that is still
-#               unpatched fails the daily scheduled scan and blocks publishing
+#               unpatched fails the next scheduled scan and blocks publishing
 # Optional, to narrow the entry: paths (image file paths from the scan output).
 #
 # Ignored findings still appear in every scan log. Remove an entry once fixed.
