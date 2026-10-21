@@ -306,6 +306,8 @@ wudup web --host 127.0.0.1 --port 7417 --static-dir webui/dist
 CI and Docker installs use hashed Python locks and disable third-party install
 scripts where supported. Run `make lock` with the installed development tools
 to regenerate the runtime, build-backend, and development locks together.
+Dependabot pydantic PRs leave `pydantic-core` at its old pin, so run
+`make lock` on those branches before merging.
 See [SonarQube triage and gate policy](SONAR_TRIAGE.md) for the per-finding
 decisions, required source-build exceptions, and merge enforcement.
 
