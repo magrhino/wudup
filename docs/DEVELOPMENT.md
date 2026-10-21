@@ -350,7 +350,9 @@ Optional checks are available when broader coverage is useful:
 Dependabot's existing weekly schedules, grouping, and cooldowns are unchanged.
 Verified minor and patch updates are eligible for automatic squash merge;
 major updates require manual review. Renovate continues to mark eligible
-non-major Docker updates with its own `automerge` label.
+non-major Docker updates with its own `automerge` label, except minor updates
+to the `python` base image (for example 3.14 to 3.15). Those change the runtime
+interpreter, so a maintainer merges them; Python patch updates stay eligible.
 
 The merge workflow waits for all repository-required checks and verifies the
 latest `ci`, `security`, and `CodeQL Advanced` runs for the current PR head. All

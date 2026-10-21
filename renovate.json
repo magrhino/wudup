@@ -14,8 +14,14 @@
   "internalChecksFilter": "strict",
   "packageRules": [
     {
-      "description": "Mark non-major Docker updates for merge automation",
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "description": "Mark patch, pin, and digest Docker updates for merge automation",
+      "matchUpdateTypes": ["patch", "pin", "digest"],
+      "addLabels": ["automerge"]
+    },
+    {
+      "description": "Mark minor Docker updates for merge automation, except Python minor releases (e.g. 3.14 -> 3.15), which a maintainer merges",
+      "matchUpdateTypes": ["minor"],
+      "matchPackageNames": ["!python"],
       "addLabels": ["automerge"]
     },
     {
