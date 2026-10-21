@@ -321,7 +321,7 @@ jobs:
                           f"- `{row['path']}` ({row['base_lines']} -> {row['head_lines']} lines,"
                           f" ceiling {row['ceiling']}): {failure}\n"
                       )
-                  # Size warnings repeat for every large file; show them only where the PR changed something.
+                  # A merge-base checker older than this job warned for every large file; show only changed ones.
                   if row["status"] != "unchanged":
                       for warning in row["warnings"]:
                           print(f"::warning file={row['path']}::{warning}")

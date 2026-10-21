@@ -430,8 +430,22 @@ def file_findings(row: dict, record: dict | None, policy: dict) -> tuple[list, l
         failures.append(
             "New or growing production file exceeds its applicable ceiling."
         )
-    if head_category == "production" and head_lines > policy["thresholds"]["warn"]:
-        warnings.append("Production size needs a responsibility and navigation review.")
+    warn = policy["thresholds"]["warn"]
+    # Warn only when this change adds size; an edit that keeps a large file's
+    # size is not a reason to review it again.
+    if head_category == "production" and head_lines > warn:
+        if is_new_production:
+            growth = f"is a new {head_lines}-line file"
+        elif head_lines > base_lines:
+            growth = f"grew {base_lines} -> {head_lines} lines"
+        else:
+            growth = None
+        if growth:
+            warnings.append(
+                f"{row['path']} {growth} (warn threshold {warn}, ceiling "
+                f"{row['ceiling']}). Check that it still has one clear "
+                "responsibility before it reaches the ceiling."
+            )
     return failures, warnings
 
 

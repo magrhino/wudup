@@ -154,6 +154,31 @@ def test_new_production_threshold_boundaries(repo, count, code, warns):
     if code:
         assert "Danger acknowledgement cannot bypass" in report["remediation"]
         assert len(report["anti_gaming"]) == 6
+    if warns:
+        assert row(report, "source.py")["warnings"][0].startswith(
+            f"source.py is a new {count}-line file (warn threshold 500, ceiling 800)."
+        )
+
+
+def test_size_warning_names_growth_and_skips_edits_that_do_not_grow(repo):
+    repo.lines("source.py", 600)
+    repo.base = repo.commit()
+    edited = (repo.path / "source.py").read_bytes().replace(b"# line 0\n", b"# edit\n")
+    repo.write("source.py", edited)
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["warnings"] == []
+    repo.lines("source.py", 650)
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["warnings"] == [
+        (
+            "source.py grew 600 -> 650 lines (warn threshold 500, ceiling 800). Check "
+            "that it still has one clear responsibility before it reaches the ceiling."
+        )
+    ]
 
 
 @pytest.mark.parametrize("count,code", [(900, 0), (850, 0), (950, 0), (951, 1)])
