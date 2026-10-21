@@ -506,6 +506,90 @@ class DigestVerifierTests(unittest.TestCase):
         self.assertEqual(result.tag_digest, expected)
         self.assertEqual(result.matched_child_digest, child)
 
+    def test_containerd_index_image_id_matches_platform_child_digest(self) -> None:
+        # On Docker's containerd image store the local image ID is the pulled
+        # index digest, not the platform image's config digest.
+        expected = "sha256:child"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): index_doc("sha256:index", (expected,)),
+                ("quay.io", "acme/app", expected): manifest_doc(expected, "sha256:config"),
+            }
+        )
+        verifier = DigestVerifier(
+            FakeDocker(
+                image_id="sha256:index",
+                repo_digests=("quay.io/acme/app@sha256:index",),
+            ),
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.reason, "registry-platform-manifest-match")
+        self.assertEqual(result.matched_child_digest, expected)
+        self.assertEqual(result.local_image_id, "sha256:index")
+
+    def test_containerd_index_image_id_matches_current_index_digest(self) -> None:
+        expected = "sha256:index"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): index_doc(expected, ("sha256:child",)),
+            }
+        )
+        verifier = DigestVerifier(
+            FakeDocker(image_id=expected),
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.reason, "registry-index-manifest-match")
+        self.assertEqual(result.tag_digest, expected)
+        self.assertEqual(resolver.calls, [("quay.io", "acme/app", "latest")])
+
+    def test_containerd_manifest_image_id_matches_single_manifest_tag(self) -> None:
+        expected = "sha256:manifest"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): manifest_doc(expected, "sha256:config"),
+            }
+        )
+        verifier = DigestVerifier(
+            FakeDocker(image_id=expected),
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.reason, "registry-tag-manifest-match")
+
+    def test_containerd_image_id_from_other_index_still_fails(self) -> None:
+        expected = "sha256:child"
+        resolver = StaticResolver(
+            {
+                ("quay.io", "acme/app", "latest"): index_doc("sha256:index", (expected,)),
+                ("quay.io", "acme/app", expected): manifest_doc(expected, "sha256:config"),
+            }
+        )
+        verifier = DigestVerifier(
+            FakeDocker(image_id="sha256:old-index"),
+            primary_resolver=resolver,
+            fallback_resolver=resolver,
+        )
+
+        result = verifier.verify("quay.io/acme/app:latest", expected)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "platform-mismatch")
+        self.assertEqual(result.local_image_id, "sha256:old-index")
+
     def test_non_ghcr_stale_digest_fails_when_registry_proves_current_index(self) -> None:
         resolver = StaticResolver(
             {

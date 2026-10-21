@@ -854,7 +854,9 @@ class DigestVerifier:
                 error=str(exc),
             )
         expected_config = expected_document.config_digest()
-        if expected_config and expected_config == local_image_id:
+        if _image_id_matches(
+            local_image_id, expected_config, expected, tag_document.digest
+        ):
             return DigestCheckResult(
                 ok=True,
                 status=_STATUS_VERIFIED,
@@ -911,7 +913,9 @@ class DigestVerifier:
         local_image_id: str,
     ) -> DigestCheckResult:
         config_digest = tag_document.config_digest()
-        if config_digest and config_digest == local_image_id:
+        if _image_id_matches(
+            local_image_id, config_digest, tag_document.digest or expected
+        ):
             return DigestCheckResult(
                 ok=True,
                 status=_STATUS_VERIFIED,
@@ -941,12 +945,23 @@ class DigestVerifier:
         repo_digests: tuple[str, ...],
         local_image_id: str,
     ) -> DigestCheckResult:
+        index_digest = tag_document.digest or expected
+        if _image_id_matches(local_image_id, "", index_digest):
+            return DigestCheckResult(
+                ok=True,
+                status=_STATUS_VERIFIED,
+                reason=_reason(image, "index-manifest-match"),
+                seen_repo_digests=repo_digests,
+                tag_digest=index_digest,
+                local_image_id=local_image_id,
+                source=tag_document.source,
+            )
         for child_digest in tag_document.child_digests():
             child = self._try_fetch(image, child_digest)
             if child is None:
                 continue
             config_digest = child.config_digest()
-            if config_digest and config_digest == local_image_id:
+            if _image_id_matches(local_image_id, config_digest, child_digest):
                 return DigestCheckResult(
                     ok=True,
                     status=_STATUS_VERIFIED,
@@ -1249,6 +1264,21 @@ def _header_value(headers: Mapping[str, str], name: str) -> str:
         if key.lower() == wanted:
             return value
     return ""
+
+
+def _image_id_matches(
+    local_image_id: str,
+    config_digest: str,
+    *manifest_digests: str,
+) -> bool:
+    """Match a local image ID from either Docker image store.
+
+    The classic store's image ID is the config digest. The containerd store's
+    image ID is the digest of the manifest or index that was pulled.
+    """
+    if not local_image_id:
+        return False
+    return local_image_id in (config_digest, *manifest_digests)
 
 
 def _same_manifest(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
