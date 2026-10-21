@@ -37,6 +37,7 @@ import {
   staleDiagnosticLabel,
   tagStreamLabelApprovalIssueKey,
 } from "../../views/pending/planReviewFormatters";
+import { extraInterruptionLabel } from "../../views/pending/reviewSummary";
 import PendingPlanLineList from "./PendingPlanLineList.vue";
 import PendingReviewSummary from "./PendingReviewSummary.vue";
 import CoreUpdateTourPanel from "../CoreUpdateTourPanel.vue";
@@ -107,6 +108,8 @@ const emit = defineEmits<{
 }>();
 
 const changes = computed(() => planChanges(props.plan));
+// Shown in the header so a long services list cannot hide interruptions outside the selection.
+const extraInterruption = computed(() => extraInterruptionLabel(props.plan));
 // A ready plan's state is carried by the Apply button; repeating it in the header adds nothing.
 const applyReady = computed(() => props.plan.status === "ready" && props.plan.can_apply);
 const readinessClear = computed(() => !!props.applyPreflight?.ok && !props.applyPreflightAttentionChecks.length);
@@ -610,10 +613,14 @@ function tagStreamRulePreview(issue: PlanIssue): string {
       >
         <div class="preflight-impact-heading">
           <strong id="preflight-impact-title">Services and images</strong>
-          <n-tag size="small">{{ pluralize(planLines.length, "service") }}</n-tag>
+          <span class="preflight-impact-tags">
+            <n-tag v-if="extraInterruption" size="small" type="warning">{{ extraInterruption }}</n-tag>
+            <n-tag size="small">{{ pluralize(planLines.length, "service") }}</n-tag>
+          </span>
         </div>
         <PendingPlanLineList
           :plan-lines="planLines"
+          :stacks="plan.stacks"
           :stack-count="plan.summary.stack_count"
           :release-notes="releaseNotes"
           :release-notes-loading="releaseNotesLoading"
@@ -645,6 +652,7 @@ function tagStreamRulePreview(issue: PlanIssue): string {
           </summary>
           <PendingPlanLineList
             :plan-lines="planLines"
+            :stacks="plan.stacks"
             :stack-count="plan.summary.stack_count"
             :release-notes="releaseNotes"
             :release-notes-loading="releaseNotesLoading"
@@ -742,6 +750,12 @@ function tagStreamRulePreview(issue: PlanIssue): string {
 </template>
 
 <style scoped>
+.preflight-impact-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .unmatched-guidance {
   display: grid;
   gap: 10px;
