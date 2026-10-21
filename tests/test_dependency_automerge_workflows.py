@@ -348,7 +348,13 @@ elif "/workflows/" in path and "/runs?" in path:
         run.update(status="in_progress", conclusion=None)
     data = {"workflow_runs": [] if scenario == "missing-run" else [run]}
     if scenario == "newer-failure":
-        data["workflow_runs"] = [{**run, "conclusion": "failure"}, run]
+        data["workflow_runs"] = [{**run, "id": 9, "conclusion": "failure"}, run]
+    if scenario == "cancelled-duplicate":
+        data["workflow_runs"] = [{**run, "id": 9, "conclusion": "cancelled"}, run]
+    assert "--paginate" in args and "--slurp" in args
+    data = [data]
+    if scenario == "newer-failure-next-page":
+        data.append({"workflow_runs": [{**run, "id": 9, "conclusion": "failure"}]})
 elif "/jobs?" in path:
     names = {"1": ["python tests", "shell tests", "webui checks"],
              "2": ["dependency review", "workflow security"],
@@ -380,7 +386,8 @@ print(json.dumps(data))
             "missing-core", "required-failed", "behind", "changed", "api-error",
             "retargeted", "security-failure", "codeql-pending",
             "skipped-core-2", "skipped-core-3",
-            "retried-pass", "retried-failure",
+            "retried-pass", "retried-failure", "cancelled-duplicate",
+            "newer-failure-next-page",
         ]
         for scenario in cases:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
@@ -400,7 +407,8 @@ print(json.dumps(data))
                 )
                 self.assertEqual(
                     (root / "merged").exists(),
-                    scenario in ("green", "retried-pass"), result.stderr,
+                    scenario in ("green", "retried-pass", "cancelled-duplicate"),
+                    result.stderr,
                 )
                 self.assertEqual(result.returncode, 1 if scenario == "api-error" else 0,
                                  result.stderr)
