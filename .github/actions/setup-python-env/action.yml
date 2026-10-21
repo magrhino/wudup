@@ -25,8 +25,12 @@ runs:
         set -euo pipefail
         python -m venv .venv
         . .venv/bin/activate
-        if ! python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt; then
-          echo "::error title=Python lock files could not be installed::If pip reported conflicting dependencies above, the requirements files are out of sync, for example pydantic was bumped without pydantic-core. Run 'make lock' on this branch, commit the regenerated requirements files, and push."
+        pip_log="$RUNNER_TEMP/pip-install.log"
+        if ! python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-dev.txt -r requirements-build.txt 2>&1 | tee "$pip_log"; then
+          # Only a resolver conflict means the locks disagree; network or index errors need a rerun instead.
+          if grep -q 'ResolutionImpossible' "$pip_log"; then
+            echo "::error title=Python lock files are out of sync::pip found conflicting pins in the requirements files, for example pydantic was bumped without pydantic-core. Run 'make lock' on this branch, commit the regenerated requirements files, and push."
+          fi
           exit 1
         fi
         # Local editable source still builds; binary-only applies to index candidates.
