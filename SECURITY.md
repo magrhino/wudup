@@ -335,9 +335,11 @@ that commit is still the head of `main`. Edge images are
 for maintainer testing; they are not releases and carry no release sign-off.
 
 New vulnerability data can fail this policy without any repository change. The
-`scheduled image scan` workflow rebuilds `main` daily for both variants and
-platforms and applies the same scan without publishing anything, so a newly
-disclosed CVE fails that run before it blocks the next edge or release publish.
+`scheduled image scan` workflow rebuilds `main` every 6 hours for both variants
+and platforms and applies the same scan without publishing anything, so a newly
+disclosed CVE usually fails that run before it blocks the next edge or release
+publish. A push to `main` soon after new data lands can still hit it in edge
+first, because GitHub may start scheduled runs hours late.
 
 A finding with no shipped fix yet (for example, an upstream binary still built
 with a vulnerable Go release) can be ignored temporarily in `.trivyignore.yaml`
@@ -347,7 +349,7 @@ entry to have an ID, a statement explaining why shipping is acceptable and what
 fix will replace it, and an unquoted `expired_at` date at most 90 days ahead.
 Use `paths` to limit an entry to specific files. Ignored findings are still
 printed in every scan log. Trivy stops applying an entry at 00:00 UTC on its
-date, so a finding that is still unpatched fails the daily scheduled scan
+date, so a finding that is still unpatched fails the next scheduled scan
 (GitHub notifies on the failure) and blocks publishing again; renewing it needs
 a new review. Remove an entry as soon as the fix ships.
 

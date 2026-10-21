@@ -1,14 +1,17 @@
 name: scheduled image scan
 
 # New vulnerability data can fail the edge and release image scans without any
-# repository change. Rebuild main daily and scan it with the same policy so the
-# failure shows up here, not on the next merge or release.
+# repository change. Rebuild main and scan it with the same policy so the
+# failure shows up here, not on the next merge or release. GitHub often starts
+# scheduled runs hours late, so run every 6 hours (Trivy's database update
+# interval) rather than once a day; a late run then leaves a gap of hours, not
+# a day.
 on:
   schedule:
-    - cron: "17 11 * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
-# Queue instead of cancelling so a manual run never stops the daily scan.
+# Queue instead of cancelling so a manual run never stops a scheduled scan.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false

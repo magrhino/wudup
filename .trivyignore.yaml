@@ -6,44 +6,17 @@
 #   statement:  why it is safe to ship meanwhile and what fixes it
 #   expired_at: unquoted date at most 90 days ahead; Trivy stops applying the
 #               entry at 00:00 UTC that day, so a finding that is still
-#               unpatched fails the daily scheduled scan and blocks publishing
+#               unpatched fails the next scheduled scan and blocks publishing
 # Optional, to narrow the entry: paths (image file paths from the scan output).
 #
 # Ignored findings still appear in every scan log. Remove an entry once fixed.
 vulnerabilities:
-  - id: CVE-2026-78667
-    paths:
-      - usr/local/libexec/docker/cli-plugins/docker-compose
-      - usr/local/bin/trivy
-    statement: >-
-      Denial of service only. Fixed in Go 1.26.9 or 1.27.2 and
-      golang.org/x/net 0.60.0, but the latest upstream releases are still
-      vulnerable: docker-compose 5.6.0, bundled by docker:29.9.0-cli, is built
-      with Go 1.26.8 and x/net 0.58.0, and trivy 0.75.0, bundled in the trivy
-      variant, with Go 1.27.1 and x/net 0.59.0. Remove each path once its
-      upstream image ships a build with the fixes.
-    expired_at: 2026-11-08
   - id: CVE-2026-78669
     paths:
       - usr/local/libexec/docker/cli-plugins/docker-compose
-      - usr/local/bin/trivy
     statement: >-
-      Denial of service only. Fixed in Go 1.26.9 or 1.27.2 and
-      golang.org/x/net 0.60.0, but the latest upstream releases are still
-      vulnerable: docker-compose 5.6.0, bundled by docker:29.9.0-cli, is built
-      with Go 1.26.8 and x/net 0.58.0, and trivy 0.75.0, bundled in the trivy
-      variant, with Go 1.27.1 and x/net 0.59.0. Remove each path once its
-      upstream image ships a build with the fixes.
-    expired_at: 2026-11-08
-  - id: CVE-2026-97031
-    paths:
-      - usr/local/libexec/docker/cli-plugins/docker-compose
-      - usr/local/bin/trivy
-    statement: >-
-      Denial of service only. Fixed in Go 1.26.9 or 1.27.2 and
-      golang.org/x/net 0.60.0, but the latest upstream releases are still
-      vulnerable: docker-compose 5.6.0, bundled by docker:29.9.0-cli, is built
-      with Go 1.26.8 and x/net 0.58.0, and trivy 0.75.0, bundled in the trivy
-      variant, with Go 1.27.1 and x/net 0.59.0. Remove each path once its
-      upstream image ships a build with the fixes.
+      Denial of service only. Fixed in golang.org/x/net 0.60.0, but the latest
+      upstream release is still vulnerable: docker-compose 5.6.1, bundled by
+      docker:29.9.2-cli, is built with Go 1.26.10 but still x/net 0.58.0.
+      Remove once the docker CLI image ships a compose build with the fix.
     expired_at: 2026-11-08
