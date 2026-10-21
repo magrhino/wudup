@@ -1,9 +1,9 @@
 {
   "version": 1,
   "baseline": {
-    "status": "pending",
-    "commit": null,
-    "reason": "Draft only: generate and review ceilings from main after the #694 predecessor refactors are integrated or explicitly deferred. Validated pull requests are not an integrated baseline.",
+    "status": "ready",
+    "commit": "76d8a1abbd89342c81e32d8fabd898d337fdf14c",
+    "reason": "Reviewed baseline from main after the #694 refactors. Each oversized owner reviewed as cohesive gets its size at this commit plus 10% review headroom, so the check asks for a review when growth accumulates rather than on every small change. Growth since the refactors was reviewed for cohesion, not size: owners that grew within their own responsibility are recorded as reviewed, and the two that gained a second responsibility are deferred with follow-up issues and no headroom.",
     "follow_up": "https://github.com/magrhino/wudup/issues/706"
   },
   "thresholds": {"warn": 500, "block": 800},
@@ -14,10 +14,215 @@
   "tests": {"prefixes": ["tests/", "webui/tests/"]},
   "generated": {"prefixes": ["src/wudup/web_static/", "webui/dist/", "webui/coverage/"]},
   "locks": {"paths": ["requirements.txt", "requirements-build.txt", "requirements-dev.txt", "webui/package-lock.json"]},
-  "ceilings": {},
-  "allowances": {},
+  "ceilings": {
+    "src/wudup/compose.py": {
+      "ceiling": 1390,
+      "reason": "The Docker Compose subprocess layer; recent growth (override-file detection, deterministic service order) is Compose runtime knowledge used by its own commands. Baseline size 1259 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When Compose runtime file-set or dependency-order logic gains callers outside the Compose command layer, or a change adds update policy."
+    },
+    "src/wudup/compose_rewrite.py": {
+      "ceiling": 1570,
+      "reason": "Owns update and approval matching, regex policy and resolved-tag marker semantics for Compose rewrites; YAML mechanics and persistence already moved to compose_source.py and compose_persistence.py. Baseline size 1419 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds YAML editing mechanics, file persistence, or a rewrite family unrelated to tag, digest or exclusion updates."
+    },
+    "src/wudup/compose_source.py": {
+      "ceiling": 1330,
+      "reason": "Source-preserving Compose YAML editing (spans, label styles, anchor guards, comment tokens) with fail-closed errors; one cohesive parser concern. Baseline size 1206 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds update policy or file writes, which belong to compose_rewrite.py and compose_persistence.py."
+    },
+    "src/wudup/digest_verifier.py": {
+      "ceiling": 1540,
+      "reason": "Owns digest verification decisions for WUD-reported updates; registry HTTPS transport and authentication live in registry_http.py. Baseline size 1395 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds registry transport, a new verification source, or behavior unrelated to deciding whether a digest is trusted."
+    },
+    "src/wudup/plans.py": {
+      "ceiling": 1570,
+      "reason": "Builds the structured dry-run plan for WebUI previews; matching and issue collection already live in plan_matching.py and plan_issues.py. Baseline size 1419 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds plan execution, a new plan input source, or presentation formatting."
+    },
+    "src/wudup/updater.py": {
+      "ceiling": 844,
+      "reason": "The updater facade also owns the in-flight WUD pending-entry lifecycle (remove, restore, record, reconcile), a second reason to change added by interrupt cleanup. Baseline size 844 lines; no headroom while the extraction is deferred.",
+      "deferred": true,
+      "follow_up": "https://github.com/magrhino/wudup/issues/917",
+      "re_review": "When the pending-entry lifecycle extraction lands, lower or remove this ceiling."
+    },
+    "src/wudup/updater_lifecycle.py": {
+      "ceiling": 910,
+      "reason": "Stack lifecycle execution (pull, verify, recreate, retry) for update-from-wud; health and rewrite phases already have their own lifecycle modules. Baseline size 824 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a lifecycle phase that does not need the executor's per-stack state."
+    },
+    "src/wudup/web_auth.py": {
+      "ceiling": 1670,
+      "reason": "Security-sensitive owner of credentials, setup, sessions, CSRF and Host/Origin acceptance; keeping these decisions together keeps the acceptance policy reviewable in one place. Baseline size 1518 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds behavior that does not decide whether a request is authenticated or allowed, such as formatting or request context, which have their own owners."
+    },
+    "src/wudup/web_jobs.py": {
+      "ceiling": 900,
+      "reason": "Plan-apply job submission and execution, job read routes and SSE streaming; the shared registry and mutation gate live in web_job_registry.py. Baseline size 816 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds another job family or mutation gate logic."
+    },
+    "src/wudup/web_release_notifications.py": {
+      "ceiling": 1540,
+      "reason": "Owns notification scheduling, source selection, reservations, history, audit and API responses; Discord rendering and delivery already moved to web_discord.py. Baseline size 1399 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a second delivery transport (for example Apprise) or rendering logic."
+    },
+    "src/wudup/web_retag_apply.py": {
+      "ceiling": 1210,
+      "reason": "Retag apply execution and recovery; recent growth (approved Compose hash checks, stopped-service rollback, known-image reconciliation decisions) is recovery for the same apply, with persistence delegated to web_retag_audit.py. Baseline size 1099 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds retag planning, preview, audit persistence, or scope rules, which have their own owners."
+    },
+    "src/wudup/web_retags.py": {
+      "ceiling": 1040,
+      "reason": "Retag review routes, plan building and preview rendering; target discovery, preview jobs and apply already have their own owners. Baseline size 944 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds retag apply, preview job lifecycle, or target discovery behavior."
+    },
+    "src/wudup/web_scheduler.py": {
+      "ceiling": 1230,
+      "reason": "The auto-update scheduler; holding and recording missed slots (#870) is part of the same slot timing and reservation policy. Baseline size 1115 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds scheduling of a different kind (for example one-off scheduled plan runs) or non-scheduler mutation behavior."
+    },
+    "src/wudup/web_security.py": {
+      "ceiling": 1010,
+      "reason": "Candidate security scan route handlers. Baseline size 918 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds scanner execution or result storage that other routes also use."
+    },
+    "src/wudup/web_self_update.py": {
+      "ceiling": 1580,
+      "reason": "Owns WebUI self-update and also the separate container-restart route family and its web-container-restart audit records. Baseline size 1580 lines; no headroom while the extraction is deferred.",
+      "deferred": true,
+      "follow_up": "https://github.com/magrhino/wudup/issues/918",
+      "re_review": "When the container-restart extraction lands, lower or remove this ceiling."
+    },
+    "src/wudup/web_settings.py": {
+      "ceiling": 1060,
+      "reason": "Settings report and managed settings entries, validation, apply and audit; effective configuration already moved to web_effective_settings.py. Baseline size 958 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds effective-configuration resolution or a new settings family with its own routes."
+    },
+    "src/wudup/web_state.py": {
+      "ceiling": 1310,
+      "reason": "WebUI SQLite state route handlers and their audit helpers. Baseline size 1186 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a new state family with its own routes and audit mode."
+    },
+    "src/wudup/web_wud_cache.py": {
+      "ceiling": 1110,
+      "reason": "Single owner of WUD snapshots, refresh serialization, cooldowns and watch batches; its lock scopes must stay in one module. Baseline size 1006 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds WUD transport, observation parsing, or pending-source reads."
+    },
+    "src/wudup/web_wud_observations.py": {
+      "ceiling": 900,
+      "reason": "WUD observation parsing, target matching, degraded retention and row conversion, with no mutable cache state. Baseline size 813 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds cache state, refresh orchestration, or WUD transport."
+    },
+    "webui/src/components/pending/PendingApplyJobPanel.vue": {
+      "ceiling": 960,
+      "reason": "Apply job progress panel for a single job. Baseline size 872 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a separately renderable section such as logs or per-stack detail."
+    },
+    "webui/src/components/pending/PendingPlanReviewModal.vue": {
+      "ceiling": 1080,
+      "reason": "The plan review modal; plan formatting and review summaries already moved to planReviewFormatters.ts and reviewSummary.ts. Baseline size 981 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a new review section that can render on its own."
+    },
+    "webui/src/stores/updates.ts": {
+      "ceiling": 1000,
+      "reason": "Updates store for pending, plan and scan state; retag and self-update state already moved to their own stores. Baseline size 907 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds state for a feature that can own its own store without cross-store cycles."
+    },
+    "webui/src/views/PendingView.vue": {
+      "ceiling": 1050,
+      "reason": "Pending page view; plan actions, review state and the apply job already live in views/pending composables. Baseline size 949 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds page state or actions instead of composing existing composables and components."
+    },
+    "webui/src/views/RetagsView.vue": {
+      "ceiling": 950,
+      "reason": "Retags page view. Baseline size 862 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds page state or actions that belong in the retags store or a component."
+    },
+    "webui/src/views/pending/usePendingApplyJob.ts": {
+      "ceiling": 1150,
+      "reason": "Pending page apply-job composable: job subscription, progress and terminal state for one apply flow. Baseline size 1038 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds state for a flow other than the apply job, or state another view also needs (move it to a store)."
+    }
+  },
+  "allowances": {
+    "src/wudup/db_schema.py": {
+      "ceiling": 1490,
+      "reason": "SQLite schema and ordered migrations; migrations are append-only and must stay in one ordered sequence. Baseline size 1347 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When migrations use up the headroom: split migrations into their own ordered module rather than raising the ceiling again."
+    },
+    "src/wudup/web_demo_fixtures.py": {
+      "ceiling": 2360,
+      "reason": "Generator for disposable demo state and the generated static WebUI fixtures; mostly declarative fixture data. Baseline size 2140 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds a new fixture family that can live in its own module, as the frontend demo fixtures did."
+    },
+    "src/wudup/web_models.py": {
+      "ceiling": 2260,
+      "reason": "Declarative Pydantic request and response models for the WebUI API; fields, defaults and constraints read as one schema. Baseline size 2046 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds behavior beyond model declarations, or when one route family's models can move with that family."
+    },
+    "webui/src/api/types.ts": {
+      "ceiling": 1800,
+      "reason": "Declarative TypeScript types mirroring the WebUI API models. Baseline size 1632 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When a change adds runtime code, or when one API family's types can move with that family."
+    }
+  },
   "transitions": {},
-  "remediation": "Extract the new responsibility, keep the change net-neutral by moving cohesive behavior, or request a reviewed exact-path exception with a ceiling, reason, follow-up when deferred, and re-review condition. A Danger acknowledgement cannot bypass enforcement.",
+  "remediation": "Maintainability is the goal; file size is a review signal, not the definition of good design. A file that outgrows its ceiling needs a review of its responsibilities: extract a genuinely separate responsibility, keep the change net-neutral by moving cohesive behavior, or raise the ceiling in a reviewed policy change with a reason, a follow-up when extraction is deferred, and a re-review condition. Raising the ceiling of a cohesive owner is better than splitting it into fragments. A Danger acknowledgement cannot bypass enforcement.",
   "anti_gaming": [
     "Do not compress formatting or combine statements solely to lower physical LOC.",
     "Do not delete validation, safeguards, tests, comments, or useful type precision to satisfy the check.",

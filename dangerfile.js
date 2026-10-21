@@ -389,7 +389,7 @@ async function runLargeFileRules() {
         [
           `\`${file}\` grew by ${added} added lines in this PR.`,
           "",
-          "Review responsibility and navigation burden using `maintainability-policy.json`. Extract a cohesive responsibility or document a reviewed path-specific exception. Add `Danger: large-file-review-complete` to acknowledge this advisory; the marker cannot bypass maintainability enforcement. The checker remains draft-only until its post-refactor baseline is approved.",
+          "Review responsibility and navigation burden using `maintainability-policy.json`. Extract a cohesive responsibility or document a reviewed path-specific exception. Add `Danger: large-file-review-complete` to acknowledge this advisory; the marker cannot bypass maintainability enforcement. Raising a cohesive owner's ceiling is a valid outcome; splitting one responsibility across files is not.",
         ].join("\n"),
       );
     }

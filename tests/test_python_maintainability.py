@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -154,6 +155,31 @@ def test_new_production_threshold_boundaries(repo, count, code, warns):
     if code:
         assert "Danger acknowledgement cannot bypass" in report["remediation"]
         assert len(report["anti_gaming"]) == 6
+    if warns:
+        assert row(report, "source.py")["warnings"][0].startswith(
+            f"source.py is a new {count}-line file (warn threshold 500, ceiling 800)."
+        )
+
+
+def test_size_warning_names_growth_and_skips_edits_that_do_not_grow(repo):
+    repo.lines("source.py", 600)
+    repo.base = repo.commit()
+    edited = (repo.path / "source.py").read_bytes().replace(b"# line 0\n", b"# edit\n")
+    repo.write("source.py", edited)
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["warnings"] == []
+    repo.lines("source.py", 650)
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["warnings"] == [
+        (
+            "source.py grew 600 -> 650 lines (warn threshold 500, ceiling 800). Check "
+            "that it still has one clear responsibility before it reaches the ceiling."
+        )
+    ]
 
 
 @pytest.mark.parametrize("count,code", [(900, 0), (850, 0), (950, 0), (951, 1)])
@@ -269,6 +295,20 @@ def test_comment_only_move_requires_review_when_git_misses_rename(
     assert code == 1
     assert "Possible category move" in row(report, "source.py")["failures"][0]
     assert report["category_move_candidates"] == [target]
+
+
+def test_deleting_an_unreviewed_file_while_docs_change_only_warns(repo):
+    repo.lines("source.py", 300)
+    repo.write("README.md", b"# Before\n")
+    repo.base = repo.commit()
+    (repo.path / "source.py").unlink()
+    repo.write("README.md", b"# After the removal\n")
+    repo.commit()
+    code, report = repo.check()
+    assert code == 0
+    assert row(report, "source.py")["failures"] == []
+    assert "Possible category move" in row(report, "source.py")["warnings"][0]
+    assert report["category_move_candidates"] == ["README.md"]
 
 
 @pytest.fixture
@@ -805,13 +845,15 @@ def test_option_like_ref_does_not_become_git_option(repo):
     assert "rev-parse failed" in report["error"]
 
 
-def test_draft_policy_has_no_initial_ceilings_or_integration_baseline():
+def test_committed_baseline_is_ready_and_records_name_existing_files():
     policy = json.loads((ROOT / POLICY_PATH).read_text())
-    assert policy["baseline"]["status"] == "pending"
-    assert policy["baseline"]["commit"] is None
-    assert policy["ceilings"] == policy["allowances"] == {}
+    assert policy["baseline"]["status"] == "ready"
+    assert re.fullmatch(r"[0-9a-f]{40}", policy["baseline"]["commit"])
     assert policy["thresholds"] == {"warn": 500, "block": 800}
-    assert "not an integrated baseline" in policy["baseline"]["reason"]
+    records = {**policy["ceilings"], **policy["allowances"]}
+    assert records
+    # A renamed or deleted owner must take its record with it.
+    assert [path for path in records if not (ROOT / path).is_file()] == []
 
 
 def test_malformed_thresholds_and_unknown_fields_fail_closed(repo):

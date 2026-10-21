@@ -12,11 +12,13 @@ Rules for files under `src/wudup/`. Root `AGENTS.md` controls repo-wide safety, 
 
 ## Backend Ownership
 
-Prefer small modules with one clear reason to change:
+Give each module one clear reason to change. Size is a review signal, not the
+goal: extract a responsibility that has its own reason to change, and keep a
+cohesive owner together rather than splitting it into fragments.
 
 Use the shared [maintainability policy](../../maintainability-policy.json) and
-[checker guidance](../../docs/DEVELOPMENT.md#maintainability-checker-draft) when
-reviewing module growth; its initial baseline is still pending integration.
+[checker guidance](../../docs/DEVELOPMENT.md#maintainability-checker) when
+reviewing module growth.
 
 | Area | Preferred owner | Notes |
 |---|---|---|

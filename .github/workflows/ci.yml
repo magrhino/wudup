@@ -262,6 +262,69 @@ jobs:
       - name: Run tests
         run: tests/run-all.sh --shell
 
+  maintainability:
+    name: maintainability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A `[skip ci]` title must not skip the size gate, so this job ignores skip_ci.
+    if: ${{ github.event_name == 'pull_request' }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Run the checker from the PR's merge base, so a PR cannot change the
+      # checker that judges it. The policy is read from the PR head, where
+      # every ceiling change is visible in the diff.
+      - name: Check file growth against the maintainability policy
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+          checker="$RUNNER_TEMP/check_maintainability.py"
+          git show "$base:scripts/check_maintainability.py" > "$checker"
+          status=0
+          python3 "$checker" --repo . --base "$base" --head "$PR_HEAD_SHA" \
+            > "$RUNNER_TEMP/maintainability.json" || status=$?
+          python3 - "$RUNNER_TEMP/maintainability.json" <<'EOF'
+          import json, os, sys
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              try:
+                  with open(sys.argv[1]) as source:
+                      report = json.load(source)
+              except ValueError:
+                  summary.write("The maintainability checker did not produce a report; see the job log.\n")
+                  sys.exit(0)
+              summary.write(f"## Maintainability: {report['result']}\n\n")
+              for reason in report["blocked"]:
+                  summary.write(f"- {reason}\n")
+              for row in report["files"]:
+                  for failure in row["failures"]:
+                      print(f"::error file={row['path']}::{failure}")
+                      summary.write(
+                          f"- `{row['path']}` ({row['base_lines']} -> {row['head_lines']} lines,"
+                          f" ceiling {row['ceiling']}): {failure}\n"
+                      )
+                  # A merge-base checker older than this job warned for every large file; show only changed ones.
+                  if row["status"] != "unchanged":
+                      for warning in row["warnings"]:
+                          print(f"::warning file={row['path']}::{warning}")
+              if report["result"] == "FAIL":
+                  summary.write(f"\n{report['remediation']}\n")
+          EOF
+          exit "$status"
+
   webui-checks:
     name: webui checks
     runs-on: ubuntu-latest

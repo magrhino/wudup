@@ -430,9 +430,30 @@ def file_findings(row: dict, record: dict | None, policy: dict) -> tuple[list, l
         failures.append(
             "New or growing production file exceeds its applicable ceiling."
         )
-    if head_category == "production" and head_lines > policy["thresholds"]["warn"]:
-        warnings.append("Production size needs a responsibility and navigation review.")
+    if head_category == "production":
+        warning = size_warning(row, policy["thresholds"]["warn"], is_new_production)
+        if warning:
+            warnings.append(warning)
     return failures, warnings
+
+
+def size_warning(row: dict, warn: int, is_new_production: bool) -> str | None:
+    # Warn only when this change adds size; an edit that keeps a large file's
+    # size is not a reason to review it again.
+    base_lines, head_lines = row["base_lines"], row["head_lines"]
+    if head_lines <= warn:
+        return None
+    if is_new_production:
+        growth = f"is a new {head_lines}-line file"
+    elif head_lines > base_lines:
+        growth = f"grew {base_lines} -> {head_lines} lines"
+    else:
+        return None
+    return (
+        f"{row['path']} {growth} (warn threshold {warn}, ceiling "
+        f"{row['ceiling']}). Check that it still has one clear "
+        "responsibility before it reaches the ceiling."
+    )
 
 
 def file_status(
@@ -528,6 +549,22 @@ def transition_destination_error(
     return None
 
 
+def flag_possible_category_move(row: dict, base_policy: dict) -> None:
+    # Only a file with a reviewed ceiling or allowance gains anything by
+    # moving out of enforcement; deleting any other file is a warning.
+    if row["path"] in base_policy["ceilings"].keys() | base_policy["allowances"].keys():
+        row["failures"].append(
+            "Possible category move: production disappeared while non-enforced paths "
+            "changed. Review category_move_candidates and add a transitions entry "
+            "for this source and comparison base, declaring destinations or a genuine deletion."
+        )
+    else:
+        row["warnings"].append(
+            "Possible category move: production disappeared while non-enforced paths "
+            "changed. Check that category_move_candidates did not receive this code."
+        )
+
+
 def review_category_moves(
     rows: list[dict],
     before: dict,
@@ -553,11 +590,7 @@ def review_category_moves(
         record = policy["transitions"].get(row["path"])
         if not record or record["base_commit"] != base:
             if candidates:
-                row["failures"].append(
-                    "Possible category move: production disappeared while non-enforced paths "
-                    "changed. Review category_move_candidates and add a transitions entry "
-                    "for this source and comparison base, declaring destinations or a genuine deletion."
-                )
+                flag_possible_category_move(row, base_policy)
             continue
         row["transition"] = record
         for destination in record["destinations"]:
