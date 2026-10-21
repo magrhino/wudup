@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -847,7 +848,7 @@ def test_option_like_ref_does_not_become_git_option(repo):
 def test_committed_baseline_is_ready_and_records_name_existing_files():
     policy = json.loads((ROOT / POLICY_PATH).read_text())
     assert policy["baseline"]["status"] == "ready"
-    assert len(policy["baseline"]["commit"]) == 40
+    assert re.fullmatch(r"[0-9a-f]{40}", policy["baseline"]["commit"])
     assert policy["thresholds"] == {"warn": 500, "block": 800}
     records = {**policy["ceilings"], **policy["allowances"]}
     assert records

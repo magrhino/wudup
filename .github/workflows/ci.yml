@@ -266,13 +266,8 @@ jobs:
     name: maintainability
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs:
-      - changes
-    if: >-
-      ${{
-        needs.changes.outputs.skip_ci != 'true' &&
-        github.event_name == 'pull_request'
-      }}
+    # A `[skip ci]` title must not skip the size gate, so this job ignores skip_ci.
+    if: ${{ github.event_name == 'pull_request' }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
