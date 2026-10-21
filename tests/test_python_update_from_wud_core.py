@@ -9,6 +9,7 @@ from unittest import mock
 from tests.update_from_wud_helpers import (
     UpdateFromWudRunnerTestCase,
     manifest_image,
+    manifest_index,
     manifest_index_digest,
 )
 
@@ -16,7 +17,11 @@ from wudup.compose import (
     ComposeStack,
     ServiceImage,
 )
-from wudup.digest_verifier import DigestCheckResult, DigestResolveResult
+from wudup.digest_verifier import (
+    DigestCheckResult,
+    DigestResolveResult,
+    ManifestLookupError,
+)
 from wudup.updater_lifecycle_health import _updated_images
 from wudup.updater_models import (
     STALE_PENDING_DIGEST_REASON,
@@ -286,6 +291,28 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
         )
         self.assertIn("Digest verification was inconclusive", log_text)
         self.assertIn("Digest verification reason: manifest-unavailable-untrusted", log_text)
+    def test_preflight_stops_moved_index_without_tag_digest(self) -> None:
+        self.wud_file.write_text(
+            "quay.io/acme/app:latest@sha256:planned\n", encoding="utf-8"
+        )
+        self.make_stack("app", [("app", "quay.io/acme/app:latest", "cid-app")])
+        self.set_image_state("quay.io/acme/app:latest", "old", "sha256:old")
+        # docker manifest inspect reports no index digest, and the planned
+        # index lists different children, so the tag has really moved.
+        self.set_manifest_stdout("quay.io/acme/app:latest", manifest_index("sha256:newer"))
+        self.set_manifest_stdout("quay.io/acme/app@sha256:planned", manifest_index("sha256:older"))
+
+        with mock.patch(
+            "wudup.digest_verifier.RegistryHttpManifestResolver.fetch",
+            side_effect=ManifestLookupError("registry unavailable in offline test"),
+        ):
+            status, stdout, stderr = self.run_direct()
+
+        self.assertNotEqual(status, 0, stderr + stdout)
+        self.assertNotRegex(self.calls(), r"compose -f docker-compose.yml pull app")
+        log_text = self.latest_run_log().read_text(encoding="utf-8")
+        self.assertIn("Pending WUD entry for line 1 is stale", log_text)
+        self.assertNotIn("Digest preflight was inconclusive", log_text)
     def test_non_ghcr_platform_digest_allows_registry_verification(self) -> None:
         self.wud_file.write_text("acme/app:latest@sha256:child\n", encoding="utf-8")
         self.make_stack("app", [("app", "quay.io/acme/app:latest", "cid-app")])

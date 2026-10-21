@@ -112,7 +112,7 @@ class _LifecycleDigestMixin:
                     "No update was applied; check the registry before retrying."
                 )
                 continue
-            if result.reason != "stale-digest" or not result.digest:
+            if result.reason != "stale-digest":
                 self.preflight_digest_outcomes.viable.add(requirement_key)
                 self.log.warning(
                     f"[{stack.name}] Digest preflight was inconclusive for line "

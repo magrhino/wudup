@@ -177,6 +177,45 @@ class UpdateFromWudDigestPinTests(UpdateFromWudRunnerTestCase):
                 stack.images,
             )
         )
+    def test_digest_pin_verification_explains_unconfirmed_target(self) -> None:
+        stack = ComposeStack(
+            index=1,
+            directory=self.root,
+            file="docker-compose.yml",
+            name="app",
+            images=("docker.io/repo/app:2.0",),
+            service_images=(ServiceImage("app", "docker.io/repo/app:2.0"),),
+        )
+        runner = self.make_runner(digest_verifier=mock.Mock())
+
+        with mock.patch.object(
+            runner.lifecycle,
+            "_verify_digest_pin_update_target",
+            return_value=DigestResolveResult(
+                False, "untrusted", "tag-digest-unavailable"
+            ),
+        ):
+            verified = runner._verify_digest_pin_updates(
+                stack,
+                (
+                    digest_pin_update_from_values(
+                        old_image="repo/app:1.0",
+                        resolved_tag="2.0",
+                        planned_digest="sha256:planned",
+                        services=("app",),
+                    ),
+                ),
+                stack.images,
+            )
+
+        self.assertFalse(verified)
+        log_text = self.latest_run_log().read_text(encoding="utf-8")
+        self.assertIn(
+            "[app] Could not confirm digest-pin target for repo/app:2.0:",
+            log_text,
+        )
+        self.assertNotIn("tag-digest-unavailable", log_text)
+
     def test_digest_pin_verification_checks_all_updates_after_failure(self) -> None:
         stack = ComposeStack(
             index=1,
