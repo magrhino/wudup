@@ -98,6 +98,7 @@ def assess_release_security(
         advisory_ids[:SECURITY_ADVISORY_FETCH_MAX],
     )
     lookup_truncated = lookup_truncated or fetch_truncated
+    token_note = f" {GITHUB_TOKEN_REJECTED_MESSAGE}" if token_rejected else ""
     advisory_ids = _advisory_ids(advisory_ids, advisories)
     links = _advisory_links(advisories, advisory_ids)
     severity = _highest_advisory_severity(advisories)
@@ -125,7 +126,7 @@ def assess_release_security(
                 reason=(
                     f"Verified {verified_severity.title()} advisory {identifier} "
                     f"affects {current_version} and is patched by {target_version}."
-                    f"{incomplete}"
+                    f"{incomplete}{token_note}"
                 ),
                 advisory_ids=advisory_ids,
                 lookup_truncated=lookup_truncated,
@@ -141,6 +142,7 @@ def assess_release_security(
                 reason=(
                     "Security signals were found, but advisory lookup was capped; "
                     "review the linked advisories."
+                    f"{token_note}"
                 ),
                 advisory_ids=advisory_ids,
                 lookup_truncated=True,
@@ -156,7 +158,7 @@ def assess_release_security(
                 reason=(
                     "Security signals were found, but GitHub advisory evidence "
                     "could not be checked."
-                    + (f" {GITHUB_TOKEN_REJECTED_MESSAGE}" if token_rejected else "")
+                    f"{token_note}"
                 ),
                 advisory_ids=advisory_ids,
             ),
@@ -252,11 +254,9 @@ def _fetch_security_advisories(
                 context,
                 advisory_id,
             )
-        except GitHubAuthenticationError:
-            failed = token_rejected = True
-            continue
-        except Exception:  # noqa: BLE001 - failure becomes bounded review metadata.
+        except Exception as exc:  # noqa: BLE001 - failure becomes bounded review metadata.
             failed = True
+            token_rejected |= isinstance(exc, GitHubAuthenticationError)
             continue
         for advisory in fetched:
             key = _advisory_stable_id(advisory.payload)

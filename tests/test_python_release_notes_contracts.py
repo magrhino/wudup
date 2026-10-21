@@ -6,6 +6,7 @@ import urllib.error
 from unittest import mock
 
 from wudup.db import init_db, open_db
+from wudup.release_note_cache import ERROR_CACHE_TTL_SECONDS
 from wudup.release_note_providers import (
     CVE_ID_RE,
     GHSA_ID_RE,
@@ -88,7 +89,15 @@ class GitHubTransportContractTests(unittest.TestCase):
                 client.get_json(url)
 
         message = str(caught.exception)
-        self.assertTrue(message.startswith(GITHUB_TOKEN_REJECTED_MESSAGE))
+        self.assertTrue(
+            message.startswith(
+                "GitHub rejected the configured GITHUB_TOKEN (expired, revoked, or "
+                "mistyped). Create a new token or remove GITHUB_TOKEN to use "
+                "anonymous access, then restart WUDup. Cached release-note errors "
+                "are retried after 15 minutes. Detail: "
+            )
+        )
+        self.assertEqual(ERROR_CACHE_TTL_SECONDS, 15 * 60)
         self.assertIn(f"HTTP 401 Unauthorized for {url}", message)
         self.assertNotIn("example-dead-token", message)
         self.assertIs(caught.exception.__cause__, error)

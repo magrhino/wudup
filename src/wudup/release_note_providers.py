@@ -51,7 +51,7 @@ SECURITY_ADVISORY_FETCH_MAX = 4
 GITHUB_TOKEN_REJECTED_MESSAGE = (
     "GitHub rejected the configured GITHUB_TOKEN (expired, revoked, or mistyped). "
     "Create a new token or remove GITHUB_TOKEN to use anonymous access, "
-    "then reload release notes."
+    "then restart WUDup. Cached release-note errors are retried after 15 minutes."
 )
 
 
