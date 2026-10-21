@@ -24,6 +24,7 @@ from wudup.digest_verifier import (
 )
 from wudup.docker_cli import DockerCli
 from wudup.platforms import ImagePlatform
+from wudup.updater_digest_pin import _digest_pin_resolve_error
 
 INDEX_TYPE = "application/vnd.oci.image.index.v1+json"
 MANIFEST_TYPE = "application/vnd.oci.image.manifest.v1+json"
@@ -1034,6 +1035,57 @@ class DigestVerifierResolveTagDigestTests(FakeDockerTestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(result.digest, "sha256:index")
+
+    def _set_verbose_index(self, image: str, *children: str) -> None:
+        self._set_manifest_stdout(
+            image,
+            [
+                verbose_manifest_item(child, architecture=f"arch{index}")
+                for index, child in enumerate(children)
+            ],
+        )
+
+    def _verify_index_without_https(self, expected: str) -> object:
+        verifier = self._make_verifier()
+        # A plain-HTTP registry, like the e2e one, cannot report the index digest.
+        with mock.patch(
+            "wudup.digest_verifier.RegistryHttpManifestResolver.fetch",
+            side_effect=ManifestLookupError("https unavailable"),
+        ):
+            return verifier.verify_tag_digest("repo/app:latest", expected)
+
+    def test_verify_tag_digest_accepts_index_matching_planned_digest(self) -> None:
+        self._set_verbose_index("docker.io/repo/app:latest", "sha256:amd64", "sha256:att")
+        self._set_verbose_index("docker.io/repo/app@sha256:index", "sha256:amd64", "sha256:att")
+
+        result = self._verify_index_without_https("sha256:index")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.reason, "tag-manifest-current")
+        self.assertEqual(result.digest, "sha256:index")
+
+    def test_verify_tag_digest_rejects_index_that_differs_from_planned_digest(self) -> None:
+        self._set_verbose_index("docker.io/repo/app:latest", "sha256:newer", "sha256:att")
+        self._set_verbose_index("docker.io/repo/app@sha256:index", "sha256:amd64", "sha256:att")
+
+        result = self._verify_index_without_https("sha256:index")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "stale-digest")
+        self.assertEqual(result.digest, "")
+
+    def test_verify_tag_digest_reports_unknown_index_digest_as_unavailable(self) -> None:
+        self._set_verbose_index("docker.io/repo/app:latest", "sha256:amd64", "sha256:att")
+        self._set_manifest_failure("docker.io/repo/app@sha256:index", "manifest unknown\n")
+
+        result = self._verify_index_without_https("sha256:index")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "tag-digest-unavailable")
+        self.assertEqual(result.digest, "")
+        message = _digest_pin_resolve_error("repo/app:latest", result)
+        self.assertNotIn("moved", message)
+        self.assertIn("Could not confirm digest-pin target for repo/app:latest", message)
 
 
 if __name__ == "__main__":

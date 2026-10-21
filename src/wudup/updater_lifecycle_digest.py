@@ -288,6 +288,12 @@ class _LifecycleDigestMixin:
                 f"{update.resolved_image}: planned {update.planned_digest}{suffix}",
             )
             return
+        if current.reason == "tag-digest-unavailable":
+            self.log.error(
+                f"[{stack.name}] "
+                f"{_digest_pin_resolve_error(update.resolved_image, current)}"
+            )
+            return
         self.log.error(
             f"[{stack.name}] Could not re-resolve digest-pin target "
             f"{update.resolved_image}: {current.reason}"
