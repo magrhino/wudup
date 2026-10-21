@@ -27,24 +27,45 @@ export function operationalImpact(stack: PlanStack): string {
   return `${stack.name}: ${operationalSteps(stack)}`;
 }
 
-// One line of what the operator will notice; steps every plan shares (orphan cleanup, pending health results) stay in operationalImpact.
+export type StackImpact = {
+  mode: "recreate" | "force-recreate" | "pause";
+  wholeStack: boolean;
+  // Services interrupted without an image update of their own, such as network providers or label-driven stack recreates.
+  alsoRestarted: string[];
+  dependenciesMayStart: boolean;
+};
+
+// Structured impact for a recreate or pause plan; null when the plan has no short form to trust.
+export function stackImpact(stack: PlanStack): StackImpact | null {
+  const has = (kind: string) => stack.actions.some(action => action.kind === kind);
+  const mode = has("up") ? (stack.force_recreate ? "force-recreate" : "recreate") : has("pause") ? "pause" : null;
+  if (!mode) return null;
+  const updated = new Set(stack.lines.map(line => line.service));
+  const interrupted = [...stack.services, ...(has("stop") ? stack.stop_services : [])];
+  return {
+    mode,
+    wholeStack: !stack.services.length,
+    alsoRestarted: [...new Set(interrupted.filter(service => !updated.has(service)))].sort(),
+    dependenciesMayStart: has("up") && !!stack.services.length && !stack.up_no_deps,
+  };
+}
+
+// A plain recreate of the updated services is what the services list already implies.
+export function stackImpactIsNotable(impact: StackImpact): boolean {
+  return impact.mode !== "recreate" || impact.wholeStack || !!impact.alsoRestarted.length || impact.dependenciesMayStart;
+}
+
+// Header label for services interrupted without their own update; "interrupts" covers both restart and pause.
+export function extraInterruptionLabel(plan: PlanResponse): string {
+  const count = plan.stacks.reduce((total, stack) => total + (stackImpact(stack)?.alsoRestarted.length ?? 0), 0);
+  return count ? `Also interrupts ${count} ${count === 1 ? "service" : "services"}` : "";
+}
+
+// Text fallback for stacks without a structured impact; the services list shows the rest.
 export function impactSummary(stack: PlanStack, showStack: boolean): string {
   const prefix = showStack ? `${stack.name}: ` : "";
   if (!stack.actions.length) return `${prefix}Execution steps are not recorded for this plan.`;
-  const scope = stack.services.length ? stack.services.join(", ") : `All services in ${stack.name}`;
-  const has = (kind: string) => stack.actions.some(action => action.kind === kind);
-  const parts: string[] = [];
-  if (has("up")) parts.push(`${scope} will be ${stack.force_recreate ? "force-recreated" : "recreated"} (brief interruption).`);
-  else if (has("pause")) parts.push(`${scope} will be paused during the update.`);
-  // Without a recreate or pause step there is no short form to trust; show every planned step.
-  else return `${prefix}${operationalSteps(stack)}`;
-  const extraStops = stack.stop_services.filter(service => !stack.services.includes(service));
-  if (has("stop") && extraStops.length) parts.push(`Also stops ${extraStops.join(", ")}.`);
-  if (has("up") && stack.services.length && !stack.up_no_deps) parts.push("Dependencies may also start.");
-  if (has("health-wait") || stack.actions.some(action => action.kind === "up" && action.args.includes("--wait"))) {
-    parts.push("Waits for health checks.");
-  }
-  return `${prefix}${parts.join(" ")}`;
+  return `${prefix}${operationalSteps(stack)}`;
 }
 
 function repository(image: string): string {

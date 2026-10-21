@@ -2,7 +2,7 @@
 import { AlertTriangle } from "@lucide/vue";
 import { computed } from "vue";
 import type { PlanResponse, ReleaseNoteInfo, SecurityScanInfo } from "../../api/client";
-import { impactSummary, operationalImpact, reviewEvidence } from "../../views/pending/reviewSummary";
+import { impactSummary, operationalImpact, reviewEvidence, stackImpact } from "../../views/pending/reviewSummary";
 
 const props = defineProps<{
   plan: PlanResponse;
@@ -31,7 +31,10 @@ const attention = computed(() => [...new Set([
   ...props.reasons,
   ...evidence.value.unresolved,
 ].filter(Boolean))]);
-const impact = computed(() => props.plan.stacks.map(stack => impactSummary(stack, props.plan.stacks.length > 1)));
+// Recreate and pause impact is drawn in the services list; only plans without that short form need text.
+const impact = computed(() => props.plan.stacks
+  .filter(stack => !stackImpact(stack))
+  .map(stack => impactSummary(stack, props.plan.stacks.length > 1)));
 const missingEvidence = computed(() => [scanRequestGap.value, ...evidence.value.gaps].filter(Boolean));
 const evidenceSections = computed(() => [
   { title: "Found", items: evidence.value.supporting },

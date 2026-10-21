@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
+import PendingPlanLineList from "../src/components/pending/PendingPlanLineList.vue";
 import PendingReviewSummary from "../src/components/pending/PendingReviewSummary.vue";
-import { impactSummary, operationalImpact, reviewEvidence } from "../src/views/pending/reviewSummary";
+import {
+  extraInterruptionLabel, impactSummary, operationalImpact, reviewEvidence, stackImpact, stackImpactIsNotable,
+} from "../src/views/pending/reviewSummary";
+import { planLinesFromPlan } from "../src/views/pending/utils";
 import { planResponse, releaseNoteInfo, securityScanInfo } from "./helpers/fixtures";
 import { mountWithApp } from "./helpers/mount";
+import type { PlanStack } from "../src/api/client";
 
 function evidenceFixture() {
   const plan = planResponse();
@@ -37,30 +42,44 @@ describe("Pending review decision summary", () => {
     expect(operationalImpact(stack)).toContain("Compose may also start dependencies.");
   });
 
-  it("summarizes impact in one line and leaves steps every plan shares to the details", () => {
+  it("describes recreate impact as structured data and flags only what the services list does not show", () => {
     const stack = planResponse().stacks[0]!;
-    stack.services = ["app", "worker"];
-    stack.stop_services = ["app", "worker", "db"];
     stack.actions.push(
       { kind: "stop", args: [], description: "", cwd: "" },
       { kind: "up", args: ["up", "--remove-orphans", "--wait"], description: "", cwd: "" },
     );
-    expect(impactSummary(stack, false)).toBe(
-      "app, worker will be recreated (brief interruption). Also stops db. Waits for health checks.",
-    );
-    expect(impactSummary(stack, true)).toMatch(/^media: /);
+    // A plain recreate of the updated service is what the services list already implies.
+    const plain = stackImpact(stack)!;
+    expect(plain).toEqual({ mode: "recreate", wholeStack: false, alsoRestarted: [], dependenciesMayStart: false });
+    expect(stackImpactIsNotable(plain)).toBe(false);
+    // A network provider joins the lifecycle scope without an image update of its own.
+    stack.services = ["gluetun", "app"];
+    stack.stop_services = ["app", "gluetun", "db"];
+    expect(stackImpact(stack)!.alsoRestarted).toEqual(["db", "gluetun"]);
+    expect(stackImpactIsNotable(stackImpact(stack)!)).toBe(true);
+    // A whole-stack recreate never lists the updated service as an extra restart.
     stack.services = [];
+    stack.stop_services = ["worker", "app"];
+    expect(stackImpact(stack)).toMatchObject({ wholeStack: true, alsoRestarted: ["worker"] });
     stack.force_recreate = true;
-    expect(impactSummary(stack, false)).toContain("All services in media will be force-recreated");
+    expect(stackImpact(stack)!.mode).toBe("force-recreate");
     stack.services = ["app"];
     stack.up_no_deps = false;
-    expect(impactSummary(stack, false)).toContain("Dependencies may also start.");
-    stack.actions = stack.actions.filter(action => action.kind === "pull");
+    expect(stackImpact(stack)!.dependenciesMayStart).toBe(true);
+    stack.actions = ["pause", "unpause"].map(kind => ({ kind, args: [], description: "", cwd: "" }));
+    expect(stackImpact(stack)).toMatchObject({ mode: "pause", dependenciesMayStart: false });
+  });
+
+  it("keeps a text impact only for plans without a recreate or pause step", () => {
+    const stack = planResponse().stacks[0]!;
     // No recreate or pause step: show every planned step rather than a short claim.
+    expect(stackImpact(stack)).toBeNull();
     expect(impactSummary(stack, false)).toMatch(/^Pull images for /);
+    expect(impactSummary(stack, true)).toMatch(/^media: Pull images for /);
     stack.actions = [{ kind: "stop", args: [], description: "", cwd: "" }];
-    expect(impactSummary(stack, true)).toBe("media: Stop app, worker, db.");
+    expect(impactSummary(stack, true)).toBe("media: Stop app.");
     stack.actions = [];
+    expect(stackImpact(stack)).toBeNull();
     expect(impactSummary(stack, false)).toContain("Execution steps are not recorded");
   });
 
@@ -292,5 +311,86 @@ describe("Pending review decision summary", () => {
     expect(wrapper.find(".review-attention").text()).toContain("The Compose file changed. Preview again.");
     expect(wrapper.find("details.review-evidence").text()).toContain("evidence is advisory");
     wrapper.unmount();
+  });
+
+  it("draws extra restarts in the services list instead of a text line per stack", () => {
+    const plan = planResponse();
+    const stack = plan.stacks[0]!;
+    stack.services = [];
+    stack.stop_services = ["gluetun", "app", "thelounge"];
+    stack.actions.push(
+      { kind: "stop", args: [], description: "", cwd: "" },
+      { kind: "up", args: ["up", "--wait"], description: "", cwd: "" },
+    );
+    const quiet = planResponse();
+    quiet.stacks[0]!.name = "arr";
+    quiet.stacks[0]!.actions.push({ kind: "up", args: ["up", "--wait"], description: "", cwd: "" });
+    plan.stacks.push(quiet.stacks[0]!);
+    const planLines = planLinesFromPlan(plan);
+    const summary = mountWithApp({
+      components: { PendingReviewSummary },
+      setup: () => ({ plan }),
+      template: '<PendingReviewSummary :plan="plan" :release-notes="[]" :security-scans="[]" :security-scans-loading="false" security-scans-error="" :release-notes-loading="false" release-notes-error="" :reasons="[]" />',
+    });
+    expect(summary.find(".review-impact").exists()).toBe(false);
+    summary.unmount();
+
+    const list = mountWithApp({
+      components: { PendingPlanLineList },
+      setup: () => ({ plan, planLines }),
+      template: '<PendingPlanLineList :plan-lines="planLines" :stacks="plan.stacks" :stack-count="2" :release-notes="[]" :release-notes-loading="false" release-notes-error="" />',
+    });
+    const rows = list.findAll(".list-row");
+    // The impact row follows its stack's last service; a plain recreate gets none.
+    expect(rows.map(row => row.classes().includes("plan-impact-row"))).toEqual([false, true, false]);
+    expect(rows[1]!.attributes("aria-label")).toBe("media stack impact");
+    expect(rows[1]!.text()).toContain("Whole stack");
+    // The updated service itself is not listed as an extra restart.
+    expect(rows[1]!.find(".plan-impact-detail").text().replace(/\s+/g, "")).toBe("Alsorestartsgluetunthelounge");
+    list.unmount();
+  });
+
+  it("counts paused and restarted extra services in one future-tense header label", () => {
+    const plan = planResponse();
+    const stack = plan.stacks[0]!;
+    stack.actions.push({ kind: "up", args: ["up", "--wait"], description: "", cwd: "" });
+    expect(extraInterruptionLabel(plan)).toBe("");
+    stack.services = ["gluetun", "app"];
+    expect(extraInterruptionLabel(plan)).toBe("Also interrupts 1 service");
+    const paused = planResponse().stacks[0]!;
+    paused.name = "arr";
+    paused.services = ["app", "worker"];
+    paused.actions = ["pause", "unpause"].map(kind => ({ kind, args: [], description: "", cwd: "" }));
+    plan.stacks.push(paused);
+    // A paused service is interrupted, not restarted; the header must not claim a restart.
+    expect(extraInterruptionLabel(plan)).toBe("Also interrupts 2 services");
+  });
+
+  it.each([
+    { name: "pause", mutate: (stack: PlanStack) => {
+      stack.services = ["app", "worker"];
+      stack.actions = ["pause", "unpause"].map(kind => ({ kind, args: [], description: "", cwd: "" }));
+    }, tags: "Paused", detail: "Alsopausedworker" },
+    { name: "force recreate", mutate: (stack: PlanStack) => {
+      stack.force_recreate = true;
+      stack.actions.push({ kind: "up", args: ["up"], description: "", cwd: "" });
+    }, tags: "Force recreate", detail: "Recreatedevenifunchanged" },
+    { name: "dependencies", mutate: (stack: PlanStack) => {
+      stack.up_no_deps = false;
+      stack.actions.push({ kind: "up", args: ["up"], description: "", cwd: "" });
+    }, tags: "", detail: "Dependenciesmayalsostart" },
+  ])("renders the $name impact row copy", ({ mutate, tags, detail }) => {
+    const plan = planResponse();
+    mutate(plan.stacks[0]!);
+    const planLines = planLinesFromPlan(plan);
+    const list = mountWithApp({
+      components: { PendingPlanLineList },
+      setup: () => ({ plan, planLines }),
+      template: '<PendingPlanLineList :plan-lines="planLines" :stacks="plan.stacks" :stack-count="1" :release-notes="[]" :release-notes-loading="false" release-notes-error="" />',
+    });
+    const row = list.find(".plan-impact-row");
+    expect(row.find(".plan-line-heading").text().replace(/\s+/g, "")).toBe(`media${tags.replace(/\s+/g, "")}`);
+    expect(row.find(".plan-impact-detail").text().replace(/\s+/g, "")).toBe(detail);
+    list.unmount();
   });
 });
