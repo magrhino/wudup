@@ -14,6 +14,7 @@ hotspots are outside this change.
 | `AaCqshWCCYJ15EFuBTqi` | `docker:S8541`, runtime requirements install | Fix: require wheels as well as hashes. Hashing a source archive does not prevent its build hooks from executing. |
 | `AZ-Ew1_08PcgpjNh6X1F` | `githubactions:S8544`, setup-python-env | Fix: install generated, hashed `requirements-dev.txt` and `requirements-build.txt` before the editable project. Dev resolution is constrained by the runtime and build locks. Cache keys include the locks. |
 | `AaCqshP5CYJ15EFuBTqg` | `githubactions:S8541`, setup-python-env | Fix third-party installs with `--only-binary=:all:`. Building the checked-out project is intentional; its separate install uses `--no-deps --no-build-isolation`, so it cannot fetch additional dependencies. The Docker source install uses the same boundary. |
+| `AaFfBi8m2Rb6UGtetZ9e`, `AaFfBi8m2Rb6UGtetZ9f` | `githubactions:S8541` and `githubactions:S8544`, CI `python tests (3.x)` matrix | Fix: install the same hashed, wheel-only locks through setup-python-env's `python-version` input instead of resolving `.[dev]` per interpreter. The 3.11–3.13 resolution produced the same pins and hashes as the Python 3.14 locks on 2026-10-21. |
 | `AaB8AqP4OrpnBdyVTZ7r` | `githubactions:S8264`, CI permissions | Fix: move `pull-requests: read` to `changes`, where paths-filter needs it. Other CI jobs retain only the workflow's `contents: read` default. |
 | `AZ-Ew2B58PcgpjNh6X1H` | `docker:S8544`, optional TrueNAS client | Resolved by removal: the optional TrueNAS client build and its `TRUENAS_API_CLIENT_REF` build argument were removed from the Dockerfile (last present at the `legacy-file-mode` tag). Originally accepted as residual dependency-locking risk. |
 | `AaCqshWCCYJ15EFuBTqh` | `docker:S8541`, optional TrueNAS client | Resolved by removal: the image no longer installs the `truenas/api_client` Git source. Originally accepted as required source execution. |
@@ -103,8 +104,9 @@ or eliminate the reviewed local build.
 ## Validation and maintenance
 
 `make lock` regenerates all three pip-tools locks; review and commit them
-together. CI and lock generation use Python 3.14; older interpreters can require
-additional marker-dependent packages and must not consume this CI lock. The
+together. Lock generation uses Python 3.14. CI also installs these locks on
+Python 3.11–3.13; older interpreters can require additional marker-dependent
+packages, which hash-checking mode rejects as unpinned rather than resolving. The
 development lock includes the lock-generation tools themselves.
 All three locks remain at the root under the existing Dependabot pip entry.
 Dependabot discovers these requirements files and can update matching pins and
