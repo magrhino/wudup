@@ -73,6 +73,7 @@ Use the shell already used by the target script.
 | Python backend validation | See `src/wudup/AGENTS.md`. |
 | update pip lockfile | `make lock` |
 | Live digest verification probe | `tests/live-digest-verification.py alpine:3.20 quay.io/prometheus/busybox:latest` |
+| Upstream WUD part-count probe (fails until WUD offers tags with a different number of version parts) | `tests/wud-segment-count-probe.sh 9.6.0` |
 | WebUI validation and local dev | See `webui/AGENTS.md`. |
 | maintainability checker tests | `python -m pytest tests/test_python_maintainability*.py` and `python -m py_compile scripts/check_maintainability.py` |
 | format check | Not configured. |
