@@ -48,6 +48,7 @@ from .web_effective_settings import (
     DEFAULT_RELEASE_NOTIFICATIONS_RESEND_POLICY,
     DEFAULT_RELEASE_NOTIFICATIONS_VERBOSITY,
     DEFAULT_RETAG_DIGEST_PINS,
+    DEFAULT_SIDEBAR_BADGES,
     DIGEST_PIN_UPDATES_VALUES,
     MANAGED_COMPOSE_IGNORE_PATHS_DB_KEY,
     MANAGED_COMPOSE_IGNORE_PATHS_KEY,
@@ -70,6 +71,8 @@ from .web_effective_settings import (
     MANAGED_RELEASE_NOTIFICATIONS_VERBOSITY_KEY,
     MANAGED_RETAG_DIGEST_PINS_DB_KEY,
     MANAGED_RETAG_DIGEST_PINS_KEY,
+    MANAGED_SIDEBAR_BADGES_DB_KEY,
+    MANAGED_SIDEBAR_BADGES_KEY,
     MANAGED_THEME_PREFERENCE_DB_KEY,
     MANAGED_THEME_PREFERENCE_KEY,
     ONBOARDING_CHECKLIST_VALUES,
@@ -79,6 +82,7 @@ from .web_effective_settings import (
     RELEASE_NOTIFICATIONS_RESEND_POLICY_VALUES,
     RELEASE_NOTIFICATIONS_VERBOSITY_VALUES,
     RETAG_DIGEST_PINS_VALUES,
+    SIDEBAR_BADGES_VALUES,
     THEME_PREFERENCE_VALUES,
     _compose_ignore_env_configured,
     _compose_ignore_paths_disabled_reason,
@@ -125,6 +129,7 @@ DEFAULT_WEB_HOST = "127.0.0.1"
 _MANAGED_SETTING_ALLOWED_VALUES = {
     MANAGED_THEME_PREFERENCE_KEY: THEME_PREFERENCE_VALUES,
     MANAGED_ONBOARDING_CHECKLIST_KEY: ONBOARDING_CHECKLIST_VALUES,
+    MANAGED_SIDEBAR_BADGES_KEY: SIDEBAR_BADGES_VALUES,
     MANAGED_DIGEST_PIN_UPDATES_KEY: DIGEST_PIN_UPDATES_VALUES,
     MANAGED_RETAG_DIGEST_PINS_KEY: RETAG_DIGEST_PINS_VALUES,
     MANAGED_RELEASE_NOTES_ENABLED_KEY: RELEASE_NOTES_ENABLED_VALUES,
@@ -141,6 +146,7 @@ _MANAGED_SETTING_ALLOWED_VALUES = {
 }
 _MANAGED_SETTING_DB_KEYS = {
     MANAGED_THEME_PREFERENCE_KEY: MANAGED_THEME_PREFERENCE_DB_KEY,
+    MANAGED_SIDEBAR_BADGES_KEY: MANAGED_SIDEBAR_BADGES_DB_KEY,
     MANAGED_COMPOSE_IGNORE_PATHS_KEY: MANAGED_COMPOSE_IGNORE_PATHS_DB_KEY,
     MANAGED_DIGEST_PIN_UPDATES_KEY: MANAGED_DIGEST_PIN_UPDATES_DB_KEY,
     MANAGED_RETAG_DIGEST_PINS_KEY: MANAGED_RETAG_DIGEST_PINS_DB_KEY,
@@ -267,6 +273,7 @@ def _managed_settings_entries_from_values(
     return [
         _theme_preference_entry(values),
         _onboarding_checklist_entry(values),
+        _sidebar_badges_entry(values),
         _compose_ignore_paths_entry(values, settings),
         _digest_pin_updates_entry(values, settings),
         _retag_digest_pins_entry(values),
@@ -298,6 +305,24 @@ def _onboarding_checklist_entry(values: Mapping[str, str]) -> ManagedSettingEntr
         source="configured" if onboarding_dismissed_at else "default",
         editable=True,
         allowed_values=list(ONBOARDING_CHECKLIST_VALUES),
+        restart_required=False,
+    )
+
+
+def _sidebar_badges_entry(values: Mapping[str, str]) -> ManagedSettingEntry:
+    configured = MANAGED_SIDEBAR_BADGES_DB_KEY in values
+    enabled = parse_bool_env(
+        MANAGED_SIDEBAR_BADGES_KEY,
+        values.get(MANAGED_SIDEBAR_BADGES_DB_KEY, ""),
+        default=DEFAULT_SIDEBAR_BADGES,
+    )
+    return ManagedSettingEntry(
+        key=MANAGED_SIDEBAR_BADGES_KEY,
+        value=_format_bool(enabled),
+        default_value=_format_bool(DEFAULT_SIDEBAR_BADGES),
+        source="configured" if configured else "default",
+        editable=True,
+        allowed_values=list(SIDEBAR_BADGES_VALUES),
         restart_required=False,
     )
 

@@ -13,11 +13,13 @@ const {
   settings,
   themePreferenceEntry,
   onboardingChecklistEntry,
+  sidebarBadgesEntry,
   composeIgnorePathsEntry,
   digestPinUpdatesEntry,
   retagDigestPinsEntry,
   themePreferenceValue,
   onboardingChecklistValue,
+  sidebarBadgesValue,
   composeIgnorePathsValue,
   digestPinUpdatesValue,
   retagDigestPinsValue,
@@ -32,6 +34,7 @@ const {
   preferenceSaveDisabled,
   themePreferenceOptions,
   onboardingChecklistOptions,
+  sidebarBadgesOptions,
   digestPinUpdatesOptions,
   retagDigestPinsOptions,
   coreUpdateTourStatus,
@@ -104,6 +107,28 @@ const {
                 :options="themePreferenceOptions"
                 :disabled="preferenceControlsDisabled"
                 aria-label="Theme preference"
+              />
+            </div>
+            <div
+              v-settings-select-loading-state
+              class="settings-preference-row"
+            >
+              <div>
+                <strong class="wrap-anywhere">Sidebar counts</strong>
+                <span class="wrap-anywhere">
+                  Shows pending updates and containers that need a tracking
+                  fix next to their navigation links.
+                </span>
+                <span class="wrap-anywhere">
+                  Source:
+                  {{ managedSourceLabel(sidebarBadgesEntry) }}
+                </span>
+              </div>
+              <n-select
+                v-model:value="sidebarBadgesValue"
+                :options="sidebarBadgesOptions"
+                :disabled="preferenceControlsDisabled"
+                aria-label="Sidebar counts"
               />
             </div>
           </div>

@@ -18,11 +18,17 @@ import { useMediaQuery } from "@vueuse/core";
 
 import { responsiveMediaQueries } from "../../responsive";
 import { useConnectionStore } from "../../stores/connection";
+import { useSettingsStore } from "../../stores/settings";
+import { useTrackingStore } from "../../stores/tracking";
+import { useUpdatesStore } from "../../stores/updates";
 import { runInBackground } from "../../utils/promises";
 import AppBrandMark from "./AppBrandMark.vue";
 
 const route = useRoute();
 const connection = useConnectionStore();
+const settings = useSettingsStore();
+const tracking = useTrackingStore();
+const updates = useUpdatesStore();
 const navListRef = ref<HTMLElement | null>(null);
 const appShellLayout = useMediaQuery(responsiveMediaQueries.appShell);
 
@@ -76,6 +82,64 @@ type NavItem = {
   icon: Component;
   activeRouteNames: string[];
 };
+
+type NavBadge = {
+  text: string;
+  tone: "neutral" | "attention";
+  description: string;
+};
+
+const NAV_BADGE_MAX = 99;
+
+// Wait for managed settings so a disabled preference never flashes counts.
+const navBadgesEnabled = computed(
+  () =>
+    settings.settings !== null &&
+    settings.settings.managed.find((entry) => entry.key === "sidebar_badges")
+      ?.value !== "false",
+);
+const pendingCount = computed(
+  () => updates.pending?.count ?? connection.status?.pending_count ?? 0,
+);
+
+function navBadge(
+  count: number,
+  tone: NavBadge["tone"],
+  description: string,
+): NavBadge | undefined {
+  if (count <= 0) {
+    return undefined;
+  }
+  return {
+    text: count > NAV_BADGE_MAX ? `${NAV_BADGE_MAX}+` : String(count),
+    tone,
+    description,
+  };
+}
+
+const navBadges = computed<Partial<Record<string, NavBadge>>>(() => {
+  if (!navBadgesEnabled.value) {
+    return {};
+  }
+  const repairs = tracking.needsRepairCount;
+  return {
+    "/pending": navBadge(
+      pendingCount.value,
+      "neutral",
+      `${pendingCount.value} pending ${pendingCount.value === 1 ? "update" : "updates"}`,
+    ),
+    "/containers": navBadge(
+      repairs,
+      "attention",
+      `${repairs} ${repairs === 1 ? "container needs" : "containers need"} a tracking fix`,
+    ),
+  };
+});
+
+function navItemLabel(item: NavItem): string {
+  const badge = navBadges.value[item.to];
+  return badge ? `${item.label}, ${badge.description}` : item.label;
+}
 
 const navItems: NavItem[] = [
   {
@@ -175,6 +239,23 @@ watch(
   () => runInBackground(scrollActiveNavItemIntoView()),
 );
 
+watch(
+  [navBadgesEnabled, () => route.name],
+  ([enabled, routeName]) => {
+    // Retry a failed or unavailable inventory on navigation. The Containers
+    // view loads its own inventory; avoid a duplicate discovery there.
+    if (
+      enabled &&
+      tracking.inventory?.status !== "ready" &&
+      !tracking.loading &&
+      routeName !== "containers"
+    ) {
+      runInBackground(tracking.load());
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   if (connection.status === null) {
     runInBackground(connection.loadStatus());
@@ -197,13 +278,21 @@ onMounted(() => {
         class="nav-item"
         :class="{ 'nav-item-active': isNavItemActive(item) }"
         :to="item.to"
-        :title="item.label"
-        :aria-label="item.label"
+        :title="navItemLabel(item)"
+        :aria-label="navItemLabel(item)"
         :aria-current="isNavItemActive(item) ? 'page' : undefined"
         @focus="scrollNavItemIntoView"
       >
         <component :is="item.icon" :size="18" />
         <span>{{ item.label }}</span>
+        <span
+          v-if="navBadges[item.to]"
+          class="nav-badge"
+          :class="`nav-badge-${navBadges[item.to]?.tone}`"
+          aria-hidden="true"
+        >
+          {{ navBadges[item.to]?.text }}
+        </span>
       </RouterLink>
     </nav>
 
@@ -273,6 +362,35 @@ onMounted(() => {
   background: var(--color-sidebar-hover);
   color: var(--color-sidebar-text);
   transform: translateX(2px);
+}
+
+.nav-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--text-label-size);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nav-badge-neutral {
+  border-color: rgba(247, 251, 252, 0.18);
+  background: rgba(247, 251, 252, 0.12);
+  color: var(--color-sidebar-text);
+}
+
+.nav-badge-attention {
+  border-color: color-mix(in srgb, var(--color-warning-fg) 40%, transparent);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-fg);
 }
 
 .sidebar-footer {
