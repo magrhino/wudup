@@ -42,6 +42,8 @@ export const useTrackingStore = defineStore("tracking", () => {
   const applyError = ref("");
   const applyErrorJobId = ref("");
   const rememberedJobId = ref(storedTrackingJobId());
+  // Separate from `error`, which also carries repair-job check failures.
+  const inventoryLoadFailed = ref(false);
   const needsRepairCount = computed(() =>
     inventory.value?.status === "ready"
       ? inventory.value.items.filter((item) => REPAIRABLE_TRACKING_HEALTH.has(item.tracking_health)).length
@@ -101,9 +103,13 @@ export const useTrackingStore = defineStore("tracking", () => {
     await refreshRememberedJob(rememberedJobId.value, version);
     try {
       const currentInventory = await webApi.trackedContainers();
-      if (version === loadVersion) inventory.value = currentInventory;
+      if (version === loadVersion) {
+        inventory.value = currentInventory;
+        inventoryLoadFailed.value = false;
+      }
     } catch (exc) {
       if (version === loadVersion) {
+        inventoryLoadFailed.value = true;
         error.value = [error.value, errorMessage(exc)].filter(Boolean).join(" ");
       }
     } finally {
@@ -178,5 +184,5 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
   }
 
-  return { inventory, plan, job, rememberedJobId, needsRepairCount, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
+  return { inventory, plan, job, rememberedJobId, inventoryLoadFailed, needsRepairCount, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
 });

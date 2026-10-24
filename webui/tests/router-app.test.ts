@@ -458,7 +458,12 @@ describe("app shell", () => {
     // Not loaded yet with no error: nothing is known, so no badge.
     expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
 
-    tracking.error = "Docker is unavailable";
+    // A repair-job error alone says nothing about the inventory.
+    tracking.error = "Could not check tracking repair job job-1";
+    await nextTick();
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
+
+    tracking.inventoryLoadFailed = true;
     await nextTick();
     const containersItem = wrapper
       .findAll(".nav-item")
@@ -472,6 +477,7 @@ describe("app shell", () => {
       tracking.inventory = trackedContainersResponse([
         trackedContainerItem({ tracking_health: "frozen" }),
       ]);
+      tracking.inventoryLoadFailed = false;
     });
     await router.push("/runs");
     await flushPromises();
@@ -482,6 +488,33 @@ describe("app shell", () => {
     await router.push("/audit");
     await flushPromises();
     expect(loadTracking).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows unknown status and retries after a failed refresh of a ready inventory", async () => {
+    const stores = createAppStores();
+    stores.settings.settings = settingsResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const tracking = useTrackingStore(stores.pinia);
+    tracking.inventory = trackedContainersResponse([
+      trackedContainerItem({ tracking_health: "frozen" }),
+    ]);
+    const loadTracking = vi.spyOn(tracking, "load").mockResolvedValue();
+
+    const { router, wrapper } = await mountAppAt(stores);
+    await flushPromises();
+    expect(loadTracking).not.toHaveBeenCalled();
+    expect(wrapper.find(".nav-badge-attention").text()).toBe("1");
+
+    // The older inventory stays in place, but its count is no longer trusted.
+    tracking.inventoryLoadFailed = true;
+    await nextTick();
+    expect(wrapper.find(".nav-badge-attention").exists()).toBe(false);
+    expect(wrapper.find(".nav-badge-unknown").text()).toBe("?");
+
+    await router.push("/runs");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(1);
   });
 
   it("retries an unavailable sidebar inventory on navigation", async () => {
