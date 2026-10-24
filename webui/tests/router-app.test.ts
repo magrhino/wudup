@@ -455,6 +455,18 @@ describe("app shell", () => {
     await flushPromises();
     expect(loadTracking).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".nav-badge-attention").exists()).toBe(false);
+    // Not loaded yet with no error: nothing is known, so no badge.
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
+
+    tracking.error = "Docker is unavailable";
+    await nextTick();
+    const containersItem = wrapper
+      .findAll(".nav-item")
+      .find((item) => item.text().includes("Containers"));
+    expect(containersItem?.find(".nav-badge-unknown").text()).toBe("?");
+    expect(containersItem?.attributes("aria-label")).toBe(
+      "Containers, tracking status unavailable",
+    );
 
     loadTracking.mockImplementation(async () => {
       tracking.inventory = trackedContainersResponse([
@@ -465,6 +477,7 @@ describe("app shell", () => {
     await flushPromises();
     expect(loadTracking).toHaveBeenCalledTimes(2);
     expect(wrapper.find(".nav-badge-attention").text()).toBe("1");
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
 
     await router.push("/audit");
     await flushPromises();
@@ -480,9 +493,10 @@ describe("app shell", () => {
     tracking.inventory = trackedContainersResponse([], { status: "unavailable" });
     const loadTracking = vi.spyOn(tracking, "load").mockResolvedValue();
 
-    const { router } = await mountAppAt(stores);
+    const { router, wrapper } = await mountAppAt(stores);
     await flushPromises();
     expect(loadTracking).toHaveBeenCalledTimes(1);
+    expect(wrapper.find(".nav-badge-unknown").text()).toBe("?");
 
     await router.push("/runs");
     await flushPromises();
