@@ -52,6 +52,24 @@ describe("TrackedContainersView", () => {
     document.body.replaceChildren();
   });
 
+  it("reuses an inventory load already in flight when the page mounts", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useAuthStore().session = authSession({ authenticated: true });
+    const tracking = useTrackingStore();
+    tracking.loading = true;
+    const load = vi.spyOn(tracking, "load").mockResolvedValue();
+    const router = createWudRouter(createMemoryHistory());
+    await router.push({ name: "containers" });
+    await router.isReady();
+
+    const wrapper = mountWithApp(TrackedContainersView, { pinia, router });
+    await flushPromises();
+
+    expect(load).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Loading Compose services and WUD observations");
+  });
+
   it("shows Compose inventory and a plan-first repair for the selected service", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);

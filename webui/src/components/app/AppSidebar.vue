@@ -85,7 +85,7 @@ type NavItem = {
 
 type NavBadge = {
   text: string;
-  tone: "neutral" | "attention";
+  tone: "neutral" | "attention" | "unknown";
   description: string;
 };
 
@@ -100,6 +100,13 @@ const navBadgesEnabled = computed(
 );
 const pendingCount = computed(
   () => updates.pending?.count ?? connection.status?.pending_count ?? 0,
+);
+// An unavailable or failed inventory is unknown, not "nothing to fix".
+const containerCountUnknown = computed(
+  () =>
+    !tracking.loading &&
+    (tracking.inventory?.status === "unavailable" ||
+      (tracking.inventory === null && tracking.error !== "")),
 );
 
 function navBadge(
@@ -128,11 +135,17 @@ const navBadges = computed<Partial<Record<string, NavBadge>>>(() => {
       "neutral",
       `${pendingCount.value} pending ${pendingCount.value === 1 ? "update" : "updates"}`,
     ),
-    "/containers": navBadge(
-      repairs,
-      "attention",
-      `${repairs} ${repairs === 1 ? "container needs" : "containers need"} a tracking fix`,
-    ),
+    "/containers": containerCountUnknown.value
+      ? {
+          text: "?",
+          tone: "unknown",
+          description: "tracking status unavailable",
+        }
+      : navBadge(
+          repairs,
+          "attention",
+          `${repairs} ${repairs === 1 ? "container needs" : "containers need"} a tracking fix`,
+        ),
   };
 });
 
@@ -391,6 +404,12 @@ onMounted(() => {
   border-color: color-mix(in srgb, var(--color-warning-fg) 40%, transparent);
   background: var(--color-warning-bg);
   color: var(--color-warning-fg);
+}
+
+.nav-badge-unknown {
+  border-color: rgba(247, 251, 252, 0.32);
+  border-style: dashed;
+  color: var(--color-sidebar-muted);
 }
 
 .sidebar-footer {
