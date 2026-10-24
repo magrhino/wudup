@@ -11,7 +11,36 @@
 # Usage: tests/wud-segment-count-probe.sh [wud-image-tag ...]   (default: 9.6.0)
 set -Eeuo pipefail
 
-if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+# Same polling timeout as tests/smoke-container-image.sh; macOS has no timeout(1).
+run_with_timeout(){
+  local seconds="$1"
+  shift
+  local elapsed=0
+  local pid status
+
+  "$@" &
+  pid=$!
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( elapsed >= seconds )); then
+      printf 'Command timed out after %ss: %s\n' "$seconds" "$*" >&2
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  set +e
+  wait "$pid"
+  status=$?
+  set -e
+  return "$status"
+}
+
+if ! command -v docker >/dev/null 2>&1 || ! run_with_timeout 30 docker info >/dev/null 2>&1; then
   printf 'skip - Docker is not available\n' >&2
   exit 0
 fi
@@ -46,7 +75,13 @@ JS
 
 status=0
 for wud_tag in "${@:-9.6.0}"; do
-  printf '# ghcr.io/getwud/wud:%s\n' "$wud_tag"
-  docker run --rm --quiet --entrypoint node "ghcr.io/getwud/wud:$wud_tag" -e "$PROBE_JS" || status=1
+  image="ghcr.io/getwud/wud:$wud_tag"
+  printf '# %s\n' "$image"
+  if ! run_with_timeout 300 docker pull --quiet "$image" >/dev/null; then
+    printf 'not ok - could not pull %s (failed or took over 300s); check the tag and registry access\n' "$image" >&2
+    status=1
+    continue
+  fi
+  run_with_timeout 60 docker run --rm --entrypoint node "$image" -e "$PROBE_JS" || status=1
 done
 exit "$status"
