@@ -101,12 +101,15 @@ const navBadgesEnabled = computed(
 const pendingCount = computed(
   () => updates.pending?.count ?? connection.status?.pending_count ?? 0,
 );
-// An unavailable or failed inventory is unknown, not "nothing to fix".
+// An unavailable or failed inventory is unknown, not "nothing to fix",
+// including a failed refresh that left an older inventory in place.
+const containerCountStale = computed(
+  () => tracking.inventory?.status !== "ready" || tracking.inventoryLoadFailed,
+);
 const containerCountUnknown = computed(
   () =>
     !tracking.loading &&
-    (tracking.inventory?.status === "unavailable" ||
-      (tracking.inventory === null && tracking.error !== "")),
+    (tracking.inventory?.status === "unavailable" || tracking.inventoryLoadFailed),
 );
 
 function navBadge(
@@ -261,7 +264,7 @@ watch(
     // view loads its own inventory; avoid a duplicate discovery there.
     if (
       enabled &&
-      tracking.inventory?.status !== "ready" &&
+      containerCountStale.value &&
       !tracking.loading &&
       routeName !== "containers"
     ) {

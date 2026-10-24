@@ -85,6 +85,23 @@ describe("tracking store", () => {
     expect(globalThis.sessionStorage.getItem("trackingRepairJobId")).toBeNull();
   });
 
+  it("flags a failed inventory load until a later load succeeds", async () => {
+    const store = useTrackingStore();
+    const ready = trackedContainersResponse();
+    const load = vi.spyOn(webApi, "trackedContainers").mockResolvedValueOnce(ready)
+      .mockRejectedValueOnce(new Error("Inventory unavailable"))
+      .mockResolvedValueOnce(ready);
+
+    await store.load();
+    expect(store.inventoryLoadFailed).toBe(false);
+    await store.load();
+    expect(store.inventoryLoadFailed).toBe(true);
+    expect(store.inventory).toEqual(ready);
+    await store.load();
+    expect(store.inventoryLoadFailed).toBe(false);
+    expect(load).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps an inventory refresh error separate from a successful repair", async () => {
     const store = useTrackingStore();
     store.plan = plan;
