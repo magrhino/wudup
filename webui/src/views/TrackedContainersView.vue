@@ -112,7 +112,10 @@ watch(editor, () => {
   tracking.clearPlan();
 });
 
-onMounted(() => runInBackground(tracking.load()));
+// Reuse an inventory load already in flight (for example the sidebar's).
+onMounted(() => {
+  if (!tracking.loading) runInBackground(tracking.load());
+});
 useRouteRefresh(tracking.load);
 
 async function select(item: TrackedContainerItem, event: MouseEvent): Promise<void> {

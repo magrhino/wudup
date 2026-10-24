@@ -27,6 +27,8 @@ import type {
   RunSummary,
   SecurityScanInfo,
   ServicePolicyRecord,
+  TrackedContainerItem,
+  TrackedContainersResponse,
   SelfUpdateApplyResponse,
   SelfUpdatePlanResponse,
   SelfUpdatePrepareResponse,
@@ -298,6 +300,48 @@ export function statusResponse(
   };
 }
 
+export function trackedContainerItem(
+  overrides: Partial<TrackedContainerItem> = {},
+): TrackedContainerItem {
+  return {
+    target_id: "target-radarr",
+    service_key: "media/radarr",
+    stack: "media",
+    service: "radarr",
+    compose_path: "/stacks/media/docker-compose.yml",
+    image: "repo/radarr:v1.36.2",
+    current_tag: "v1.36.2",
+    runtime_state: "running",
+    tracking_regex: String.raw`^v\d+(?:\.\d+)+$`,
+    tracking_health: "version-pattern",
+    tracking_detail: "",
+    suggested_regex: "",
+    wud: null,
+    wud_match_state: "watching",
+    wud_update_available: false,
+    last_image_recorded_at: "",
+    last_action_at: "",
+    last_action_status: "",
+    last_action_run_id: null,
+    retag_available: false,
+    ...overrides,
+  };
+}
+
+export function trackedContainersResponse(
+  items: TrackedContainerItem[] = [trackedContainerItem()],
+  overrides: Partial<TrackedContainersResponse> = {},
+): TrackedContainersResponse {
+  return {
+    status: "ready",
+    count: items.length,
+    items,
+    wud_status: null,
+    warnings: [],
+    ...overrides,
+  };
+}
+
 export function settingsResponse(
   overrides: Partial<SettingsResponse> = {},
 ): SettingsResponse {
@@ -356,6 +400,7 @@ export function settingsResponse(
         "visible",
         "dismissed",
       ]),
+      managedSettingEntry("sidebar_badges", "true", ["false", "true"]),
       managedSettingEntry("digest_pin_updates", "false", ["false", "true"]),
       managedSettingEntry("retag_digest_pins", "false", ["false", "true"]),
       managedSettingEntry("release_notes_enabled", "false", ["false", "true"]),

@@ -11,6 +11,7 @@ import {
   managedOptions,
   ONBOARDING_CHECKLIST_LABELS,
   RETAG_DIGEST_PINS_LABELS,
+  SIDEBAR_BADGES_LABELS,
   THEME_PREFERENCE_LABELS,
 } from "./settingsDisplay";
 import { useSettingsSafety } from "./useSettingsSafety";
@@ -28,6 +29,9 @@ export function useManagedPreferences() {
   const onboardingChecklistEntry = computed(() =>
     managedEntries.value.find((entry) => entry.key === "onboarding_checklist"),
   );
+  const sidebarBadgesEntry = computed(() =>
+    managedEntries.value.find((entry) => entry.key === "sidebar_badges"),
+  );
   const composeIgnorePathsEntry = computed(() =>
     managedEntries.value.find((entry) => entry.key === "compose_ignore_paths"),
   );
@@ -40,6 +44,7 @@ export function useManagedPreferences() {
 
   const themePreferenceValue = ref("system");
   const onboardingChecklistValue = ref("visible");
+  const sidebarBadgesValue = ref("true");
   const composeIgnorePathsValue = ref("");
   const digestPinUpdatesValue = ref("false");
   const retagDigestPinsValue = ref("false");
@@ -64,6 +69,7 @@ export function useManagedPreferences() {
         (themePreferenceEntry.value?.value ?? "system") ||
       onboardingChecklistValue.value !==
         (onboardingChecklistEntry.value?.value ?? "visible") ||
+      sidebarBadgesValue.value !== (sidebarBadgesEntry.value?.value ?? "true") ||
       (composeIgnorePathsEditable.value &&
         composeIgnorePathsValue.value !==
           (composeIgnorePathsEntry.value?.value ?? "")) ||
@@ -83,6 +89,9 @@ export function useManagedPreferences() {
   const onboardingChecklistOptions = computed(() =>
     managedOptions(onboardingChecklistEntry.value, ONBOARDING_CHECKLIST_LABELS),
   );
+  const sidebarBadgesOptions = computed(() =>
+    managedOptions(sidebarBadgesEntry.value, SIDEBAR_BADGES_LABELS),
+  );
   const digestPinUpdatesOptions = computed(() =>
     managedOptions(digestPinUpdatesEntry.value, DIGEST_PIN_UPDATES_LABELS),
   );
@@ -100,6 +109,7 @@ export function useManagedPreferences() {
     themePreferenceValue.value = themePreferenceEntry.value?.value ?? "system";
     onboardingChecklistValue.value =
       onboardingChecklistEntry.value?.value ?? "visible";
+    sidebarBadgesValue.value = sidebarBadgesEntry.value?.value ?? "true";
     composeIgnorePathsValue.value = composeIgnorePathsEntry.value?.value ?? "";
     digestPinUpdatesValue.value = digestPinUpdatesEntry.value?.value ?? "false";
     retagDigestPinsValue.value = retagDigestPinsEntry.value?.value ?? "false";
@@ -126,6 +136,9 @@ export function useManagedPreferences() {
       (onboardingChecklistEntry.value?.value ?? "visible")
     ) {
       values.onboarding_checklist = onboardingChecklistValue.value;
+    }
+    if (sidebarBadgesValue.value !== (sidebarBadgesEntry.value?.value ?? "true")) {
+      values.sidebar_badges = sidebarBadgesValue.value;
     }
     if (
       composeIgnorePathsEditable.value &&
@@ -228,11 +241,13 @@ export function useManagedPreferences() {
     settings,
     themePreferenceEntry,
     onboardingChecklistEntry,
+    sidebarBadgesEntry,
     composeIgnorePathsEntry,
     digestPinUpdatesEntry,
     retagDigestPinsEntry,
     themePreferenceValue,
     onboardingChecklistValue,
+    sidebarBadgesValue,
     composeIgnorePathsValue,
     digestPinUpdatesValue,
     retagDigestPinsValue,
@@ -247,6 +262,7 @@ export function useManagedPreferences() {
     preferenceSaveDisabled,
     themePreferenceOptions,
     onboardingChecklistOptions,
+    sidebarBadgesOptions,
     digestPinUpdatesOptions,
     retagDigestPinsOptions,
     coreUpdateTourStatus,
