@@ -80,6 +80,11 @@ export const ONBOARDING_CHECKLIST_LABELS: Record<string, string> = {
   dismissed: "Dismissed",
 };
 
+export const SIDEBAR_BADGES_LABELS: Record<string, string> = {
+  true: "Show counts",
+  false: "Hide counts",
+};
+
 export const DIGEST_PIN_UPDATES_LABELS: Record<string, string> = {
   false: "Disabled",
   true: "Enabled",

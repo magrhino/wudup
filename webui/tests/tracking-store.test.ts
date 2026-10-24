@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, webApi, type TrackingRepairPlan } from "../src/api/client";
 import { useAuthStore } from "../src/stores/auth";
 import { useTrackingStore } from "../src/stores/tracking";
-import { applyJobResponse } from "./helpers/fixtures";
+import {
+  applyJobResponse,
+  trackedContainerItem,
+  trackedContainersResponse,
+} from "./helpers/fixtures";
 
 const plan: TrackingRepairPlan = {
   plan_id: "plan-radarr", source_hash: "before", rendered_hash: "after",
@@ -23,6 +27,22 @@ describe("tracking store", () => {
     globalThis.sessionStorage.clear();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("counts only frozen and needs-transform services as needing a tracking fix", () => {
+    const store = useTrackingStore();
+    expect(store.needsRepairCount).toBe(0);
+
+    store.inventory = trackedContainersResponse([
+      trackedContainerItem({ target_id: "a", tracking_health: "frozen" }),
+      trackedContainerItem({ target_id: "b", tracking_health: "needs-transform" }),
+      trackedContainerItem({ target_id: "c", tracking_health: "digest-pinned" }),
+      trackedContainerItem({ target_id: "d", tracking_health: "version-pattern" }),
+    ]);
+    expect(store.needsRepairCount).toBe(2);
+
+    store.inventory = trackedContainersResponse([], { status: "unavailable" });
+    expect(store.needsRepairCount).toBe(0);
   });
 
   it("previews with CSRF and clears a stale plan after an error", async () => {

@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 import {
@@ -13,6 +13,7 @@ import { errorMessage } from "./storeState";
 
 const MAX_APPLY_POLLS = 400; // About five minutes; the server job continues after polling stops.
 const TRACKING_JOB_STORAGE_KEY = "trackingRepairJobId";
+const REPAIRABLE_TRACKING_HEALTH = new Set(["frozen", "needs-transform"]);
 
 function trackingJobStorage(): Storage | null {
   try {
@@ -41,6 +42,11 @@ export const useTrackingStore = defineStore("tracking", () => {
   const applyError = ref("");
   const applyErrorJobId = ref("");
   const rememberedJobId = ref(storedTrackingJobId());
+  const needsRepairCount = computed(() =>
+    inventory.value?.status === "ready"
+      ? inventory.value.items.filter((item) => REPAIRABLE_TRACKING_HEALTH.has(item.tracking_health)).length
+      : 0,
+  );
   let loadVersion = 0;
 
   function forgetJob(): void {
@@ -172,5 +178,5 @@ export const useTrackingStore = defineStore("tracking", () => {
     }
   }
 
-  return { inventory, plan, job, rememberedJobId, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
+  return { inventory, plan, job, rememberedJobId, needsRepairCount, loading, planning, applying, error, applyError, load, preview, clearPlan, apply };
 });

@@ -701,10 +701,10 @@ describe("settings mutation views", () => {
     await wrapper
       .find('input[aria-label="Discord webhook URL"]')
       .setValue("https://discord.com/api/webhooks/123/token-secret");
-    emitSelectValue(wrapper, 4, RELEASE_NOTIFICATION_DELIVERY_MODE_ON_DEMAND);
-    emitSelectValue(wrapper, 5, "full");
-    emitSelectValue(wrapper, 6, "digest");
-    emitSelectValue(wrapper, 7, "cooldown");
+    emitSelectValue(wrapper, 5, RELEASE_NOTIFICATION_DELIVERY_MODE_ON_DEMAND);
+    emitSelectValue(wrapper, 6, "full");
+    emitSelectValue(wrapper, 7, "digest");
+    emitSelectValue(wrapper, 8, "cooldown");
     await wrapper
       .find('input[aria-label="Release notification cooldown seconds"]')
       .setValue("00060");

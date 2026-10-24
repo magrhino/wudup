@@ -238,6 +238,18 @@ def test_settings_reports_effective_non_secret_configuration(
         "configured": False,
         "sensitive": False,
     }
+    assert managed["sidebar_badges"] == {
+        "key": "sidebar_badges",
+        "value": "true",
+        "default_value": "true",
+        "source": "default",
+        "editable": True,
+        "allowed_values": ["false", "true"],
+        "restart_required": False,
+        "disabled_reason": "",
+        "configured": False,
+        "sensitive": False,
+    }
     assert managed["compose_ignore_paths"] == {
         "key": "compose_ignore_paths",
         "value": "",
@@ -800,6 +812,7 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
             "values": {
                 "theme_preference": "dark",
                 "onboarding_checklist": "dismissed",
+                "sidebar_badges": "false",
                 "compose_ignore_paths": "old, archive/disabled",
                 "digest_pin_updates": "true",
                 "retag_digest_pins": "true",
@@ -825,6 +838,8 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
     assert managed["theme_preference"]["source"] == "configured"
     assert managed["onboarding_checklist"]["value"] == "dismissed"
     assert managed["onboarding_checklist"]["source"] == "configured"
+    assert managed["sidebar_badges"]["value"] == "false"
+    assert managed["sidebar_badges"]["source"] == "configured"
     assert managed["compose_ignore_paths"]["value"] == "old, archive/disabled"
     assert managed["compose_ignore_paths"]["source"] == "configured"
     assert managed["digest_pin_updates"]["value"] == "true"
@@ -853,6 +868,9 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
         ).fetchone()
         onboarding = conn.execute(
             "SELECT value FROM web_settings WHERE key = 'onboarding_checklist_dismissed_at'"
+        ).fetchone()
+        sidebar_badges = conn.execute(
+            "SELECT value FROM web_settings WHERE key = 'ui.sidebar_badges'"
         ).fetchone()
         compose_ignore_paths = conn.execute(
             "SELECT value FROM web_settings WHERE key = 'compose.ignore_paths'"
@@ -917,6 +935,7 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
     event_metadata = json.loads(event["metadata_json"])
     assert theme["value"] == "dark"
     assert onboarding["value"]
+    assert sidebar_badges["value"] == "false"
     assert compose_ignore_paths["value"] == "old, archive/disabled"
     assert digest_pin_updates["value"] == "true"
     assert retag_digest_pins["value"] == "true"
@@ -944,12 +963,14 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
             "release_notifications_resend_policy",
             "release_notifications_verbosity",
             "retag_digest_pins",
+            "sidebar_badges",
             "theme_preference",
         ]
     }
     assert event_metadata["before"] == {
         "theme_preference": "system",
         "onboarding_checklist": "visible",
+        "sidebar_badges": "true",
         "compose_ignore_paths": "",
         "digest_pin_updates": "false",
         "retag_digest_pins": "false",
@@ -966,6 +987,7 @@ def test_managed_settings_persist_and_write_audit_records(tmp_path: Path) -> Non
     assert event_metadata["after"] == {
         "theme_preference": "dark",
         "onboarding_checklist": "dismissed",
+        "sidebar_badges": "false",
         "compose_ignore_paths": "old, archive/disabled",
         "digest_pin_updates": "true",
         "retag_digest_pins": "true",
