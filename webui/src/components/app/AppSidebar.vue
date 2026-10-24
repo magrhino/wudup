@@ -124,28 +124,30 @@ function navBadge(
   };
 }
 
+function containersBadge(): NavBadge | undefined {
+  if (containerCountUnknown.value) {
+    return {
+      text: "?",
+      tone: "unknown",
+      description: "tracking status unavailable",
+    };
+  }
+  const repairs = tracking.needsRepairCount;
+  const subject = repairs === 1 ? "container needs" : "containers need";
+  return navBadge(repairs, "attention", `${repairs} ${subject} a tracking fix`);
+}
+
 const navBadges = computed<Partial<Record<string, NavBadge>>>(() => {
   if (!navBadgesEnabled.value) {
     return {};
   }
-  const repairs = tracking.needsRepairCount;
   return {
     "/pending": navBadge(
       pendingCount.value,
       "neutral",
       `${pendingCount.value} pending ${pendingCount.value === 1 ? "update" : "updates"}`,
     ),
-    "/containers": containerCountUnknown.value
-      ? {
-          text: "?",
-          tone: "unknown",
-          description: "tracking status unavailable",
-        }
-      : navBadge(
-          repairs,
-          "attention",
-          `${repairs} ${repairs === 1 ? "container needs" : "containers need"} a tracking fix`,
-        ),
+    "/containers": containersBadge(),
   };
 });
 
