@@ -874,6 +874,19 @@ class ComposeCliTests(FakeDockerCase):
             [],
         )
 
+    def test_up_keeping_orphans_overrides_compose_remove_orphans_env(self) -> None:
+        stack = self.make_stack("stack", [("app", "repo/app:latest", None)])
+
+        self.compose.up(stack, "docker-compose.yml", ["app"], remove_orphans=False)
+
+        # Without an explicit flag, Compose falls back to COMPOSE_REMOVE_ORPHANS.
+        self.assertEqual(
+            self.call_commands(),
+            [
+                "compose -f docker-compose.yml up -d --remove-orphans=false --pull never --no-build --no-deps app",
+            ],
+        )
+
 class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
     def test_reports_files_loaded_beyond_discovered_compose_file(self) -> None:
         keys = compose_runtime_service_keys([

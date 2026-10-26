@@ -704,6 +704,10 @@ ps_cmd(){
       elif [[ -f "$runtime_file" ]]; then
         cat "$runtime_file"
       fi
+    elif [[ "$format" == '{{.ID}}'*'com.docker.compose.project'*'com.docker.compose.service'* ]]; then
+      if [[ -f "$ROOT/compose-containers.tsv" ]]; then
+        cat "$ROOT/compose-containers.tsv"
+      fi
     else
       [[ -f "$ROOT/containers.tsv" ]] && cat "$ROOT/containers.tsv"
     fi

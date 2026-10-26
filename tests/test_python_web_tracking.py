@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import replace
@@ -728,8 +729,8 @@ def test_repair_plan_apply_recreates_only_selected_service(tmp_path: Path) -> No
     assert job["status"] == "success", job["error"]
     assert r"wud.tag.include=^v\d+(?:\.\d+)+$$" in compose_path.read_text(encoding="utf-8")
     calls = _fake_docker_calls(fake_root)
-    assert "compose -f docker-compose.yml up -d --pull never --no-build --force-recreate --no-deps --wait --wait-timeout 0 bindery" in calls
-    assert "--remove-orphans" not in calls
+    assert "compose -f docker-compose.yml up -d --remove-orphans=false --pull never --no-build --force-recreate --no-deps --wait --wait-timeout 0 bindery" in calls
+    assert not re.search(r"--remove-orphans(?!=false)", calls)
     assert "compose -f docker-compose.yml pull bindery" not in calls
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         run = conn.execute("SELECT mode, status FROM update_runs WHERE id = ?", (job["run_id"],)).fetchone()

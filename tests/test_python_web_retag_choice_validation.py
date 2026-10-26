@@ -139,7 +139,7 @@ def test_retag_plan_accepts_duplicate_service_keys_with_target_ids(
         if "compose -f docker-compose.yml up -d" in line
     ]
     assert len(up_calls) == 2
-    assert all("--remove-orphans" not in line for line in up_calls)
+    assert all("--remove-orphans=false" in line for line in up_calls)
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         known = conn.execute(
             """

@@ -545,8 +545,8 @@ class UpdateFromWudRecreateTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(status, 0, stderr + stdout)
         calls = self.calls()
-        self.assertIn("compose -f docker-compose.yml up -d --pull never", calls)
-        self.assertNotIn("--remove-orphans", calls)
+        self.assertIn("compose -f docker-compose.yml up -d --remove-orphans=false --pull never", calls)
+        self.assertNotRegex(calls, r"--remove-orphans(?!=false)")
         self.assertIn("uses the same project name", stdout + stderr)
 
     def test_update_refuses_leftover_container_from_unused_compose_file(

@@ -285,7 +285,7 @@ def test_retag_rollback_keeps_service_stopped_before_apply_stopped(
         line.split("\t", 1)[1] for line in calls.splitlines() if " up -d " in line
     ]
     recreate = (
-        "compose -f docker-compose.yml up -d --pull never "
+        "compose -f docker-compose.yml up -d --remove-orphans=false --pull never "
         "--no-build --force-recreate --no-deps"
     )
     # Apply starts the service on the new image; rollback recreates it without starting.
