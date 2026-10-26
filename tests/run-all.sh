@@ -73,6 +73,7 @@ EOF
     tests/container-build.sh \
     tests/smoke-container-image.sh \
     tests/e2e-docker-compose.sh \
+    tests/wud-segment-count-probe.sh \
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
@@ -94,6 +95,7 @@ EOF
     tests/container-build.sh \
     tests/smoke-container-image.sh \
     tests/e2e-docker-compose.sh \
+    tests/wud-segment-count-probe.sh \
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
     tests/test-publish-release-image.sh \
