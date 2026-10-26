@@ -14,7 +14,7 @@ COPY src/wudup/discord_webhook_policy.json /src/wudup/discord_webhook_policy.jso
 RUN npm run build
 
 
-FROM python:3.14.7-alpine3.24@sha256:9e9fde4d32eedce0b661d9ab91e826b62dddf28e928c230ec55f1866cac66b01 AS wudup-runtime
+FROM python:3.15.0-alpine3.24@sha256:2699b90f4d562a22e2dd076c82f964032f64814204bff36d271a54ba4cc2c7e2 AS wudup-runtime
 
 # Keep the release workflow's cache-busting build arg name for compatibility.
 ARG APT_REFRESH="local"
