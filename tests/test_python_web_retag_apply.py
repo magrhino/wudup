@@ -444,6 +444,7 @@ def test_retag_apply_allows_explicit_inactive_start_approval(tmp_path: Path) -> 
         "compose -f docker-compose.yml up -d --remove-orphans=false --pull never --no-build "
         "--force-recreate --no-deps app"
     ) in calls
+    assert not re.search(r"--remove-orphans(?!=false)", calls)
 
 
 def test_retag_apply_refuses_project_started_with_override_file(

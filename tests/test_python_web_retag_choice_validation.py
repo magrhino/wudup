@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from tests.web_retag_test_helpers import (
@@ -140,6 +141,7 @@ def test_retag_plan_accepts_duplicate_service_keys_with_target_ids(
     ]
     assert len(up_calls) == 2
     assert all("--remove-orphans=false" in line for line in up_calls)
+    assert not any(re.search(r"--remove-orphans(?!=false)", line) for line in up_calls)
     with open_db(tmp_path / "state" / "wud.sqlite") as conn:
         known = conn.execute(
             """

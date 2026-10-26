@@ -23,6 +23,7 @@ KEEP_ORPHANS_UP = "compose -f docker-compose.yml up -d --remove-orphans=false --
 REMOVE_ORPHANS_UP = (
     "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build --no-deps app"
 )
+BARE_REMOVE_ORPHANS = r"--remove-orphans(?!=false)"
 ORPHAN_LOOKUP = r'ps --all --format \{\{\.ID\}\}'
 
 
@@ -70,7 +71,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(result, 0, output)
         self.assertIn(KEEP_ORPHANS_UP, self.calls())
-        self.assertNotRegex(self.calls(), r"--remove-orphans(?!=false)")
+        self.assertNotRegex(self.calls(), BARE_REMOVE_ORPHANS)
         self.assertIn("socket-proxy still runs in this Compose project", output)
         self.assertIn("Recreating without --remove-orphans", output)
 
@@ -86,7 +87,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(result, 0, output)
         self.assertIn(KEEP_ORPHANS_UP, self.calls())
-        self.assertNotRegex(self.calls(), r"--remove-orphans(?!=false)")
+        self.assertNotRegex(self.calls(), BARE_REMOVE_ORPHANS)
         self.assertIn("updater still runs in this Compose project", output)
 
     def test_unrelated_orphan_is_still_removed(self) -> None:
@@ -119,6 +120,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(result, 0, output)
         self.assertIn(KEEP_ORPHANS_UP, self.calls())
+        self.assertNotRegex(self.calls(), BARE_REMOVE_ORPHANS)
         self.assertIn("Could not check whether leftover containers", output)
         self.assertNotIn("private daemon detail", output)
 
@@ -131,6 +133,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(result, 0, output)
         self.assertIn(KEEP_ORPHANS_UP, self.calls())
+        self.assertNotRegex(self.calls(), BARE_REMOVE_ORPHANS)
         self.assertIn("Could not check whether leftover containers", output)
 
     def test_orphan_endpoint_inspect_failure_keeps_orphans(self) -> None:
@@ -142,6 +145,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
 
         self.assertEqual(result, 0, output)
         self.assertIn(KEEP_ORPHANS_UP, self.calls())
+        self.assertNotRegex(self.calls(), BARE_REMOVE_ORPHANS)
         self.assertIn("Could not check whether leftover containers", output)
 
     def test_dry_run_reports_kept_orphans_without_mutating(self) -> None:
@@ -170,6 +174,7 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
         up_calls = [line for line in self.calls().splitlines() if " up -d " in line]
         self.assertEqual(len(up_calls), 2, self.calls())
         self.assertTrue(all(KEEP_ORPHANS_UP in line for line in up_calls), up_calls)
+        self.assertFalse(any(re.search(BARE_REMOVE_ORPHANS, line) for line in up_calls), up_calls)
         self.assertIn(
             f"image: {APP_IMAGE}", (self.base / "wud/docker-compose.yml").read_text(),
         )
@@ -189,6 +194,8 @@ class UpdateFromWudOrphanTests(UpdateFromWudRunnerTestCase):
         calls = self.calls()
         self.assertEqual(len(re.findall(ORPHAN_LOOKUP, calls)), 1, calls)
         self.assertIn(KEEP_ORPHANS_UP, calls)
+        wud_up = [line for line in calls.splitlines() if line.endswith(" --no-deps app")]
+        self.assertFalse(any(re.search(BARE_REMOVE_ORPHANS, line) for line in wud_up), wud_up)
         self.assertIn(
             "compose -f docker-compose.yml up -d --remove-orphans --pull never --no-build "
             "--no-deps web",
