@@ -48,6 +48,8 @@ LOGGER = logging.getLogger("wudup.web_settings")
 MANAGED_THEME_PREFERENCE_KEY = "theme_preference"
 MANAGED_THEME_PREFERENCE_DB_KEY = "ui.theme_preference"
 MANAGED_ONBOARDING_CHECKLIST_KEY = "onboarding_checklist"
+MANAGED_SIDEBAR_BADGES_KEY = "sidebar_badges"
+MANAGED_SIDEBAR_BADGES_DB_KEY = "ui.sidebar_badges"
 MANAGED_COMPOSE_IGNORE_PATHS_KEY = "compose_ignore_paths"
 MANAGED_COMPOSE_IGNORE_PATHS_DB_KEY = "compose.ignore_paths"
 MANAGED_DIGEST_PIN_UPDATES_KEY = "digest_pin_updates"
@@ -88,6 +90,7 @@ MANAGED_RELEASE_NOTIFICATIONS_VERBOSITY_DB_KEY = "release_notifications.verbosit
 DISCORD_WEBHOOK_ENV_NAMES = ("DISCORD_WEBHOOK",)
 THEME_PREFERENCE_VALUES = ("system", "light", "dark")
 ONBOARDING_CHECKLIST_VALUES = ("visible", "dismissed")
+SIDEBAR_BADGES_VALUES = ("false", "true")
 DIGEST_PIN_UPDATES_VALUES = ("false", "true")
 RETAG_DIGEST_PINS_VALUES = ("false", "true")
 RELEASE_NOTES_ENABLED_VALUES = ("false", "true")
@@ -96,6 +99,7 @@ RELEASE_NOTIFICATIONS_RESEND_POLICY_VALUES = ("remote_change", "cooldown")
 RELEASE_NOTIFICATIONS_VERBOSITY_VALUES = ("summary", "full")
 DEFAULT_RELEASE_NOTES_ENABLED = False
 DEFAULT_RETAG_DIGEST_PINS = False
+DEFAULT_SIDEBAR_BADGES = True
 DEFAULT_RELEASE_NOTIFICATIONS_MODE = "digest"
 DEFAULT_RELEASE_NOTIFICATIONS_RESEND_POLICY = "remote_change"
 DEFAULT_RELEASE_NOTIFICATIONS_COOLDOWN_SECONDS = 86_400
@@ -451,11 +455,12 @@ def _managed_settings_db_values(conn: sqlite3.Connection) -> dict[str, str]:
         """
         SELECT key, value
         FROM web_settings
-        WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             MANAGED_THEME_PREFERENCE_DB_KEY,
             ONBOARDING_DISMISSED_AT_KEY,
+            MANAGED_SIDEBAR_BADGES_DB_KEY,
             MANAGED_COMPOSE_IGNORE_PATHS_DB_KEY,
             MANAGED_DIGEST_PIN_UPDATES_DB_KEY,
             MANAGED_RETAG_DIGEST_PINS_DB_KEY,

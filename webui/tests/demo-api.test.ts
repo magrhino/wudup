@@ -494,6 +494,12 @@ describe("demo web API", () => {
           editable: false,
           disabled_reason: READ_ONLY_MESSAGE,
         }),
+        expect.objectContaining({
+          key: "sidebar_badges",
+          value: "true",
+          editable: false,
+          disabled_reason: READ_ONLY_MESSAGE,
+        }),
       ]),
     );
   });

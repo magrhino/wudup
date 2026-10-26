@@ -142,6 +142,25 @@ describe("settings composables", () => {
     });
   });
 
+  it("saves the sidebar counts preference", async () => {
+    const { preferences, settings } = mountManagedPreferencesHarness(true);
+    const updateManagedSettings = vi
+      .spyOn(settings, "updateManagedSettings")
+      .mockResolvedValue({
+        managed: settingsResponse().managed,
+        audit_run_id: 79,
+      });
+
+    expect(preferences.sidebarBadgesValue.value).toBe("true");
+    preferences.sidebarBadgesValue.value = "false";
+    expect(preferences.preferencesDirty.value).toBe(true);
+    await preferences.saveManagedPreferences();
+
+    expect(updateManagedSettings).toHaveBeenCalledWith({
+      sidebar_badges: "false",
+    });
+  });
+
   it("surfaces clipboard failures while copying diagnostics", async () => {
     clipboardCopy.mockRejectedValue(new Error("Clipboard permission denied"));
     const { connection, diagnostics } = mountDiagnosticsHarness();

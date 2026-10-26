@@ -15,6 +15,7 @@ import { useAuthStore } from "../src/stores/auth";
 import { useConnectionStore } from "../src/stores/connection";
 import { useSettingsStore } from "../src/stores/settings";
 import { useRetagsStore } from "../src/stores/retags";
+import { useTrackingStore } from "../src/stores/tracking";
 import { useSelfUpdateStore } from "../src/stores/selfUpdate";
 import { useUpdatesStore } from "../src/stores/updates";
 import { useRunsStore } from "../src/stores/runs";
@@ -31,6 +32,8 @@ import {
   selfUpdateResponse,
   settingsResponse,
   statusResponse,
+  trackedContainerItem,
+  trackedContainersResponse,
 } from "./helpers/fixtures";
 import { mountWithApp } from "./helpers/mount";
 
@@ -355,6 +358,209 @@ describe("app shell", () => {
     expect(edgeLink.attributes("title")).toBe(
       "Edge build of commit 0123abc; open it on GitHub",
     );
+  });
+
+  it("shows sidebar counts for pending updates and containers that need a tracking fix", async () => {
+    const stores = createAppStores();
+    stores.connection.status = statusResponse({ pending_count: 5 });
+    stores.settings.settings = settingsResponse();
+    stores.settings.coreUpdateTour = coreUpdateTourResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const tracking = useTrackingStore(stores.pinia);
+    const loadTracking = vi.spyOn(tracking, "load").mockImplementation(async () => {
+      tracking.inventory = trackedContainersResponse([
+        trackedContainerItem({ target_id: "a", tracking_health: "frozen" }),
+        trackedContainerItem({ target_id: "b", tracking_health: "needs-transform" }),
+        trackedContainerItem({ target_id: "c" }),
+      ]);
+    });
+
+    const { wrapper } = await mountAppAt(stores);
+    await flushPromises();
+
+    const navItems = wrapper.findAll(".nav-item");
+    const pendingItem = navItems.find((item) => item.text().includes("Pending"));
+    const containersItem = navItems.find((item) => item.text().includes("Containers"));
+    expect(loadTracking).toHaveBeenCalledTimes(1);
+    expect(pendingItem?.find(".nav-badge").text()).toBe("5");
+    expect(pendingItem?.attributes("aria-label")).toBe("Pending, 5 pending updates");
+    expect(containersItem?.find(".nav-badge-attention").text()).toBe("2");
+    expect(containersItem?.attributes("aria-label")).toBe(
+      "Containers, 2 containers need a tracking fix",
+    );
+    expect(wrapper.findAll(".nav-badge")).toHaveLength(2);
+
+    stores.connection.status = statusResponse({ pending_count: 120 });
+    await nextTick();
+    expect(pendingItem?.find(".nav-badge").text()).toBe("99+");
+
+    stores.connection.status = statusResponse({ pending_count: 0 });
+    await nextTick();
+    expect(pendingItem?.find(".nav-badge").exists()).toBe(false);
+    expect(pendingItem?.attributes("aria-label")).toBe("Pending");
+  });
+
+  it("hides sidebar counts when the preference is off and skips the inventory load", async () => {
+    const stores = createAppStores();
+    stores.connection.status = statusResponse({ pending_count: 5 });
+    const settings = settingsResponse();
+    stores.settings.settings = {
+      ...settings,
+      managed: settings.managed.map((entry) =>
+        entry.key === "sidebar_badges"
+          ? { ...entry, value: "false", source: "configured" as const }
+          : entry,
+      ),
+    };
+    stores.settings.coreUpdateTour = coreUpdateTourResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const loadTracking = vi
+      .spyOn(useTrackingStore(stores.pinia), "load")
+      .mockResolvedValue();
+
+    const { wrapper } = await mountAppAt(stores);
+    await flushPromises();
+
+    expect(wrapper.find(".nav-badge").exists()).toBe(false);
+    expect(loadTracking).not.toHaveBeenCalled();
+  });
+
+  it("leaves the Containers page inventory load to the view", async () => {
+    const stores = createAppStores();
+    stores.settings.settings = settingsResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const loadTracking = vi
+      .spyOn(useTrackingStore(stores.pinia), "load")
+      .mockResolvedValue();
+
+    await mountAppAt(stores, "/containers");
+    await flushPromises();
+
+    // Only TrackedContainersView loads; the sidebar skips a duplicate discovery.
+    expect(loadTracking).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed sidebar inventory load on navigation until it is ready", async () => {
+    const stores = createAppStores();
+    stores.settings.settings = settingsResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const tracking = useTrackingStore(stores.pinia);
+    const loadTracking = vi.spyOn(tracking, "load").mockResolvedValue();
+
+    const { router, wrapper } = await mountAppAt(stores);
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(1);
+    expect(wrapper.find(".nav-badge-attention").exists()).toBe(false);
+    // Not loaded yet with no error: nothing is known, so no badge.
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
+
+    // A repair-job error alone says nothing about the inventory.
+    tracking.error = "Could not check tracking repair job job-1";
+    await nextTick();
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
+
+    tracking.inventoryLoadFailed = true;
+    await nextTick();
+    const containersItem = wrapper
+      .findAll(".nav-item")
+      .find((item) => item.text().includes("Containers"));
+    expect(containersItem?.find(".nav-badge-unknown").text()).toBe("?");
+    expect(containersItem?.attributes("aria-label")).toBe(
+      "Containers, tracking status unavailable",
+    );
+
+    loadTracking.mockImplementation(async () => {
+      tracking.inventory = trackedContainersResponse([
+        trackedContainerItem({ tracking_health: "frozen" }),
+      ]);
+      tracking.inventoryLoadFailed = false;
+    });
+    await router.push("/runs");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(2);
+    expect(wrapper.find(".nav-badge-attention").text()).toBe("1");
+    expect(wrapper.find(".nav-badge-unknown").exists()).toBe(false);
+
+    await router.push("/audit");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows unknown status and retries after a failed refresh of a ready inventory", async () => {
+    const stores = createAppStores();
+    stores.settings.settings = settingsResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const tracking = useTrackingStore(stores.pinia);
+    tracking.inventory = trackedContainersResponse([
+      trackedContainerItem({ tracking_health: "frozen" }),
+    ]);
+    const loadTracking = vi.spyOn(tracking, "load").mockResolvedValue();
+
+    const { router, wrapper } = await mountAppAt(stores);
+    await flushPromises();
+    expect(loadTracking).not.toHaveBeenCalled();
+    expect(wrapper.find(".nav-badge-attention").text()).toBe("1");
+
+    // The older inventory stays in place, but its count is no longer trusted.
+    tracking.inventoryLoadFailed = true;
+    await nextTick();
+    expect(wrapper.find(".nav-badge-attention").exists()).toBe(false);
+    expect(wrapper.find(".nav-badge-unknown").text()).toBe("?");
+
+    await router.push("/runs");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an unavailable sidebar inventory on navigation", async () => {
+    const stores = createAppStores();
+    stores.settings.settings = settingsResponse();
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const tracking = useTrackingStore(stores.pinia);
+    tracking.inventory = trackedContainersResponse([], { status: "unavailable" });
+    const loadTracking = vi.spyOn(tracking, "load").mockResolvedValue();
+
+    const { router, wrapper } = await mountAppAt(stores);
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(1);
+    expect(wrapper.find(".nav-badge-unknown").text()).toBe("?");
+
+    await router.push("/runs");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads the sidebar inventory when sidebar counts are turned on", async () => {
+    const stores = createAppStores();
+    const settings = settingsResponse();
+    const withSidebarBadges = (value: string) => ({
+      ...settings,
+      managed: settings.managed.map((entry) =>
+        entry.key === "sidebar_badges"
+          ? { ...entry, value, source: "configured" as const }
+          : entry,
+      ),
+    });
+    stores.settings.settings = withSidebarBadges("false");
+    stubAppShellLoads(stores);
+    vi.spyOn(stores.settings, "loadSettings").mockResolvedValue();
+    const loadTracking = vi
+      .spyOn(useTrackingStore(stores.pinia), "load")
+      .mockResolvedValue();
+
+    await mountAppAt(stores);
+    await flushPromises();
+    expect(loadTracking).not.toHaveBeenCalled();
+
+    stores.settings.settings = withSidebarBadges("true");
+    await flushPromises();
+    expect(loadTracking).toHaveBeenCalledTimes(1);
   });
 
   it("cycles theme preference from system to light to dark", async () => {
