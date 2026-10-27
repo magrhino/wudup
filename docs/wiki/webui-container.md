@@ -97,7 +97,11 @@ Escape to return to the review without changing selection.
 
 ### Skip A Release
 
-When one release is bad for a service, choose **Skip** on its pending row (for
+To hold back an update from Pending, open **Snooze** on its row. **Snooze for a
+while** holds every update for the service for a set time, from one day to 30
+days, and is saved in WUDup only.
+
+When one release is bad for a service, choose **Skip** in the same menu (for
 example **Skip 5.3.0**) instead of snoozing the whole service. Pick **Just
 5.3.0** or the **Whole 5.3.x line**, and optionally note what broke. The skipped
 release moves to the snoozed entries and stays there, including LinuxServer
