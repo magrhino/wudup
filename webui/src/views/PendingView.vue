@@ -22,6 +22,7 @@ import PendingSearchEmptyState from "../components/pending/PendingSearchEmptySta
 import PendingSearchPanel from "../components/pending/PendingSearchPanel.vue";
 import PendingCandidateScanControls from "../components/pending/PendingCandidateScanControls.vue";
 import PendingSelectionToolbar from "../components/pending/PendingSelectionToolbar.vue";
+import PendingSnoozeDialog from "../components/pending/PendingSnoozeDialog.vue";
 import PendingStackSelection from "../components/pending/PendingStackSelection.vue";
 import { useDataCardsBreakpoint } from "../responsive";
 import { useAuthStore } from "../stores/auth";
@@ -57,6 +58,7 @@ import { usePendingRescan } from "./pending/usePendingRescan";
 import { usePendingSearchResultState } from "./pending/usePendingSearchResultState";
 import { usePendingSearchState } from "./pending/usePendingSearchState";
 import { usePendingSelectionState } from "./pending/usePendingSelectionState";
+import type { SnoozedPendingItem } from "./pending/snoozeSelection";
 
 const updates = useUpdatesStore();
 const route = useRoute();
@@ -415,6 +417,19 @@ const securityScanRefreshDisabledMessage = computed(() => {
   }
   return "";
 });
+const snoozeTarget = ref<SnoozedPendingItem | null>(null);
+const snoozeDisabledMessage = computed(() =>
+  auth.session?.mutations_enabled === true
+    ? ""
+    : "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to snooze updates.",
+);
+
+function showSnoozeResult(target: SnoozedPendingItem, message: string): void {
+  // A snoozed item should not stay in the update the operator is building.
+  toggleGroupedItem(target.item, false);
+  pendingStatusError.value = "";
+  pendingStatusMessage.value = message;
+}
 
 const {
   clearPreflight,
@@ -794,6 +809,8 @@ onBeforeUnmount(() => {
         :selected-selection-key-set="selectedSelectionKeySet"
         :show-setup-link="showSetupLink"
         :skip-release-disabled-reason="skipReleaseDisabledReason"
+        :snooze-disabled="Boolean(snoozeDisabledMessage)"
+        :snooze-disabled-message="snoozeDisabledMessage"
         :snoozed-candidates="filteredSnoozedCandidates"
         :snoozed-items="filteredSnoozedItems"
         :stopped-items="filteredStoppedItems"
@@ -811,6 +828,7 @@ onBeforeUnmount(() => {
         :update-disabled="updateDisabled"
         @preview-stack="startStackUpdate"
         @skip-release="(group, item) => openReleaseSkip({ group, item })"
+        @snooze-item="(group, item) => (snoozeTarget = { group, item })"
         @toggle-item="toggleGroupedItem"
         @toggle-stack="toggleStack"
         @update-tag="updateTagOverride"
@@ -942,6 +960,11 @@ onBeforeUnmount(() => {
       :error="releaseSkipError"
       @close="closeReleaseSkip"
       @confirm="confirmReleaseSkip"
+    />
+    <PendingSnoozeDialog
+      :target="snoozeTarget"
+      @close="snoozeTarget = null"
+      @snoozed="showSnoozeResult"
     />
   </section>
 </template>

@@ -160,6 +160,8 @@ describe("release skips", () => {
         stackHasSelection: false,
         stackIndeterminate: false,
         stackSelected: false,
+        snoozeDisabled: false,
+        snoozeDisabledMessage: "",
         tagInputProps: () => ({ "aria-label": "New tag" }),
         tagOverrideValue: () => "",
         updateDisabled: false,
@@ -170,18 +172,37 @@ describe("release skips", () => {
       'You skipped 5.3.0 on 2026-10-26: "stalls on magnet links". Retest before applying.';
     expect(wrapper.find(".stack-change-preview").text()).toContain(reminder);
     expect(wrapper.find(".stack-details").text()).not.toContain(reminder);
-    const skipButton = wrapper.get('button[aria-label="Skip 5.3.0 for qbittorrent"]');
-    await skipButton.trigger("click");
+    const holdTrigger = wrapper.get(`button[aria-label="Snooze or skip ${item.image}"]`);
+    expect(holdTrigger.attributes("aria-haspopup")).toBe("menu");
+    const menuItem = (label: string) =>
+      wrapper.findAll('[role="menuitem"]').find((option) => option.text() === label)!;
+    expect(wrapper.findAll('[role="menuitem"]').map((option) => option.text())).toEqual([
+      "Snooze for a while",
+      "Skip 5.3.0",
+    ]);
+    await menuItem("Skip 5.3.0").trigger("click");
     expect(wrapper.emitted("skipRelease")).toEqual([[group, item]]);
+    await menuItem("Snooze for a while").trigger("click");
+    expect(wrapper.emitted("snoozeItem")).toEqual([[group, item]]);
 
     await wrapper.setProps({ skipReleaseDisabledReason: "Read-only mode is active." });
-    expect(skipButton.attributes("disabled")).toBeDefined();
-    expect(skipButton.attributes("title")).toBe("Read-only mode is active.");
+    expect(menuItem("Skip 5.3.0").attributes("disabled")).toBeDefined();
 
     await wrapper.setProps({
-      group: pendingGrouping([qbitItem({ release_skip: releaseSkip() })]).groups[0]!,
+      snoozeDisabled: true,
+      snoozeDisabledMessage: "Read-only mode is active.",
     });
-    expect(wrapper.find('button[aria-label="Skip 5.3.0 for qbittorrent"]').exists()).toBe(false);
+    expect(holdTrigger.attributes("disabled")).toBeDefined();
+    expect(holdTrigger.attributes("title")).toBe("Read-only mode is active.");
+
+    // Once the release is skipped, only the plain snooze remains.
+    await wrapper.setProps({
+      group: pendingGrouping([qbitItem({ release_skip: releaseSkip() })]).groups[0]!,
+      snoozeDisabled: false,
+      snoozeDisabledMessage: "",
+    });
+    expect(wrapper.find('[role="menuitem"]').exists()).toBe(false);
+    expect(wrapper.find(`button[aria-label="Snooze ${item.image}"]`).exists()).toBe(true);
   });
 
   it("shows the retest reminder on standalone pending rows", () => {
