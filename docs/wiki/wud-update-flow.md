@@ -221,7 +221,11 @@ stack manually. Tag exclusions that would need such a recreate are refused
 before the `wud.tag.exclude` label is written. When another discovered stack
 shares the project name while this stack still runs from its own file, the
 update goes ahead without `--remove-orphans`, so the other stack's containers
-are kept; give each stack a unique project name to avoid this. Containers from
+are kept; give each stack a unique project name to avoid this. The update also
+goes ahead without `--remove-orphans` when a container that the Compose file no
+longer defines is WUDup itself or serves the network `DOCKER_HOST` WUDup uses,
+or when WUDup cannot check that, so the update never removes WUDup's own Docker
+access. Containers from
 a Compose file that no discovered stack uses, such as leftovers from a file you
 no longer use, are refused like an override file; remove them first.
 

@@ -702,9 +702,9 @@ class ComposeCli:
         # Pulling and verification happen before recreation. Do not let Compose
         # replace that local image via pull_policy (including latest) or a build.
         # Missing images/unsupported flags must fail, never retry without guards.
-        args = ["up", "-d"]
-        if remove_orphans:
-            args.append("--remove-orphans")
+        # Compose reads COMPOSE_REMOVE_ORPHANS whenever the flag is absent, so
+        # keeping orphans must be explicit.
+        args = ["up", "-d", "--remove-orphans" if remove_orphans else "--remove-orphans=false"]
         args.extend(["--pull", "never", "--no-build"])
         if force_recreate:
             args.append("--force-recreate")

@@ -105,9 +105,9 @@ class UpdateFromWudTagExclusionTests(UpdateFromWudRunnerTestCase):
         self.assertEqual(status, 0, stderr + stdout)
         self.assertRegex(
             self.calls(),
-            r"compose -f docker-compose.yml up -d --pull never --no-build --no-deps app",
+            r"compose -f docker-compose.yml up -d --remove-orphans=false --pull never --no-build --no-deps app",
         )
-        self.assertNotIn("--remove-orphans", self.calls())
+        self.assertNotRegex(self.calls(), r"--remove-orphans(?!=false)")
     def test_exclude_tag_line_does_not_recreate_override_file_project(self) -> None:
         self.wud_file.write_text("repo/app:1.0 tag=2.0\n", encoding="utf-8")
         stack_dir = self.make_stack("app", [("app", "repo/app:1.0", "cid-app")])

@@ -77,6 +77,10 @@ _DOCKER_ENDPOINT_LOOKUP_MESSAGE = (
     "WUDup uses (DOCKER_HOST); no update was applied. Check Docker access "
     "and the Compose configuration, then retry."
 )
+_COMPOSE_PROJECT_CONTAINER_FORMAT = (
+    '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t'
+    '{{.Label "com.docker.compose.service"}}'
+)
 
 
 def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
@@ -94,6 +98,19 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
             # Raised inside the guard's lookup handler, so the stack is blocked.
             raise ValueError("DOCKER_HOST is not a network endpoint")
         return resolve_docker_endpoint(endpoint)
+
+    @functools.cache
+    def project_containers() -> tuple[tuple[str, str, str], ...]:
+        rows = runner.docker.ps_format(_COMPOSE_PROJECT_CONTAINER_FORMAT, all_containers=True)
+        containers = []
+        for row in rows:
+            if not row.strip():
+                continue
+            fields = row.split("\t")
+            if len(fields) != 3 or not fields[0]:
+                raise ValueError("unexpected docker ps output")
+            containers.append((fields[0], fields[1], fields[2]))
+        return tuple(containers)
 
     protected_id = ""
     identity_error = ""
@@ -169,6 +186,10 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
                         message = _docker_endpoint_message(endpoint.host, endpoint_services)
         if not message and not protected_services:
             runner.lifecycle.verified_update_scopes[(stack.index, _update_services(stack_matches))] = scope
+            if protected_id or endpoint is not None:
+                _keep_protected_orphans(
+                    runner, stack, protected_id, endpoint, resolved_endpoint, project_containers,
+                )
             continue
         message = f"[{stack.name}] " + (message or _SELF_UPDATE_MESSAGE)
         runner.log.error(message)
@@ -183,6 +204,67 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
         for reason, records in records_by_reason.items():
             _record_compose_preflight_failures(runner, matches, (stack,), records, reason=reason)
     return not any(records.messages_by_stack for records in records_by_reason.values())
+
+
+def _keep_protected_orphans(
+    runner: Any,
+    stack: ComposeStack,
+    protected_id: str,
+    endpoint: DockerEndpoint | None,
+    resolved_endpoint: Callable[[], DockerEndpoint],
+    project_containers: Callable[[], tuple[tuple[str, str, str], ...]],
+) -> None:
+    """Keep orphans when ``--remove-orphans`` would remove WUDup or its Docker endpoint.
+
+    Compose removes every project container whose service is no longer in the
+    Compose file, whatever services ``up`` names. When that would remove WUDup
+    or the container serving ``DOCKER_HOST``, or that cannot be checked, the
+    stack is recreated without ``--remove-orphans`` instead.
+    """
+
+    if stack.index in runner.stacks_keeping_orphans:
+        return
+    defined = set(stack.service_names)
+    try:
+        if not stack.project_name:
+            raise ValueError("Compose project identity is unavailable.")
+        orphans = {
+            container_id: service or container_id
+            for container_id, project, service in project_containers()
+            if project == stack.project_name and service not in defined
+        }
+        # ``docker ps`` prints short IDs; the inspected WUDup ID is the full one.
+        self_ids = {
+            container_id for container_id in orphans
+            if protected_id and protected_id.startswith(container_id)
+        }
+        protected = {orphans[container_id] for container_id in self_ids}
+        if endpoint is not None and len(self_ids) < len(orphans):
+            protected |= _docker_endpoint_services(
+                runner.docker,
+                [container_id for container_id in orphans if container_id not in self_ids],
+                resolved_endpoint,
+            )
+    except (CommandError, TypeError, ValueError):
+        runner.stacks_keeping_orphans.add(stack.index)
+        runner.log.warning(
+            f"[{stack.name}] Could not check whether leftover containers in this "
+            "Compose project include WUDup or the Docker endpoint it uses "
+            "(DOCKER_HOST); recreating without --remove-orphans so no leftover "
+            "container is removed."
+        )
+        return
+    if not protected:
+        return
+    runner.stacks_keeping_orphans.add(stack.index)
+    runner.log.warning(
+        f"[{stack.name}] {', '.join(sorted(protected))} still runs in this Compose "
+        f"project but is no longer defined in {stack.file}, and it is WUDup or the "
+        "Docker endpoint WUDup uses (DOCKER_HOST). Recreating without "
+        "--remove-orphans so WUDup keeps Docker access; other leftover containers "
+        f"in the project are kept too. To clear this warning, add that service back "
+        f"to {stack.file} or recreate it from the Compose file that now defines it."
+    )
 
 
 def _docker_endpoint_services(
