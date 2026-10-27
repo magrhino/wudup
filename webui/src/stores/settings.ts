@@ -10,6 +10,7 @@ import {
   type OnboardingChecklistResponse,
   type OnboardingDismissResponse,
   type ReleaseNotificationTestResponse,
+  type ReleaseSkipScope,
   type ServicePolicyRecord,
   type ServicePolicyUpdateMode,
   type SettingsResponse,
@@ -277,10 +278,15 @@ export const useSettingsStore = defineStore("settings", () => {
             kind: "delete_dependency_snooze",
             snooze_id: snoozeId,
           }
-        : {
-            kind: "delete_snooze",
-            snooze_id: snoozeId,
-          };
+        : kind === "release"
+          ? {
+              kind: "delete_release_skip",
+              snooze_id: snoozeId,
+            }
+          : {
+              kind: "delete_snooze",
+              snooze_id: snoozeId,
+            };
     await mutateAndReload(
       operation,
       async () => {
@@ -301,6 +307,34 @@ export const useSettingsStore = defineStore("settings", () => {
         kind: "create_dependency_snooze",
         service_key: serviceKey,
         wait_for_service_key: waitForServiceKey,
+        reason,
+      },
+      async () => {
+        snoozeStateFilter.value = state;
+        snoozes.value = await webApi.snoozes(state);
+      },
+    );
+  }
+
+  async function createReleaseSkip(
+    target: {
+      serviceKeys: string[];
+      image: string;
+      targetTag: string;
+      digest: string;
+    },
+    scope: ReleaseSkipScope,
+    reason: string,
+    state: SnoozeState,
+  ): Promise<void> {
+    await mutateAndReload(
+      {
+        kind: "create_release_skip",
+        service_keys: target.serviceKeys,
+        image: target.image,
+        target_tag: target.targetTag,
+        digest: target.digest,
+        scope,
         reason,
       },
       async () => {
@@ -381,6 +415,7 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteServicePolicy,
     createSnooze,
     createDependencySnooze,
+    createReleaseSkip,
     deleteSnooze,
     upsertTagExclusion,
     setTagExclusionStatus,

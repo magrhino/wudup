@@ -101,6 +101,9 @@ function statusLabel(snooze: SnoozeRecord): string {
   if (snooze.kind === "dependency") {
     return snooze.active ? "waiting" : "satisfied";
   }
+  if (snooze.kind === "release") {
+    return snooze.active ? "waiting" : "cleared";
+  }
   return snooze.active ? "active" : "expired";
 }
 
@@ -110,8 +113,16 @@ function conditionLabel(snooze: SnoozeRecord): string {
       ? `Until ${snooze.wait_for_service_key} updates successfully`
       : "Dependency not set";
   }
+  if (snooze.kind === "release") {
+    const label = snooze.release_label || "release";
+    const tag =
+      snooze.skipped_tag && snooze.skipped_tag !== label ? ` (${snooze.skipped_tag})` : "";
+    return `Skip ${label}${tag} until WUD offers another release`;
+  }
   return snooze.snoozed_until ?? "None";
 }
+
+const deleteIsReleaseSkip = computed(() => deleteTarget.value?.kind === "release");
 
 function openCreateConfirm(): void {
   if (createDisabled.value) {
@@ -443,8 +454,8 @@ useRouteRefresh(() => settings.loadSnoozes(snoozeState.value));
     <n-modal
       v-model:show="showDeleteConfirm"
       preset="dialog"
-      title="Delete snooze"
-      positive-text="Delete"
+      :title="deleteIsReleaseSkip ? 'Delete release skip' : 'Delete snooze'"
+      :positive-text="deleteIsReleaseSkip ? 'Delete skip' : 'Delete'"
       negative-text="Cancel"
       :positive-button-props="{ type: 'error', loading: settings.loading }"
       @positive-click="confirmDelete"
@@ -458,12 +469,21 @@ useRouteRefresh(() => settings.loadSnoozes(snoozeState.value));
           <span>Condition</span>
           <strong>{{ conditionLabel(deleteTarget) }}</strong>
         </div>
+        <p v-if="deleteIsReleaseSkip" class="delete-note">
+          The skipped release returns to Pending the next time WUD reports it.
+        </p>
       </div>
     </n-modal>
   </section>
 </template>
 
 <style scoped>
+.delete-note {
+  margin: 0;
+  color: var(--color-muted-text);
+  font-size: var(--text-metadata-size);
+}
+
 .snooze-table .management-table-head,
 .snooze-table .management-row {
   grid-template-columns:

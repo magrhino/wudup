@@ -559,6 +559,71 @@ describe("settings store", () => {
     });
   });
 
+  it("creates and deletes release skips through state operations", async () => {
+    const auth = useAuthStore();
+    vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-release-skip");
+    const stateOperation = vi
+      .spyOn(webApi, "stateOperation")
+      .mockResolvedValue(stateOperationResponse());
+    vi.spyOn(webApi, "snoozes").mockResolvedValue([
+      snooze({ kind: "release", release_label: "5.3.0", snoozed_until: null }),
+    ]);
+    const settings = useSettingsStore();
+    // The Snoozes page may have left a different filter behind.
+    settings.snoozeStateFilter = "expired";
+
+    await settings.createReleaseSkip(
+      {
+        serviceKeys: ["media/qbittorrent"],
+        image: "lscr.io/linuxserver/qbittorrent:5.2.0",
+        targetTag: "5.3.0",
+        digest: "",
+      },
+      "line",
+      "stalls",
+      "active",
+    );
+    await settings.deleteSnooze(9, "active", "release");
+
+    expect(stateOperation).toHaveBeenNthCalledWith(
+      1,
+      {
+        kind: "create_release_skip",
+        service_keys: ["media/qbittorrent"],
+        image: "lscr.io/linuxserver/qbittorrent:5.2.0",
+        target_tag: "5.3.0",
+        digest: "",
+        scope: "line",
+        reason: "stalls",
+      },
+      "csrf-release-skip",
+    );
+    expect(stateOperation).toHaveBeenNthCalledWith(
+      2,
+      { kind: "delete_release_skip", snooze_id: 9 },
+      "csrf-release-skip",
+    );
+    expect(settings.snoozes[0]?.kind).toBe("release");
+    expect(webApi.snoozes).toHaveBeenNthCalledWith(1, "active");
+    expect(webApi.snoozes).not.toHaveBeenCalledWith("expired");
+
+    stateOperation.mockRejectedValueOnce(new Error("media/qbittorrent already skips 5.3.0"));
+    await expect(
+      settings.createReleaseSkip(
+        {
+          serviceKeys: ["media/qbittorrent"],
+          image: "lscr.io/linuxserver/qbittorrent:5.2.0",
+          targetTag: "5.3.0",
+          digest: "",
+        },
+        "release",
+        "",
+        "active",
+      ),
+    ).rejects.toThrow("already skips 5.3.0");
+    expect(settings.error).toContain("already skips 5.3.0");
+  });
+
   it("updates tag exclusions through state operations and reloads the selected filter", async () => {
     const auth = useAuthStore();
     vi.spyOn(auth, "ensureCsrf").mockResolvedValue("csrf-tag");

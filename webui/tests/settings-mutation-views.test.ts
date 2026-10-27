@@ -337,6 +337,45 @@ describe("settings mutation views", () => {
     );
   });
 
+  it("lists release skips and deletes them with the release kind", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [
+      snooze({
+        id: 9,
+        kind: "release",
+        service_key: "media/qbittorrent",
+        snoozed_until: null,
+        release_label: "5.3.0",
+        skipped_tag: "5.3.0-r0-ls412",
+        reason: "stalls on magnet links",
+      }),
+    ];
+    updates.updateTargets = updateTargetsResponse();
+    vi.spyOn(updates, "loadUpdateTargets").mockResolvedValue();
+    vi.spyOn(settings, "loadSnoozes").mockResolvedValue();
+    const deleteSnooze = vi.spyOn(settings, "deleteSnooze").mockResolvedValue();
+    const wrapper = mountWithApp(SnoozesView, { pinia });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "Skip 5.3.0 (5.3.0-r0-ls412) until WUD offers another release",
+    );
+    expect(wrapper.text()).toContain("waiting");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Delete"))!
+      .trigger("click");
+    expect(wrapper.text()).toContain("Delete release skip");
+    expect(wrapper.text()).toContain("returns to Pending the next time WUD reports it");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Delete skip")!
+      .trigger("click");
+    await flushPromises();
+
+    expect(deleteSnooze).toHaveBeenCalledWith(9, "active", "release");
+  });
+
   it("disables snooze mutations in read-only mode", async () => {
     const { pinia, settings, updates } = setupStores(false);
     settings.snoozes = [snooze()];
