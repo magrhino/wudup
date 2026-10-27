@@ -174,19 +174,18 @@ describe("release skips", () => {
     expect(wrapper.find(".stack-details").text()).not.toContain(reminder);
     const holdTrigger = wrapper.get(`button[aria-label="Snooze or skip ${item.image}"]`);
     expect(holdTrigger.attributes("aria-haspopup")).toBe("menu");
-    const menuItem = (label: string) =>
-      wrapper.findAll('[role="menuitem"]').find((option) => option.text() === label)!;
+    const menuItem = (key: string) => wrapper.get(`[role="menuitem"][data-key="${key}"]`);
     expect(wrapper.findAll('[role="menuitem"]').map((option) => option.text())).toEqual([
-      "Snooze for a while",
-      "Skip 5.3.0",
+      "Snooze for a whileEvery update for this service",
+      "Skip 5.3.0Until WUD offers a different release",
     ]);
-    await menuItem("Skip 5.3.0").trigger("click");
+    await menuItem("skip").trigger("click");
     expect(wrapper.emitted("skipRelease")).toEqual([[group, item]]);
-    await menuItem("Snooze for a while").trigger("click");
+    await menuItem("snooze").trigger("click");
     expect(wrapper.emitted("snoozeItem")).toEqual([[group, item]]);
 
     await wrapper.setProps({ skipReleaseDisabledReason: "Read-only mode is active." });
-    expect(menuItem("Skip 5.3.0").attributes("disabled")).toBeDefined();
+    expect(menuItem("skip").attributes("disabled")).toBeDefined();
 
     await wrapper.setProps({
       snoozeDisabled: true,
@@ -194,6 +193,15 @@ describe("release skips", () => {
     });
     expect(holdTrigger.attributes("disabled")).toBeDefined();
     expect(holdTrigger.attributes("title")).toBe("Read-only mode is active.");
+
+    await wrapper.setProps({
+      group: pendingGrouping([
+        qbitItem({
+          release_key: { basis: "digest", value: "sha256:abc", line: "", label: "build sha256:abc" },
+        }),
+      ]).groups[0]!,
+    });
+    expect(menuItem("skip").text()).toContain("Until WUD offers a different build");
 
     // Once the release is skipped, only the plain snooze remains.
     await wrapper.setProps({

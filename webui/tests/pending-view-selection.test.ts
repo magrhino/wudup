@@ -3,6 +3,7 @@ import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SnoozeKind } from "../src/api/client";
+import PendingSnoozeDialog from "../src/components/pending/PendingSnoozeDialog.vue";
 import {
   applyJobResponse,
   pendingGroupedItem,
@@ -19,6 +20,7 @@ import {
   wudApiStatus,
   wudContainerMetadata,
 } from "./helpers/fixtures";
+import { naiveStubs } from "./helpers/mount";
 import {
   mockPendingLifecycle,
   mountPendingView,
@@ -1237,6 +1239,49 @@ describe("pending view selection actions", () => {
 
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("Snoozed media/app until");
+  });
+
+  it("says it cannot confirm a snooze when the save and the re-read both fail", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(settings, "createSnooze").mockRejectedValue(new Error("network down"));
+    vi.spyOn(settings, "loadSnoozes").mockRejectedValue(new Error("network down"));
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    await wrapper
+      .find('[role="dialog"]')
+      .findAll("button")
+      .find((button) => button.text() === "Snooze")
+      ?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').text()).toContain(
+      "WUDup could not confirm whether the snooze was saved: network down. Check Snoozes before trying again.",
+    );
+  });
+
+  it("closes the snooze dialog without saving", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    const createSnooze = vi.spyOn(settings, "createSnooze");
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    wrapper
+      .findComponent(PendingSnoozeDialog)
+      .findComponent(naiveStubs.NModal)
+      .vm.$emit("update:show", false);
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(createSnooze).not.toHaveBeenCalled();
   });
 
   it("disables inline snoozing in read-only mode", async () => {
