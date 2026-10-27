@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Play, Repeat2, ShieldAlert } from "@lucide/vue";
+import { Play, Repeat2, ShieldAlert, SkipForward } from "@lucide/vue";
 import { NButton, NCheckbox, NTag } from "naive-ui";
 
 import type {
@@ -25,6 +25,10 @@ import {
   type PendingTagInputProps,
   previewChangeLabels,
 } from "../../views/pending/pendingDisplay";
+import {
+  canSkipRelease,
+  releaseSkipActionLabel,
+} from "../../views/pending/releaseSkips";
 import type { SafetyCue } from "../../views/pending/safetyCues";
 import {
   pendingSelectionForItem,
@@ -32,6 +36,7 @@ import {
 } from "../../views/pending/usePendingSelectionState";
 import { pluralize } from "../../views/pending/utils";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
+import PendingReleaseSkipNote from "./PendingReleaseSkipNote.vue";
 import PendingUpdateRow from "./PendingUpdateRow.vue";
 
 const props = defineProps<{
@@ -43,6 +48,7 @@ const props = defineProps<{
   riskCues: (item: PendingGroupedItem) => SafetyCue[];
   securityScanFor: (item: PendingGroupedItem) => SecurityScanInfo | null;
   selectedSelectionKeySet: Set<string>;
+  skipReleaseDisabledReason?: string;
   stackHasSelection: boolean;
   stackIndeterminate: boolean;
   stackSelected: boolean;
@@ -53,6 +59,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   previewStack: [group: PendingStackGroup];
+  skipRelease: [group: PendingStackGroup, item: PendingGroupedItem];
   toggleItem: [item: PendingGroupedItem, checked: boolean];
   toggleStack: [group: PendingStackGroup, checked: boolean];
   updateTag: [item: PendingGroupedItem, value: string];
@@ -224,7 +231,28 @@ const previewDisabledMessage = computed(() =>
             </template>
             Choose stream
           </n-button>
+          <n-button
+            v-if="canSkipRelease(item) && item.release_key"
+            size="tiny"
+            quaternary
+            class="release-skip-trigger"
+            aria-haspopup="dialog"
+            :disabled="Boolean(skipReleaseDisabledReason)"
+            :title="skipReleaseDisabledReason || undefined"
+            :aria-label="`${releaseSkipActionLabel(item.release_key)} for ${groupedItemServices(item)}`"
+            @click="emit('skipRelease', group, item)"
+          >
+            <template #icon>
+              <SkipForward :size="14" aria-hidden="true" />
+            </template>
+            {{ releaseSkipActionLabel(item.release_key) }}
+          </n-button>
         </span>
+        <PendingReleaseSkipNote
+          v-if="item.release_skip && !item.release_skip.matches"
+          class="stack-change-release"
+          :skip="item.release_skip"
+        />
         <PendingReleaseNotes
           class="stack-change-release"
           :candidate-label="`${groupedItemServices(item)} · ${groupedItemTarget(item)}`"
@@ -258,6 +286,7 @@ const previewDisabledMessage = computed(() =>
           :tag-override-value="tagOverrideValue(item)"
           :show-tag-input="Boolean(item.desired_tag)"
           :tag-input-props="tagInputProps(item)"
+          :show-release-skip-note="false"
           @toggle="(_lineNo, checked) => emit('toggleItem', item, checked)"
           @review-stream="emit('previewStack', group)"
           @update-tag="emit('updateTag', item, $event)"
@@ -399,7 +428,8 @@ const previewDisabledMessage = computed(() =>
   font-size: 0.82rem;
 }
 
-.stream-choice-trigger {
+.stream-choice-trigger,
+.release-skip-trigger {
   margin-inline-start: 2px;
 }
 

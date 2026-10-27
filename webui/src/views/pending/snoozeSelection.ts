@@ -8,6 +8,7 @@ import {
   uniqueSorted,
   uniqueStrings,
 } from "./pendingDisplay";
+import { releaseSkipMatches } from "./releaseSkips";
 
 export type SnoozeSelectionRecord = Pick<SnoozeRecord, "active" | "service_key"> &
   Partial<Pick<SnoozeRecord, "kind">>;
@@ -117,6 +118,9 @@ function itemHasSnoozedService(
   item: PendingGroupedItem,
   snoozedServiceKeys: Set<string>,
 ): boolean {
+  if (releaseSkipMatches(item)) {
+    return true;
+  }
   for (const key of groupedItemServiceKeys(group, item)) {
     if (snoozedServiceKeys.has(key)) {
       return true;

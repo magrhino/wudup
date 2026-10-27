@@ -95,6 +95,26 @@ the candidate. The same panel is
 available under **Services and images** during plan review. Close it or press
 Escape to return to the review without changing selection.
 
+### Skip A Release
+
+When one release is bad for a service, choose **Skip** on its pending row (for
+example **Skip 5.3.0**) instead of snoozing the whole service. Pick **Just
+5.3.0** or the **Whole 5.3.x line**, and optionally note what broke. The skipped
+release moves to the snoozed entries and stays there, including LinuxServer
+rebuilds such as `5.3.0-r0-ls412` and `5.3.0-r0-ls413`. When WUD offers a
+different release, it returns to Pending with a reminder of what you skipped and
+why, so you can retest before applying. Scheduled auto-updates also respect
+skips.
+
+Releases are compared by their whole version, so skipping `3.0.0-rc1` does not
+hide `3.0.0`, and `16.4-alpine` is its own release. For LinuxServer images only
+the build suffix and package revision are ignored. A tag that is not a version,
+such as a commit hash, is skipped as that exact tag, and a digest-only update is
+skipped as that build. A skip is stored only in WUDup's database: it does not
+change Compose files or WUD labels. Successfully applying an update or retag to
+the service clears its skips; changing its settings, policies, or snoozes does
+not. Release skips are listed, and can be deleted, on the **Snoozes** page.
+
 If an update job disappears after a WebUI restart, its recovery notice links to
 the related run when known. Otherwise, review History to identify the update.
 **Check outcome** reads the related job/run evidence. **Acknowledge and collapse**

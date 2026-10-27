@@ -110,6 +110,10 @@ export function safetyCues(
     addCue("stack-restart", "Stack restart", "warning");
   }
 
+  if (groupedItem?.release_skip && !groupedItem.release_skip.matches) {
+    addCue("skipped-before", `Skipped ${groupedItem.release_skip.label} before`, "warning");
+  }
+
   addReleaseNoteCues(context, addCue);
   addSecurityScanCues(context, addCue);
   addPolicyCues(serviceKeys, context, addCue);
