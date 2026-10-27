@@ -4,6 +4,47 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.67.0](https://github.com/magrhino/wudup/compare/v0.66.0...v0.67.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **python:** running the wudup CLI outside the container now requires Python 3.11 or newer.
+
+### Features
+
+* **webui:** show sidebar counts for pending updates and containers ([#922](https://github.com/magrhino/wudup/issues/922)) ([8b7e32b](https://github.com/magrhino/wudup/commit/8b7e32b7ce8b89efa83499b055249f3070a0ec4a))
+* **webui:** show stack restart impact in the plan review services list ([#902](https://github.com/magrhino/wudup/issues/902)) ([a429358](https://github.com/magrhino/wudup/commit/a42935863592acf05a13aa829835d2524b890d44))
+
+
+### Bug Fixes
+
+* **ci:** ignore cancelled duplicate CI runs in the dependency auto-merge gate ([#900](https://github.com/magrhino/wudup/issues/900)) ([f814d35](https://github.com/magrhino/wudup/commit/f814d35d869c144cc08ab9a66356787a5b799c6d))
+* **digest:** accept containerd image-store image IDs when verifying pulls ([#908](https://github.com/magrhino/wudup/issues/908)) ([7cc99ff](https://github.com/magrhino/wudup/commit/7cc99ff8ca59ea025fce79f28372b8b9e34b86c7))
+* **digest:** confirm index-backed tags instead of reporting them as moved ([#907](https://github.com/magrhino/wudup/issues/907)) ([2eff733](https://github.com/magrhino/wudup/commit/2eff733a6c7c41911eefa35000b2d909d4f02a34))
+* **release-notes:** explain a rejected GITHUB_TOKEN instead of storing raw HTTP 401 ([#903](https://github.com/magrhino/wudup/issues/903)) ([82f2932](https://github.com/magrhino/wudup/commit/82f2932e9f5687dc4decba9b1d645cc906c9365c))
+* **security:** unblock edge image scans for CVE-2026-111943 ([#919](https://github.com/magrhino/wudup/issues/919)) ([fa18bac](https://github.com/magrhino/wudup/commit/fa18bac82e276598193d03417e35192a21505e5a))
+* **updater:** keep orphans when removal would take WUDup or its Docker endpoint ([#936](https://github.com/magrhino/wudup/issues/936)) ([3c226c6](https://github.com/magrhino/wudup/commit/3c226c6cfa5fe6a88ad56a0be9ebb0cdd9d1a1a2))
+
+
+### Dependencies
+
+* **deps-dev:** bump certifi from 2026.7.22 to 2026.10.19 ([#901](https://github.com/magrhino/wudup/issues/901)) ([e348eab](https://github.com/magrhino/wudup/commit/e348eab9a90b4b21d628e7d1c1ff3bcac250cbea))
+* **deps-dev:** bump the npm-development group across 1 directory with 3 updates ([#931](https://github.com/magrhino/wudup/issues/931)) ([b73390c](https://github.com/magrhino/wudup/commit/b73390c2a67f22566ad8df8c5e2a4b9c734817bf))
+* **deps-dev:** bump the npm-development group across 1 directory with 6 updates ([#906](https://github.com/magrhino/wudup/issues/906)) ([8138a77](https://github.com/magrhino/wudup/commit/8138a777fb5f51c6cfb60c36188294f1ae9592e3))
+* **deps-dev:** bump the python-development group across 1 directory with 2 updates ([#896](https://github.com/magrhino/wudup/issues/896)) ([1447f97](https://github.com/magrhino/wudup/commit/1447f9705d3611c365fb2ba0a904675da37513de))
+* **deps-dev:** bump the python-development group across 1 directory with 2 updates ([#927](https://github.com/magrhino/wudup/issues/927)) ([ef7ba35](https://github.com/magrhino/wudup/commit/ef7ba35bae11e994d8845cf603c205488fbcf1fe))
+* **deps:** bump @lucide/vue in /webui in the npm-production group ([#929](https://github.com/magrhino/wudup/issues/929)) ([69b79d0](https://github.com/magrhino/wudup/commit/69b79d0ec4e42f1df088c9472230701fdb1ccd6a))
+* **deps:** bump pydantic from 2.13.5 to 2.14.1 in the pydantic-runtime group across 1 directory ([#894](https://github.com/magrhino/wudup/issues/894)) ([baa8476](https://github.com/magrhino/wudup/commit/baa8476fd8cf43e71822adfe0259818f070f7f83))
+* **deps:** bump setuptools from 84.0.0 to 84.1.0 ([#928](https://github.com/magrhino/wudup/issues/928)) ([e7a7359](https://github.com/magrhino/wudup/commit/e7a73599d9b2c40a5932fbff42224327eb9f4b20))
+* **deps:** bump the github-actions group across 1 directory with 4 updates ([#899](https://github.com/magrhino/wudup/issues/899)) ([588757f](https://github.com/magrhino/wudup/commit/588757fea6faedeb8e6c9f72b3839dc8f66dba3c))
+* **deps:** bump the github-actions group with 5 updates ([#932](https://github.com/magrhino/wudup/issues/932)) ([15da874](https://github.com/magrhino/wudup/commit/15da874da148a5a0c38f696967eea0a473702aec))
+* **deps:** bump the npm-production group across 1 directory with 4 updates ([#905](https://github.com/magrhino/wudup/issues/905)) ([7994f9b](https://github.com/magrhino/wudup/commit/7994f9bc5b42696fde561eb1a38020a409d1807f))
+* **deps:** bump the npm-production group in /webui with 2 updates ([#915](https://github.com/magrhino/wudup/issues/915)) ([37544f8](https://github.com/magrhino/wudup/commit/37544f8c9510b17fb84becc210ab187ef4efc716))
+* **deps:** bump the python-production group across 1 directory with 2 updates ([#916](https://github.com/magrhino/wudup/issues/916)) ([cda1a50](https://github.com/magrhino/wudup/commit/cda1a50da04a27e14172b5976962bdec8bf9c2ba))
+* **deps:** bump the python-production group with 2 updates ([#926](https://github.com/magrhino/wudup/issues/926)) ([bfd7a89](https://github.com/magrhino/wudup/commit/bfd7a89fce65d36a78c7a3dce9a504b561810eb9))
+* **python:** require Python 3.11 now that 3.10 is end of life ([#909](https://github.com/magrhino/wudup/issues/909)) ([3aab1c1](https://github.com/magrhino/wudup/commit/3aab1c1137e1718780419397fb08d2ec3825ba04))
+
 ## [0.66.0](https://github.com/magrhino/wudup/compare/v0.65.2...v0.66.0) (2026-10-19)
 
 
