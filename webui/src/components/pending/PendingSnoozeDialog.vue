@@ -87,6 +87,8 @@ async function confirmSnooze(): Promise<boolean> {
   let failure: unknown = null;
   let confirmed = true;
   try {
+    // Saved one at a time: each save reloads the active snoozes, so the next
+    // duplicate check and any partial-failure report see every earlier save.
     for (const serviceKey of keys) {
       // A retry after a partial failure must not duplicate snoozes already saved.
       if (activeSnoozedServiceKeys(settings.snoozes).has(serviceKey)) {
@@ -99,8 +101,8 @@ async function confirmSnooze(): Promise<boolean> {
         "active",
       );
     }
-  } catch (exc) {
-    failure = exc;
+  } catch (error_) {
+    failure = error_;
     // The save may have committed before the refresh failed; re-read to know.
     try {
       await settings.loadSnoozes("active");
