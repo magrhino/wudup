@@ -19,6 +19,7 @@ from . import web_database, web_job_registry, web_jobs, web_pending_sources
 from .config import UpdaterConfig
 from .db import (
     active_dependency_snooze_rows,
+    active_release_skip_rows,
     active_snooze,
     init_db,
     open_db,
@@ -29,6 +30,13 @@ from .plans import (
     DryRunPlan,
     build_dry_run_plan_from_pending_source,
     resolve_pending_groups,
+)
+from .release_skips import (
+    ReleaseSkip,
+    release_key,
+    skip_for_release,
+    skip_from_row,
+    skips_by_service,
 )
 from .web_database import immediate_transaction as _immediate_transaction
 from .web_job_registry import plan_can_apply
@@ -367,6 +375,10 @@ def _auto_update_candidate(
         conn,
         service_keys=pending_service_keys,
     )
+    release_skips = skips_by_service(
+        skip_from_row(row)
+        for row in active_release_skip_rows(conn, service_keys=pending_service_keys)
+    )
     checked: dict[str, str] = {}
     result: tuple[
         AutoUpdateSelection,
@@ -380,6 +392,7 @@ def _auto_update_candidate(
             grouping,
             remaining,
             dependency_snoozes=dependency_snoozes,
+            release_skips=release_skips,
         )
         if selection is None:
             break
@@ -576,6 +589,7 @@ def _auto_update_selection(
     policies: Mapping[str, AutoUpdatePolicy],
     *,
     dependency_snoozes: Iterable[Any] = (),
+    release_skips: Mapping[str, tuple[ReleaseSkip, ...]] | None = None,
 ) -> AutoUpdateSelection | None:
     if not policies:
         return None
@@ -583,6 +597,7 @@ def _auto_update_selection(
         settings,
         grouping,
         policies,
+        release_skips=release_skips or {},
     )
     lines_by_mode, services_by_mode, schedules_by_mode, scheduled_for_by_mode = (
         _eligible_auto_update_candidates_by_mode(
@@ -619,6 +634,8 @@ def _auto_update_candidates_by_mode(
     settings: WebSettings,
     grouping: Any,
     policies: Mapping[str, AutoUpdatePolicy],
+    *,
+    release_skips: Mapping[str, tuple[ReleaseSkip, ...]],
 ) -> dict[str, list[AutoUpdateCandidate]]:
     candidates_by_mode: dict[str, list[AutoUpdateCandidate]] = {}
     for group in grouping.groups:
@@ -628,6 +645,7 @@ def _auto_update_candidates_by_mode(
                 group.name,
                 item,
                 policies,
+                release_skips=release_skips,
             )
             if candidate is None:
                 continue
@@ -641,6 +659,8 @@ def _auto_update_candidate_for_item(
     group_name: str,
     item: Any,
     policies: Mapping[str, AutoUpdatePolicy],
+    *,
+    release_skips: Mapping[str, tuple[ReleaseSkip, ...]],
 ) -> tuple[str, AutoUpdateCandidate] | None:
     if item.desired_tag:
         return None
@@ -649,6 +669,14 @@ def _auto_update_candidate_for_item(
     )
     if not service_keys:
         return None
+    if release_skips:
+        _skip, skipped = skip_for_release(
+            release_skips,
+            service_keys,
+            release_key(item.repo, item.desired_tag, item.digest),
+        )
+        if skipped:
+            return None
     line_policies = tuple(policies.get(service_key) for service_key in service_keys)
     if any(policy is None for policy in line_policies):
         return None

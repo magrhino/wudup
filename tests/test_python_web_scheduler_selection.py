@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from wudup import web_scheduler
+from wudup.release_skips import ReleaseSkip, skips_by_service
 
 
 def test_auto_update_selection_prefers_earliest_scheduled_mode() -> None:
@@ -259,3 +260,77 @@ def test_auto_update_selection_requires_complete_consistent_service_policies() -
     assert selection.schedule_keys == (
         "stack/ready|2026-05-30|09:00|America/Chicago",
     )
+
+
+def test_auto_update_selection_skips_digest_held_by_a_release_skip() -> None:
+    scheduled_for = datetime(2026, 5, 30, 14, 0, tzinfo=UTC)
+    settings = SimpleNamespace(config=SimpleNamespace(update_mode="live"))
+    grouping = SimpleNamespace(
+        groups=(
+            SimpleNamespace(
+                name="stack",
+                items=(
+                    SimpleNamespace(
+                        desired_tag="",
+                        digest="sha256:skipped",
+                        repo="repo/app",
+                        line_no=1,
+                        services=("app",),
+                    ),
+                    SimpleNamespace(
+                        desired_tag="",
+                        digest="sha256:fresh",
+                        repo="repo/worker",
+                        line_no=2,
+                        services=("worker",),
+                    ),
+                ),
+            ),
+        ),
+    )
+    policies = {
+        service_key: web_scheduler.AutoUpdatePolicy(
+            service_key=service_key,
+            update_mode="",
+            auto_update_time="09:00",
+            auto_update_days=("sat",),
+            schedule_key=f"{service_key}|2026-05-30|09:00|UTC",
+            scheduled_for=scheduled_for,
+        )
+        for service_key in ("stack/app", "stack/worker")
+    }
+    release_skips = skips_by_service(
+        [
+            ReleaseSkip(
+                id=1,
+                service_key="stack/app",
+                basis="digest",
+                value="sha256:skipped",
+                scope="release",
+                skipped_tag="",
+                reason="bad build",
+                created_at="2026-05-29T00:00:00+00:00",
+            ),
+            ReleaseSkip(
+                id=2,
+                service_key="stack/worker",
+                basis="digest",
+                value="sha256:older",
+                scope="release",
+                skipped_tag="",
+                reason="",
+                created_at="2026-05-29T00:00:00+00:00",
+            ),
+        ]
+    )
+
+    selection = web_scheduler._auto_update_selection(
+        settings,
+        grouping,
+        policies,
+        release_skips=release_skips,
+    )
+
+    assert selection is not None
+    assert selection.line_numbers == (2,)
+    assert selection.service_keys == ("stack/worker",)

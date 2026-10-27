@@ -311,7 +311,11 @@ CoreUpdateTourStep = Literal[
     "runs_history",
 ]
 
-SnoozeKind = Literal["time", "dependency"]
+SnoozeKind = Literal["time", "dependency", "release"]
+
+ReleaseSkipBasis = Literal["version", "tag", "digest"]
+
+ReleaseSkipScope = Literal["release", "line"]
 
 SnoozeState = Literal["active", "expired", "all"]
 
@@ -600,6 +604,26 @@ class PendingTagStream(BaseModel):
     reported_stream: str
 
 
+class PendingReleaseKey(BaseModel):
+    basis: ReleaseSkipBasis
+    value: str
+    line: str = ""
+    label: str
+
+
+class PendingReleaseSkip(BaseModel):
+    id: int
+    service_key: str
+    basis: ReleaseSkipBasis
+    value: str
+    scope: ReleaseSkipScope
+    label: str
+    skipped_tag: str = ""
+    reason: str = ""
+    created_at: str
+    matches: bool
+
+
 class PendingItem(BaseModel):
     line_no: int
     raw: str
@@ -644,6 +668,8 @@ class PendingGroupedItem(PendingItem):
     runtime_state: PendingRuntimeState = "unknown"
     running_services: list[str] = Field(default_factory=list)
     stopped_services: list[str] = Field(default_factory=list)
+    release_key: PendingReleaseKey | None = None
+    release_skip: PendingReleaseSkip | None = None
 
 class PendingStackGroup(BaseModel):
     name: str
@@ -1880,6 +1906,8 @@ class SnoozeRecord(BaseModel):
     active: bool
     kind: SnoozeKind = "time"
     wait_for_service_key: str = ""
+    release_label: str = ""
+    skipped_tag: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 class TagExclusionRuleRecord(BaseModel):
@@ -1928,6 +1956,19 @@ class DeleteDependencySnoozeOperation(BaseModel):
     kind: Literal["delete_dependency_snooze"]
     snooze_id: int = Field(ge=1)
 
+class CreateReleaseSkipOperation(BaseModel):
+    kind: Literal["create_release_skip"]
+    service_keys: list[str] = Field(min_length=1, max_length=32)
+    image: str = Field(min_length=1, max_length=1024)
+    target_tag: str = Field(default="", max_length=128)
+    digest: str = Field(default="", max_length=256)
+    scope: ReleaseSkipScope = "release"
+    reason: str = Field(default="", max_length=1024)
+
+class DeleteReleaseSkipOperation(BaseModel):
+    kind: Literal["delete_release_skip"]
+    snooze_id: int = Field(ge=1)
+
 class UpsertTagExclusionOperation(BaseModel):
     kind: Literal["upsert_tag_exclusion"]
     scope: TagExclusionScope
@@ -1949,6 +1990,8 @@ StateOperation = Annotated[
     | DeleteSnoozeOperation
     | CreateDependencySnoozeOperation
     | DeleteDependencySnoozeOperation
+    | CreateReleaseSkipOperation
+    | DeleteReleaseSkipOperation
     | UpsertTagExclusionOperation
     | SetTagExclusionStatusOperation,
     Field(discriminator="kind"),

@@ -11,6 +11,7 @@ from . import (
     web_database,
     web_pending_snoozes,
     web_pending_sources,
+    web_release_skips,
     web_wud_api,
     web_wud_refresh,
 )
@@ -40,6 +41,8 @@ from .web_models import (
     PendingMetadataRefreshRequest,
     PendingMetadataRefreshResponse,
     PendingMetadataStatus,
+    PendingReleaseKey,
+    PendingReleaseSkip,
     PendingResponse,
     PendingStackGroup,
     PendingTagStream,
@@ -354,6 +357,15 @@ def _pending_grouping_response(
         ),
     )
     runtime_service_states = _pending_runtime_service_states(settings)
+    release_skips = web_release_skips.pending_release_skips(
+        settings,
+        (
+            f"{group.name}/{service}"
+            for group in grouping.groups
+            for item in group.items
+            for service in item.services
+        ),
+    )
     return PendingGrouping(
         status=grouping.status,
         groups=[
@@ -374,6 +386,15 @@ def _pending_grouping_response(
                         source_ids_by_line=source_ids_by_line,
                         metadata_status_by_line=metadata_status_by_line,
                         runtime=_pending_item_runtime(group, item, runtime_service_states),
+                        release_fields=web_release_skips.pending_release_fields(
+                            release_skips,
+                            service_keys=(
+                                f"{group.name}/{service}" for service in item.services
+                            ),
+                            image_repo=item.repo,
+                            desired_tag=item.desired_tag,
+                            digest=item.digest,
+                        ),
                     )
                     for item in group.items
                 ],
@@ -403,8 +424,13 @@ def _pending_grouped_item(
     source_ids_by_line: dict[int, str],
     metadata_status_by_line: dict[int, PendingMetadataStatus],
     runtime: tuple[str, tuple[str, ...], tuple[str, ...]],
+    release_fields: tuple[PendingReleaseKey | None, PendingReleaseSkip | None] = (
+        None,
+        None,
+    ),
 ) -> PendingGroupedItem:
     runtime_state, running_services, stopped_services = runtime
+    release_key, release_skip = release_fields
     return PendingGroupedItem(
         line_no=item.line_no,
         raw=item.raw,
@@ -451,6 +477,8 @@ def _pending_grouped_item(
             )
         ),
         metadata_status=metadata_status_by_line.get(item.line_no, "fresh"),
+        release_key=release_key,
+        release_skip=release_skip,
     )
 
 
