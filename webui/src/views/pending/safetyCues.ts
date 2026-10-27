@@ -28,7 +28,7 @@ export type SafetyCueContext = {
   // The queue summary already says "No candidate scans yet" once, so rows skip the same cue.
   securityScansAllUnscanned?: boolean;
   servicePolicies: Pick<ServicePolicyRecord, "auto_update" | "service_key">[];
-  snoozes: Pick<SnoozeRecord, "service_key">[];
+  snoozes: (Pick<SnoozeRecord, "service_key"> & Partial<Pick<SnoozeRecord, "kind">>)[];
 };
 
 type ParsedVersion = {
@@ -108,6 +108,10 @@ export function safetyCues(
 
   if (groupedItem?.action === "recreate_stack") {
     addCue("stack-restart", "Stack restart", "warning");
+  }
+
+  if (groupedItem?.release_skip && !groupedItem.release_skip.matches) {
+    addCue("skipped-before", `Skipped ${groupedItem.release_skip.label} before`, "warning");
   }
 
   addReleaseNoteCues(context, addCue);
@@ -219,7 +223,13 @@ function addPolicyCues(
   context: Pick<SafetyCueContext, "servicePolicies" | "snoozes">,
   addCue: (key: string, label: string, type: SafetyCue["type"]) => void,
 ): void {
-  if (context.snoozes.some((snooze) => serviceKeys.includes(snooze.service_key))) {
+  // A release skip holds back one release, not the whole service.
+  if (
+    context.snoozes.some(
+      (snooze) =>
+        snooze.kind !== "release" && serviceKeys.includes(snooze.service_key),
+    )
+  ) {
     addCue("snoozed", "Snoozed", "default");
   }
   const policy = context.servicePolicies.find((item) =>

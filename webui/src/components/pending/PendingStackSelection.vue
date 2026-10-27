@@ -39,6 +39,7 @@ defineProps<{
   securityScanFor: (item: PendingGroupedItem) => SecurityScanInfo | null;
   selectedSelectionKeySet: Set<string>;
   showSetupLink: boolean;
+  skipReleaseDisabledReason: string;
   snoozedCandidates: PendingSnoozedCandidate[];
   snoozedItems: SnoozedPendingItem[];
   stackGroups: PendingStackGroup[];
@@ -58,6 +59,7 @@ defineProps<{
 
 const emit = defineEmits<{
   previewStack: [group: PendingStackGroup];
+  skipRelease: [group: PendingStackGroup, item: PendingGroupedItem];
   toggleItem: [item: PendingGroupedItem, checked: boolean];
   toggleStack: [group: PendingStackGroup, checked: boolean];
   updateTag: [item: PendingGroupedItem, value: string];
@@ -83,6 +85,7 @@ function verifiedLineNumbers(group: PendingStackGroup): number[] {
       :risk-cues="riskCues"
       :security-scan-for="securityScanFor"
       :selected-selection-key-set="selectedSelectionKeySet"
+      :skip-release-disabled-reason="skipReleaseDisabledReason"
       :stack-has-selection="stackHasSelection(group)"
       :stack-indeterminate="stackIndeterminate(group)"
       :stack-selected="stackSelected(group)"
@@ -90,6 +93,7 @@ function verifiedLineNumbers(group: PendingStackGroup): number[] {
       :tag-override-value="tagOverrideValue"
       :update-disabled="updateDisabled(verifiedLineNumbers(group))"
       @preview-stack="emit('previewStack', $event)"
+      @skip-release="(stackGroup, item) => emit('skipRelease', stackGroup, item)"
       @toggle-item="(item, checked) => emit('toggleItem', item, checked)"
       @toggle-stack="(stackGroup, checked) => emit('toggleStack', stackGroup, checked)"
       @update-tag="(item, value) => emit('updateTag', item, value)"

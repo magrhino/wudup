@@ -9,6 +9,7 @@ from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 
+from .config import VALID_UPDATE_MODES
 from .db_schema import (
     _EXPECTED_SCHEMAS_BY_VERSION as _EXPECTED_SCHEMAS_BY_VERSION,
 )
@@ -41,6 +42,22 @@ from .digest_provenance import (
     DIGEST_PROVENANCE_SQL_COLUMNS,
     DigestTagProvenance,
     digest_provenance_or_empty,
+)
+
+# Run modes that change what a service runs: the updater's update modes and
+# WebUI retags. Other WebUI runs only audit settings or notifications.
+SERVICE_UPDATE_RUN_MODES = (*sorted(VALID_UPDATE_MODES), "web-retag")
+_SERVICE_UPDATE_RUN_MODE_PLACEHOLDERS = ", ".join("?" for _ in SERVICE_UPDATE_RUN_MODES)
+# Splits a stored ``stack/service`` key at its first "/" for a correlated
+# lookup, matching ``str.partition`` in ``service_updated_since``.
+_SKIP_STACK_SQL = (
+    "CASE WHEN instr(skip.service_key, '/') > 0 "
+    "THEN substr(skip.service_key, 1, instr(skip.service_key, '/') - 1) ELSE '' END"
+)
+_SKIP_SERVICE_SQL = (
+    "CASE WHEN instr(skip.service_key, '/') > 0 "
+    "THEN substr(skip.service_key, instr(skip.service_key, '/') + 1) "
+    "ELSE skip.service_key END"
 )
 
 
@@ -289,18 +306,54 @@ def dependency_snooze_satisfied(
 ) -> bool:
     """Return true when the dependency service updated after snooze creation."""
 
+    return service_updated_since(
+        conn,
+        service_key=wait_for_service_key,
+        created_at=created_at,
+    )
+
+
+def service_updated_since(
+    conn: sqlite3.Connection,
+    *,
+    service_key: str,
+    created_at: str,
+) -> bool:
+    """Return true when a service has a successful update at or after a time.
+
+    Only updater and retag runs count. WebUI settings, auth, notification, and
+    other audit runs also write successful ``update_events`` rows for a
+    service, but they do not change what the service runs.
+    """
+
+    stack_name, sep, service_name = service_key.partition("/")
+    if not sep:
+        stack_name, service_name = "", service_key
     row = conn.execute(
-        """
-        SELECT 1
-        FROM update_events
-        WHERE stack_name || '/' || service_name = ?
-          AND status = 'success'
-          AND created_at >= ?
-        LIMIT 1
-        """,
-        (wait_for_service_key, created_at),
+        f"SELECT {_service_update_exists_sql('?', '?', '?')}",
+        (stack_name, service_name, created_at, *SERVICE_UPDATE_RUN_MODES),
     ).fetchone()
-    return row is not None
+    return bool(row[0])
+
+
+def _service_update_exists_sql(stack_sql: str, service_sql: str, since_sql: str) -> str:
+    """Return an EXISTS test for a successful updater or retag event.
+
+    The arguments are fixed SQL expressions or ``?`` placeholders, never
+    values. The run mode placeholders are bound after them.
+    """
+
+    return f"""EXISTS (
+        SELECT 1
+        FROM update_events AS event
+        JOIN update_runs AS run ON run.id = event.run_id
+        WHERE event.stack_name = {stack_sql}
+          AND event.service_name = {service_sql}
+          AND event.status = 'success'
+          AND event.created_at >= {since_sql}
+          AND run.dry_run = 0
+          AND run.mode IN ({_SERVICE_UPDATE_RUN_MODE_PLACEHOLDERS})
+    )"""
 
 
 def active_dependency_snooze_rows(
@@ -338,6 +391,55 @@ def active_dependency_snooze_rows(
             wait_for_service_key=str(row["wait_for_service_key"]),
             created_at=str(row["created_at"]),
         )
+    )
+
+
+def active_release_skip_rows(
+    conn: sqlite3.Connection,
+    *,
+    service_keys: Iterable[str],
+) -> tuple[sqlite3.Row, ...]:
+    """Return release skips for these services that no later update cleared."""
+
+    keys = tuple(dict.fromkeys(service_keys))
+    if not keys:
+        return ()
+    placeholders = ", ".join("?" for _ in keys)
+    cleared = _service_update_exists_sql(
+        _SKIP_STACK_SQL,
+        _SKIP_SERVICE_SQL,
+        "skip.created_at",
+    )
+    rows = conn.execute(
+        f"""
+        SELECT skip.*
+        FROM release_skips AS skip
+        WHERE skip.service_key IN ({placeholders})
+          AND NOT {cleared}
+        ORDER BY skip.created_at DESC, skip.id DESC
+        """,
+        (*keys, *SERVICE_UPDATE_RUN_MODES),
+    ).fetchall()
+    return tuple(rows)
+
+
+def release_skip_rows_with_status(conn: sqlite3.Connection) -> tuple[sqlite3.Row, ...]:
+    """Return every release skip, newest first, with a ``cleared`` 0/1 column."""
+
+    cleared = _service_update_exists_sql(
+        _SKIP_STACK_SQL,
+        _SKIP_SERVICE_SQL,
+        "skip.created_at",
+    )
+    return tuple(
+        conn.execute(
+            f"""
+            SELECT skip.*, {cleared} AS cleared
+            FROM release_skips AS skip
+            ORDER BY skip.created_at DESC, skip.id DESC
+            """,
+            SERVICE_UPDATE_RUN_MODES,
+        ).fetchall()
     )
 
 

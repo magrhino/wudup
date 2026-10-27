@@ -214,6 +214,31 @@ export interface PendingGroupedItem extends PendingItem {
   runtime_state: PendingRuntimeState;
   running_services: string[];
   stopped_services: string[];
+  release_key?: PendingReleaseKey | null;
+  release_skip?: PendingReleaseSkip | null;
+}
+
+export type ReleaseSkipBasis = "version" | "tag" | "digest";
+export type ReleaseSkipScope = "release" | "line";
+
+export interface PendingReleaseKey {
+  basis: ReleaseSkipBasis;
+  value: string;
+  line: string;
+  label: string;
+}
+
+export interface PendingReleaseSkip {
+  id: number;
+  service_key: string;
+  basis: ReleaseSkipBasis;
+  value: string;
+  scope: ReleaseSkipScope;
+  label: string;
+  skipped_tag: string;
+  reason: string;
+  created_at: string;
+  matches: boolean;
 }
 
 export interface PendingStackGroup {
@@ -1428,7 +1453,7 @@ export interface DiagnosticsSupportBundleResponse {
 
 export type ServicePolicyUpdateMode = "" | "pause" | "stop" | "live";
 export type AutoUpdateDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-export type SnoozeKind = "time" | "dependency";
+export type SnoozeKind = "time" | "dependency" | "release";
 export type SnoozeState = "active" | "expired" | "all";
 export type TagExclusionScope = "image_repo" | "service";
 export type TagExclusionMatchType = "exact";
@@ -1456,6 +1481,8 @@ export interface SnoozeRecord {
   active: boolean;
   kind: SnoozeKind;
   wait_for_service_key: string;
+  release_label?: string;
+  skipped_tag?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -1505,6 +1532,19 @@ export type StateOperation =
     }
   | {
       kind: "delete_dependency_snooze";
+      snooze_id: number;
+    }
+  | {
+      kind: "create_release_skip";
+      service_keys: string[];
+      image: string;
+      target_tag?: string;
+      digest?: string;
+      scope?: ReleaseSkipScope;
+      reason?: string;
+    }
+  | {
+      kind: "delete_release_skip";
       snooze_id: number;
     }
   | {

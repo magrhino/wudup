@@ -1630,6 +1630,50 @@ def test_pending_endpoint_groups_tag_updates_without_allowing_tag_updates(
 
 
 @pytest.mark.parametrize(
+    ("skipped_value", "matches"),
+    [("2.0", True), ("1.5", False)],
+)
+def test_pending_endpoint_marks_release_skips_on_grouped_items(
+    tmp_path: Path,
+    skipped_value: str,
+    matches: bool,
+) -> None:
+    fake_env, fake_root = _fake_docker_env(tmp_path)
+    client = _client(tmp_path, {"WUD_WEB_DEV_NO_AUTH": "true", **fake_env})
+    (tmp_path / "state" / "images.todo").write_text(
+        "repo/app:1.0 tag=2.0\n",
+        encoding="utf-8",
+    )
+    _make_fake_stack(tmp_path, fake_root, "stack", [("app", "repo/app:1.0", "cid-app")])
+    with open_db(tmp_path / "state" / "wud.sqlite") as conn:
+        init_db(conn)
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO release_skips (
+                    service_key, basis, value, scope, reason, created_at
+                )
+                VALUES ('stack/app', 'version', ?, 'release', 'broke login', ?)
+                """,
+                (skipped_value, "2026-10-26T10:00:00+00:00"),
+            )
+
+    response = client.get("/api/v1/pending")
+
+    assert response.status_code == 200
+    item = response.json()["grouping"]["groups"][0]["items"][0]
+    assert item["release_key"] == {
+        "basis": "version",
+        "value": "2.0",
+        "line": "2.0",
+        "label": "2.0",
+    }
+    assert item["release_skip"]["matches"] is matches
+    assert item["release_skip"]["label"] == skipped_value
+    assert item["release_skip"]["reason"] == "broke login"
+
+
+@pytest.mark.parametrize(
     "path",
     ["/api/v1/pending/cleanup", "/api/v1/pending/removal-plan", "/api/v1/pending/removal"],
 )

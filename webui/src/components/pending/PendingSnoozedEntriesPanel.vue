@@ -15,6 +15,7 @@ import {
   groupedItemServices,
   type PendingTagInputProps,
 } from "../../views/pending/pendingDisplay";
+import { releaseSkipWaitingText } from "../../views/pending/releaseSkips";
 import type { SafetyCue } from "../../views/pending/safetyCues";
 import {
   pendingSelectionForItem,
@@ -63,6 +64,19 @@ function candidateMeta(candidate: PendingSnoozedCandidate): string {
     parts.push(candidate.source_id);
   }
   return parts.join(" | ");
+}
+
+function snoozedStatusLabel(item: PendingGroupedItem): string {
+  return item.release_skip?.matches ? "Skipped release" : "Snoozed";
+}
+
+function snoozedMeta(item: PendingGroupedItem): string {
+  const skip = item.release_skip;
+  if (!skip?.matches) {
+    return "";
+  }
+  const waiting = releaseSkipWaitingText(skip);
+  return skip.reason ? `${waiting} Reason: ${skip.reason}` : waiting;
 }
 
 function runtimeStatusLabel(item: PendingGroupedItem): string {
@@ -170,10 +184,11 @@ function runtimeMeta(item: PendingGroupedItem): string {
           :selected="selectedSelectionKeySet.has(pendingSelectionKey(pendingSelectionForItem(item)))"
           :group-name="group.name"
           :service-label="groupedItemServices(item)"
-          status-label="Snoozed"
+          :status-label="snoozedStatusLabel(item)"
           status-tag-type="default"
           :risk-cues="riskCues(item)"
           :security-scan="securityScanFor(item)"
+          :meta-detail="snoozedMeta(item)"
           :show-diagnostic="false"
           :show-release-notes="false"
           :tag-override-value="tagOverrideValue(item)"

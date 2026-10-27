@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException, Query, Request
 
-from . import web_scheduler
+from . import web_release_skips, web_scheduler
 from .compose_rewrite import js_regex_escape
 from .db import (
     DatabaseError,
@@ -33,8 +33,10 @@ from .web_metadata import json_list as _json_list
 from .web_metadata import json_object as _json_object
 from .web_models import (
     CreateDependencySnoozeOperation,
+    CreateReleaseSkipOperation,
     CreateSnoozeOperation,
     DeleteDependencySnoozeOperation,
+    DeleteReleaseSkipOperation,
     DeleteServicePolicyOperation,
     DeleteSnoozeOperation,
     ServicePolicyRecord,
@@ -110,10 +112,11 @@ def api_snoozes(
                 ORDER BY created_at DESC, id DESC
                 """
             ).fetchall()
-            dependency_records = [
+            condition_records = [
                 _dependency_snooze_from_row(conn, row)
                 for row in dependency_rows
             ]
+            condition_records.extend(web_release_skips.release_skip_records(conn))
     except ReadOnlyDatabaseMissing:
         return []
     except (OSError, sqlite3.Error, DatabaseError) as exc:
@@ -124,7 +127,7 @@ def api_snoozes(
     records = [_snooze_from_row(row, now=now) for row in time_rows]
     records.extend(
         record
-        for record in dependency_records
+        for record in condition_records
         if state == "all"
         or (state == "active" and record.active)
         or (state == "expired" and not record.active)
@@ -284,6 +287,10 @@ def _apply_state_operation(
         return _create_dependency_snooze(conn, settings, request, payload)
     if isinstance(payload, DeleteDependencySnoozeOperation):
         return _delete_dependency_snooze(conn, settings, request, payload)
+    if isinstance(payload, CreateReleaseSkipOperation):
+        return _create_release_skip(conn, settings, request, payload)
+    if isinstance(payload, DeleteReleaseSkipOperation):
+        return _delete_release_skip(conn, settings, request, payload)
     if isinstance(payload, UpsertTagExclusionOperation):
         return _upsert_tag_exclusion(conn, settings, request, payload)
     if isinstance(payload, SetTagExclusionStatusOperation):
@@ -655,6 +662,76 @@ def _delete_dependency_snooze(
         status="success",
         audit_run_id=audit_run_id,
         resource_type="dependency_snooze",
+        resource_id=str(payload.snooze_id),
+    )
+
+
+def _create_release_skip(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    request: Request,
+    payload: CreateReleaseSkipOperation,
+) -> StateOperationResponse:
+    rows = web_release_skips.insert_release_skips(conn, payload)
+    # One audit event per service, like delete, so History shows each skip on
+    # the service it holds back.
+    audit_run_ids = [
+        _insert_state_audit(
+            conn,
+            settings,
+            request,
+            operation=payload.kind,
+            resource_type="release_skip",
+            resource_id=str(row["id"]),
+            target={
+                "id": int(row["id"]),
+                "service_key": str(row["service_key"]),
+            },
+            before=None,
+            after=web_release_skips.release_skip_summary(row),
+        )
+        for row in rows
+    ]
+    resource_id = ",".join(str(row["id"]) for row in rows)
+    return StateOperationResponse(
+        operation=payload.kind,
+        status="success",
+        audit_run_id=audit_run_ids[0],
+        resource_type="release_skip",
+        resource_id=resource_id,
+        resource=web_release_skips.release_skip_record(conn, rows[0]),
+    )
+
+
+def _delete_release_skip(
+    conn: sqlite3.Connection,
+    settings: WebSettings,
+    request: Request,
+    payload: DeleteReleaseSkipOperation,
+) -> StateOperationResponse:
+    before_row = web_release_skips.release_skip_row(conn, payload.snooze_id)
+    if before_row is None:
+        raise HTTPException(status_code=404, detail="release skip not found")
+    conn.execute("DELETE FROM release_skips WHERE id = ?", (payload.snooze_id,))
+    audit_run_id = _insert_state_audit(
+        conn,
+        settings,
+        request,
+        operation=payload.kind,
+        resource_type="release_skip",
+        resource_id=str(payload.snooze_id),
+        target={
+            "id": payload.snooze_id,
+            "service_key": str(before_row["service_key"]),
+        },
+        before=web_release_skips.release_skip_summary(before_row),
+        after=None,
+    )
+    return StateOperationResponse(
+        operation=payload.kind,
+        status="success",
+        audit_run_id=audit_run_id,
+        resource_type="release_skip",
         resource_id=str(payload.snooze_id),
     )
 

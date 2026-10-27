@@ -17,6 +17,7 @@ import PendingApplyRecovery from "../components/pending/PendingApplyRecovery.vue
 import PendingFallbackQueue from "../components/pending/PendingFallbackQueue.vue";
 import PendingPlanReviewModal from "../components/pending/PendingPlanReviewModal.vue";
 import PendingReleaseNotificationModal from "../components/pending/PendingReleaseNotificationModal.vue";
+import PendingReleaseSkipModal from "../components/pending/PendingReleaseSkipModal.vue";
 import PendingSearchEmptyState from "../components/pending/PendingSearchEmptyState.vue";
 import PendingSearchPanel from "../components/pending/PendingSearchPanel.vue";
 import PendingCandidateScanControls from "../components/pending/PendingCandidateScanControls.vue";
@@ -51,6 +52,7 @@ import { usePendingPlanActions } from "./pending/usePendingPlanActions";
 import { usePendingPlanReviewState } from "./pending/usePendingPlanReviewState";
 import { usePendingQueueState } from "./pending/usePendingQueueState";
 import { usePendingReleaseNotifications } from "./pending/usePendingReleaseNotifications";
+import { usePendingReleaseSkip } from "./pending/usePendingReleaseSkip";
 import { usePendingRescan } from "./pending/usePendingRescan";
 import { usePendingSearchResultState } from "./pending/usePendingSearchResultState";
 import { usePendingSearchState } from "./pending/usePendingSearchState";
@@ -224,6 +226,20 @@ const {
   sendReleaseNotifications,
   showReleaseNotificationModal,
 } = usePendingReleaseNotifications();
+const {
+  closeReleaseSkip,
+  confirmReleaseSkip,
+  openReleaseSkip,
+  releaseSkipError,
+  releaseSkipSaving,
+  releaseSkipTarget,
+  showReleaseSkipModal,
+} = usePendingReleaseSkip();
+const skipReleaseDisabledReason = computed(() =>
+  auth.session?.mutations_enabled
+    ? ""
+    : "Read-only mode is active. Set WUD_WEB_MUTATIONS_ENABLED=true on the server to skip releases.",
+);
 const securityScanRefreshVisible = computed(
   () => updates.securityScans?.scanning_enabled ?? false,
 );
@@ -777,6 +793,7 @@ onBeforeUnmount(() => {
         :security-scan-for="updates.securityScanFor"
         :selected-selection-key-set="selectedSelectionKeySet"
         :show-setup-link="showSetupLink"
+        :skip-release-disabled-reason="skipReleaseDisabledReason"
         :snoozed-candidates="filteredSnoozedCandidates"
         :snoozed-items="filteredSnoozedItems"
         :stopped-items="filteredStoppedItems"
@@ -793,6 +810,7 @@ onBeforeUnmount(() => {
         :unmatched-review-summary="visibleUnmatchedReviewSummary"
         :update-disabled="updateDisabled"
         @preview-stack="startStackUpdate"
+        @skip-release="(group, item) => openReleaseSkip({ group, item })"
         @toggle-item="toggleGroupedItem"
         @toggle-stack="toggleStack"
         @update-tag="updateTagOverride"
@@ -915,6 +933,15 @@ onBeforeUnmount(() => {
       @close="closeReleaseNotificationModal"
       @resend-preview="previewReleaseNotificationResend"
       @send="sendReleaseNotifications"
+    />
+
+    <PendingReleaseSkipModal
+      :show="showReleaseSkipModal"
+      :target="releaseSkipTarget"
+      :loading="releaseSkipSaving"
+      :error="releaseSkipError"
+      @close="closeReleaseSkip"
+      @confirm="confirmReleaseSkip"
     />
   </section>
 </template>

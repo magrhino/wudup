@@ -14,6 +14,7 @@ import {
   pendingMetadataStatusTitle,
 } from "../../views/pending/pendingDisplay";
 import PendingReleaseNotes from "./PendingReleaseNotes.vue";
+import PendingReleaseSkipNote from "./PendingReleaseSkipNote.vue";
 import PendingSecurityScanDetails from "./PendingSecurityScanDetails.vue";
 
 type TagType = "default" | "error" | "info" | "success" | "warning";
@@ -42,6 +43,7 @@ withDefaults(defineProps<{
   tagOverrideValue?: string;
   showTagInput?: boolean;
   tagInputProps?: InputHTMLAttributes;
+  showReleaseSkipNote?: boolean;
 }>(), {
   groupName: "",
   riskCues: () => [],
@@ -55,6 +57,7 @@ withDefaults(defineProps<{
   tagOverrideValue: "",
   showTagInput: false,
   tagInputProps: () => ({}),
+  showReleaseSkipNote: true,
 });
 
 const emit = defineEmits<{
@@ -88,6 +91,10 @@ function groupedItemTarget(item: PendingGroupedItem): string {
       <span>-></span>
       <code class="wrap-anywhere">{{ groupedItemTarget(item) }}</code>
     </div>
+    <PendingReleaseSkipNote
+      v-if="showReleaseSkipNote && item.release_skip && !item.release_skip.matches"
+      :skip="item.release_skip"
+    />
     <PendingReleaseNotes
       v-if="showReleaseNotes"
       :candidate-label="`${serviceLabel} · ${groupedItemTarget(item)}`"

@@ -18,6 +18,7 @@ from wudup.db import (
     DatabaseError,
     _validate_schema,
     active_dependency_snooze_rows,
+    active_release_skip_rows,
     active_snooze,
     active_tag_exclusion_rules,
     connect_db,
@@ -28,6 +29,8 @@ from wudup.db import (
     insert_update_event,
     insert_update_run,
     open_db,
+    release_skip_rows_with_status,
+    service_updated_since,
     update_pending_update,
     upsert_known_image,
     upsert_tag_exclusion_rule,
@@ -173,6 +176,7 @@ class DatabaseTests(unittest.TestCase):
                     "pending_updates",
                     "release_note_cache",
                     "release_notification_history",
+                    "release_skips",
                     "security_scan_cache",
                     "tag_exclusion_rules",
                     "web_users",
@@ -228,6 +232,165 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("idx_update_events_service_latest", indexes)
         self.assertEqual(tuple(event), ("bindery", "bindery"))
         self.assertEqual(migration_count, 1)
+
+    def test_v14_upgrade_adds_release_skips_table(self) -> None:
+        with db_connection(":memory:") as conn:
+            init_db(conn)
+            conn.execute("DROP TABLE release_skips")
+            conn.execute("DELETE FROM schema_migrations WHERE version = 15")
+            conn.execute("PRAGMA user_version = 14")
+
+            init_db(conn)
+            init_db(conn)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            columns = [
+                row[1] for row in conn.execute("PRAGMA table_info(release_skips)")
+            ]
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(release_skips)")}
+            migration_count = conn.execute(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 15"
+            ).fetchone()[0]
+
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertEqual(
+            columns,
+            [
+                "id",
+                "service_key",
+                "image_repo",
+                "basis",
+                "value",
+                "scope",
+                "skipped_tag",
+                "reason",
+                "created_at",
+                "metadata_json",
+            ],
+        )
+        self.assertIn("idx_release_skips_service_key", indexes)
+        self.assertEqual(migration_count, 1)
+
+    def test_active_release_skip_rows_drop_skips_cleared_by_an_update(self) -> None:
+        with db_connection(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            for service_key, created_at in (
+                ("media/qbittorrent", "2026-10-26T10:00:00+00:00"),
+                ("media/sonarr", "2026-10-26T10:00:00+00:00"),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO release_skips (
+                        service_key, basis, value, created_at
+                    )
+                    VALUES (?, 'version', '5.3.0', ?)
+                    """,
+                    (service_key, created_at),
+                )
+            run_id = insert_update_run(conn, status="success", mode="live")
+            insert_update_event(
+                conn,
+                run_id=run_id,
+                service_name="sonarr",
+                stack_name="media",
+                image="repo/sonarr:4.0.15",
+                status="success",
+                created_at="2026-10-27T10:00:00+00:00",
+            )
+
+            rows = active_release_skip_rows(
+                conn,
+                service_keys=("media/qbittorrent", "media/sonarr", "media/qbittorrent"),
+            )
+            empty = active_release_skip_rows(conn, service_keys=())
+
+        self.assertEqual([row["service_key"] for row in rows], ["media/qbittorrent"])
+        self.assertEqual(empty, ())
+
+    def test_release_skip_lookups_use_one_query_and_agree_on_cleared_skips(self) -> None:
+        with db_connection(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            for service_key in ("media/qbittorrent", "media/sonarr", "media/radarr"):
+                conn.execute(
+                    """
+                    INSERT INTO release_skips (service_key, basis, value, created_at)
+                    VALUES (?, 'version', '5.3.0', '2026-10-26T10:00:00+00:00')
+                    """,
+                    (service_key,),
+                )
+            run_id = insert_update_run(conn, status="success", mode="web-retag")
+            insert_update_event(
+                conn,
+                run_id=run_id,
+                service_name="sonarr",
+                stack_name="media",
+                image="repo/sonarr:4.0.15",
+                status="success",
+                created_at="2026-10-27T10:00:00+00:00",
+            )
+            statements: list[str] = []
+            conn.set_trace_callback(statements.append)
+
+            active = active_release_skip_rows(
+                conn,
+                service_keys=("media/qbittorrent", "media/sonarr", "media/radarr"),
+            )
+            listed = release_skip_rows_with_status(conn)
+            conn.set_trace_callback(None)
+
+        self.assertEqual(
+            sorted(row["service_key"] for row in active),
+            ["media/qbittorrent", "media/radarr"],
+        )
+        self.assertEqual(
+            {row["service_key"]: row["cleared"] for row in listed},
+            {"media/qbittorrent": 0, "media/sonarr": 1, "media/radarr": 0},
+        )
+        self.assertEqual(len(statements), 2)
+
+    def test_service_updated_since_ignores_audit_and_dry_runs(self) -> None:
+        with db_connection(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            since = "2026-10-26T10:00:00+00:00"
+            later = "2026-10-27T10:00:00+00:00"
+            for mode, dry_run in (("web-state", False), ("web-auth", False), ("live", True)):
+                run_id = insert_update_run(
+                    conn, status="success", mode=mode, dry_run=dry_run
+                )
+                insert_update_event(
+                    conn,
+                    run_id=run_id,
+                    service_name="db",
+                    stack_name="stack",
+                    image="repo/db:1",
+                    status="success",
+                    created_at=later,
+                )
+            audit_only = service_updated_since(
+                conn, service_key="stack/db", created_at=since
+            )
+            run_id = insert_update_run(conn, status="success", mode="pause")
+            insert_update_event(
+                conn,
+                run_id=run_id,
+                service_name="db",
+                stack_name="stack",
+                image="repo/db:2",
+                status="success",
+                created_at=later,
+            )
+            updated = service_updated_since(
+                conn, service_key="stack/db", created_at=since
+            )
+            other_stack = service_updated_since(
+                conn, service_key="other/db", created_at=since
+            )
+
+        self.assertFalse(audit_only)
+        self.assertTrue(updated)
+        self.assertFalse(other_stack)
 
     def test_init_db_sets_user_version_to_current_schema(self) -> None:
         with db_connection(":memory:") as conn:
@@ -1132,6 +1295,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 started_at="2026-05-18T12:00:00+00:00",
                 status="success",
+                mode="stop",
             )
             insert_dependency_snooze(
                 conn,

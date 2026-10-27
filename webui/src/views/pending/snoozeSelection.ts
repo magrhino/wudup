@@ -8,8 +8,10 @@ import {
   uniqueSorted,
   uniqueStrings,
 } from "./pendingDisplay";
+import { releaseSkipMatches } from "./releaseSkips";
 
-export type SnoozeSelectionRecord = Pick<SnoozeRecord, "active" | "service_key">;
+export type SnoozeSelectionRecord = Pick<SnoozeRecord, "active" | "service_key"> &
+  Partial<Pick<SnoozeRecord, "kind">>;
 
 export type SnoozedPendingItem = {
   group: PendingStackGroup;
@@ -23,7 +25,11 @@ export function activeSnoozedServiceKeys(
 ): Set<string> {
   return new Set(
     snoozes
-      .filter((snooze) => snooze.active && snooze.service_key)
+      // Release skips hide one release, matched per item by the backend.
+      .filter(
+        (snooze) =>
+          snooze.active && snooze.service_key && snooze.kind !== "release",
+      )
       .map((snooze) => snooze.service_key),
   );
 }
@@ -112,6 +118,9 @@ function itemHasSnoozedService(
   item: PendingGroupedItem,
   snoozedServiceKeys: Set<string>,
 ): boolean {
+  if (releaseSkipMatches(item)) {
+    return true;
+  }
   for (const key of groupedItemServiceKeys(group, item)) {
     if (snoozedServiceKeys.has(key)) {
       return true;
