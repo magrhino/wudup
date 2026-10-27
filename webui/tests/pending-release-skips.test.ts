@@ -8,6 +8,7 @@ import type {
   PendingReleaseSkip,
 } from "../src/api/client";
 import PendingReleaseSkipModal from "../src/components/pending/PendingReleaseSkipModal.vue";
+import PendingSnoozedEntriesPanel from "../src/components/pending/PendingSnoozedEntriesPanel.vue";
 import PendingStackCard from "../src/components/pending/PendingStackCard.vue";
 import PendingUpdateRow from "../src/components/pending/PendingUpdateRow.vue";
 import { useSettingsStore } from "../src/stores/settings";
@@ -259,6 +260,91 @@ describe("release skips", () => {
       "Could not skip this release: media/qbittorrent already skips 5.3.0",
     );
     expect(skip.showReleaseSkipModal.value).toBe(true);
+  });
+
+  it("labels skipped releases in the snoozed entries with their note", () => {
+    const skipped = qbitItem({ release_skip: releaseSkip() });
+    const snoozed = qbitItem({ line_no: 2, services: ["sonarr"], release_key: null });
+    const group = pendingGrouping([skipped, snoozed]).groups[0]!;
+    const wrapper = mount(PendingSnoozedEntriesPanel, {
+      props: {
+        riskCues: () => [],
+        securityScanFor: () => null,
+        selectedSelectionKeySet: new Set<string>(),
+        snoozedCandidates: [],
+        snoozedItems: [
+          { group, item: skipped },
+          { group, item: snoozed },
+        ],
+        stoppedItems: [],
+        tagInputProps: () => ({}),
+        tagOverrideValue: () => "",
+      },
+      global: { stubs: naiveStubs },
+    });
+
+    expect(wrapper.text()).toContain("Skipped release");
+    expect(wrapper.text()).toContain(
+      "Skipped 5.3.0. Waiting for a different release. Reason: stalls on magnet links",
+    );
+    expect(wrapper.text()).toContain("Snoozed");
+  });
+
+  it("closes the skip dialog unless a save is in flight", async () => {
+    const settings = useSettingsStore();
+    let finishSave: () => void = () => undefined;
+    vi.spyOn(settings, "createReleaseSkip").mockImplementation(
+      () => new Promise<void>((resolve) => { finishSave = resolve; }),
+    );
+    vi.spyOn(useUpdatesStore(), "loadPending").mockResolvedValue();
+    const item = qbitItem();
+    const skip = usePendingReleaseSkip();
+
+    skip.openReleaseSkip({ group: pendingGrouping([item]).groups[0]!, item });
+    skip.closeReleaseSkip();
+    expect(skip.showReleaseSkipModal.value).toBe(false);
+
+    skip.openReleaseSkip({ group: pendingGrouping([item]).groups[0]!, item });
+    const saving = skip.confirmReleaseSkip("release", "");
+    skip.closeReleaseSkip();
+    await skip.confirmReleaseSkip("release", "");
+    expect(skip.releaseSkipSaving.value).toBe(true);
+    expect(skip.showReleaseSkipModal.value).toBe(true);
+    expect(settings.createReleaseSkip).toHaveBeenCalledTimes(1);
+    finishSave();
+    await saving;
+    expect(skip.showReleaseSkipModal.value).toBe(false);
+  });
+
+  it("closes the dialog from cancel and describes digest and line skips", async () => {
+    const item = qbitItem({
+      desired_tag: "",
+      digest: "sha256:0123456789abcdef0123",
+      release_key: {
+        basis: "digest",
+        value: "sha256:0123456789abcdef0123",
+        line: "",
+        label: "build sha256:0123456789ab",
+      },
+    });
+    const wrapper = mount(PendingReleaseSkipModal, {
+      props: {
+        error: "",
+        loading: false,
+        show: true,
+        target: { group: pendingGrouping([item]).groups[0]!, item },
+      },
+      global: { stubs: naiveStubs },
+    });
+
+    expect(wrapper.text()).toContain("Skip build sha256:0123456789ab for media/qbittorrent?");
+    expect(wrapper.text()).toContain("Returns to Pending when WUD offers a different build.");
+    expect(wrapper.find('input[type="radio"]').exists()).toBe(false);
+    await wrapper.getComponent(naiveStubs.NModal as never).vm.$emit("update:show", false);
+    expect(wrapper.emitted("close")).toHaveLength(1);
+
+    await wrapper.setProps({ target: null, show: false });
+    expect(wrapper.text()).not.toContain("Skip release");
   });
 
   it("hides the line choice when the release has no minor version", () => {
