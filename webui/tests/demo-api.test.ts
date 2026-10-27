@@ -9,7 +9,7 @@ const READ_ONLY_MESSAGE =
 
 describe("demo web API", () => {
   it("offers release identities on grouped pending items without any stored skips", async () => {
-    const api = createDemoWebApi(new DemoApiState());
+    const api = createDemoWebApi();
     const pending = await api.pending();
     const items = pending.grouping.groups.flatMap((group) => group.items);
 
