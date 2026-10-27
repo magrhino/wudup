@@ -48,6 +48,18 @@ from .digest_provenance import (
 # WebUI retags. Other WebUI runs only audit settings or notifications.
 SERVICE_UPDATE_RUN_MODES = (*sorted(VALID_UPDATE_MODES), "web-retag")
 _SERVICE_UPDATE_RUN_MODE_PLACEHOLDERS = ", ".join("?" for _ in SERVICE_UPDATE_RUN_MODES)
+# Splits a stored ``stack/service`` key at its first "/" for a correlated
+# lookup, matching ``str.partition`` in ``service_updated_since``.
+_SKIP_STACK_SQL = (
+    "CASE WHEN instr(skip.service_key, '/') > 0 "
+    "THEN substr(skip.service_key, 1, instr(skip.service_key, '/') - 1) ELSE '' END"
+)
+_SKIP_SERVICE_SQL = (
+    "CASE WHEN instr(skip.service_key, '/') > 0 "
+    "THEN substr(skip.service_key, instr(skip.service_key, '/') + 1) "
+    "ELSE skip.service_key END"
+)
+
 
 def connect_db(path: str | Path, *, owner_uid: int | None = None) -> sqlite3.Connection:
     """Open a SQLite connection with WUDup defaults applied."""
@@ -379,6 +391,55 @@ def active_dependency_snooze_rows(
             wait_for_service_key=str(row["wait_for_service_key"]),
             created_at=str(row["created_at"]),
         )
+    )
+
+
+def active_release_skip_rows(
+    conn: sqlite3.Connection,
+    *,
+    service_keys: Iterable[str],
+) -> tuple[sqlite3.Row, ...]:
+    """Return release skips for these services that no later update cleared."""
+
+    keys = tuple(dict.fromkeys(service_keys))
+    if not keys:
+        return ()
+    placeholders = ", ".join("?" for _ in keys)
+    cleared = _service_update_exists_sql(
+        _SKIP_STACK_SQL,
+        _SKIP_SERVICE_SQL,
+        "skip.created_at",
+    )
+    rows = conn.execute(
+        f"""
+        SELECT skip.*
+        FROM release_skips AS skip
+        WHERE skip.service_key IN ({placeholders})
+          AND NOT {cleared}
+        ORDER BY skip.created_at DESC, skip.id DESC
+        """,
+        (*keys, *SERVICE_UPDATE_RUN_MODES),
+    ).fetchall()
+    return tuple(rows)
+
+
+def release_skip_rows_with_status(conn: sqlite3.Connection) -> tuple[sqlite3.Row, ...]:
+    """Return every release skip, newest first, with a ``cleared`` 0/1 column."""
+
+    cleared = _service_update_exists_sql(
+        _SKIP_STACK_SQL,
+        _SKIP_SERVICE_SQL,
+        "skip.created_at",
+    )
+    return tuple(
+        conn.execute(
+            f"""
+            SELECT skip.*, {cleared} AS cleared
+            FROM release_skips AS skip
+            ORDER BY skip.created_at DESC, skip.id DESC
+            """,
+            SERVICE_UPDATE_RUN_MODES,
+        ).fetchall()
     )
 
 

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from .digest_provenance import DIGEST_PROVENANCE_SQL_COLUMNS
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 ColumnSchema = tuple[str, str, int, str | None, int]
 SchemaDefinition = dict[str, tuple[ColumnSchema, ...]]
@@ -78,6 +78,18 @@ EXPECTED_SCHEMA: SchemaDefinition = {
         ("id", "INTEGER", 0, None, 1),
         ("service_key", "TEXT", 1, None, 0),
         ("wait_for_service_key", "TEXT", 1, None, 0),
+        ("reason", "TEXT", 1, "''", 0),
+        ("created_at", "TEXT", 1, None, 0),
+        ("metadata_json", "TEXT", 1, "'{}'", 0),
+    ),
+    "release_skips": (
+        ("id", "INTEGER", 0, None, 1),
+        ("service_key", "TEXT", 1, None, 0),
+        ("image_repo", "TEXT", 1, "''", 0),
+        ("basis", "TEXT", 1, None, 0),
+        ("value", "TEXT", 1, None, 0),
+        ("scope", "TEXT", 1, "'release'", 0),
+        ("skipped_tag", "TEXT", 1, "''", 0),
         ("reason", "TEXT", 1, "''", 0),
         ("created_at", "TEXT", 1, None, 0),
         ("metadata_json", "TEXT", 1, "'{}'", 0),
@@ -237,10 +249,16 @@ WEB_SCHEMA_TABLES = frozenset(
     {"schema_migrations", "web_users", "web_sessions", "web_settings"}
 )
 
-EXPECTED_SCHEMA_V12: SchemaDefinition = dict(EXPECTED_SCHEMA)
+EXPECTED_SCHEMA_V14: SchemaDefinition = {
+    name: columns
+    for name, columns in EXPECTED_SCHEMA.items()
+    if name != "release_skips"
+}
+
+EXPECTED_SCHEMA_V12: SchemaDefinition = dict(EXPECTED_SCHEMA_V14)
 EXPECTED_SCHEMA_V12["release_note_cache"] = tuple(
     column
-    for column in EXPECTED_SCHEMA["release_note_cache"]
+    for column in EXPECTED_SCHEMA_V14["release_note_cache"]
     if column[0] != RELEASE_NOTE_TARGET_DIGEST_COLUMN[0]
 )
 
@@ -338,7 +356,8 @@ _EXPECTED_SCHEMAS_BY_VERSION: dict[int, SchemaDefinition] = {
     10: EXPECTED_SCHEMA_V10,
     11: EXPECTED_SCHEMA_V11,
     12: EXPECTED_SCHEMA_V12,
-    13: EXPECTED_SCHEMA,
+    13: EXPECTED_SCHEMA_V14,
+    14: EXPECTED_SCHEMA_V14,
     SCHEMA_VERSION: EXPECTED_SCHEMA,
 }
 _SCHEMA_IDENTIFIERS = frozenset(EXPECTED_SCHEMA) | frozenset(
@@ -525,6 +544,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             );
 
+            CREATE TABLE IF NOT EXISTS release_skips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_key TEXT NOT NULL,
+                image_repo TEXT NOT NULL DEFAULT '',
+                basis TEXT NOT NULL,
+                value TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT 'release',
+                skipped_tag TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
             CREATE TABLE IF NOT EXISTS service_policy (
                 service_key TEXT PRIMARY KEY,
                 update_mode TEXT NOT NULL DEFAULT '',
@@ -602,6 +634,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 ON dependency_snoozes (service_key, created_at);
             CREATE INDEX IF NOT EXISTS idx_dependency_snoozes_wait_for_service_key
                 ON dependency_snoozes (wait_for_service_key, created_at);
+            CREATE INDEX IF NOT EXISTS idx_release_skips_service_key
+                ON release_skips (service_key, created_at);
             CREATE INDEX IF NOT EXISTS idx_pending_updates_run_id
                 ON pending_updates (run_id);
             CREATE INDEX IF NOT EXISTS idx_pending_updates_status
@@ -710,7 +744,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         _validate_schema(conn)
         _backfill_schema_migrations(conn, SCHEMA_VERSION)
         conn.execute(  # nosemgrep: PRAGMA needs a literal internal version.
-            "PRAGMA user_version = 14"
+            "PRAGMA user_version = 15"
         )
 
 
@@ -888,6 +922,7 @@ MIGRATION_NAMES = {
     11: "add release notification history",
     12: "add release note body cache",
     14: "index recent service events",
+    15: "add release skips",
 }
 
 
@@ -1329,6 +1364,41 @@ def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
     _record_schema_migration(conn, 14)
 
 
+def _migrate_v14_to_v15(conn: sqlite3.Connection) -> None:
+    object_type = _sqlite_object_type(conn, "release_skips")
+    if object_type is not None:
+        if object_type != "table":
+            raise DatabaseError(
+                f"Expected release_skips to be a table, found {object_type}"
+            )
+        _validate_table_columns(
+            conn,
+            "release_skips",
+            EXPECTED_SCHEMA["release_skips"],
+        )
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS release_skips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_key TEXT NOT NULL,
+            image_repo TEXT NOT NULL DEFAULT '',
+            basis TEXT NOT NULL,
+            value TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'release',
+            skipped_tag TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_release_skips_service_key
+            ON release_skips (service_key, created_at);
+        """
+    )
+    conn.execute("PRAGMA user_version = 15")
+    _record_schema_migration(conn, 15)
+
+
 # init_schema runs each migration inside _migration_transaction.
 _MIGRATIONS_BY_TARGET_VERSION: dict[int, Migration] = {
     2: _migrate_v1_to_v2,
@@ -1344,4 +1414,5 @@ _MIGRATIONS_BY_TARGET_VERSION: dict[int, Migration] = {
     12: _migrate_v11_to_v12,
     13: _migrate_v12_to_v13,
     14: _migrate_v13_to_v14,
+    15: _migrate_v14_to_v15,
 }
