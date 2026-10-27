@@ -8,6 +8,22 @@ const READ_ONLY_MESSAGE =
   "The public static demo is read-only. Run WUDup locally to apply changes.";
 
 describe("demo web API", () => {
+  it("offers release identities on grouped pending items without any stored skips", async () => {
+    const api = createDemoWebApi(new DemoApiState());
+    const pending = await api.pending();
+    const items = pending.grouping.groups.flatMap((group) => group.items);
+
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((item) => item.release_key)).toBe(true);
+    expect(items.some((item) => item.release_skip)).toBe(false);
+    expect(
+      items.find((item) => item.desired_tag === "2.34.4")?.release_key,
+    ).toMatchObject({ basis: "version", value: "2.34.4", line: "2.34" });
+    await expect(api.snoozes("all")).resolves.not.toContainEqual(
+      expect.objectContaining({ kind: "release" }),
+    );
+  });
+
   it("keeps Alpine demo suggestions aligned with the major-pinned backend rule", async () => {
     const api = createDemoWebApi();
     const targets = await api.retagTargets();
@@ -535,6 +551,17 @@ describe("demo web API", () => {
         },
         "csrf",
       ),
+      api.stateOperation(
+        {
+          kind: "create_release_skip",
+          service_keys: ["media/radarr"],
+          image: "lscr.io/linuxserver/radarr:5.21.1",
+          target_tag: "5.22.4",
+          scope: "release",
+        },
+        "csrf",
+      ),
+      api.stateOperation({ kind: "delete_release_skip", snooze_id: 1 }, "csrf"),
       api.restartContainer("csrf"),
       api.createJob("demo", [], false, [], [], "csrf"),
       api.job("demo"),

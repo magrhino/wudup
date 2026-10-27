@@ -27,6 +27,17 @@ import {
 import { useAuthStore } from "./auth";
 import { errorMessage, runWithStoreState } from "./storeState";
 
+function deleteSnoozeOperation(snoozeId: number, kind: SnoozeKind): StateOperation {
+  switch (kind) {
+    case "dependency":
+      return { kind: "delete_dependency_snooze", snooze_id: snoozeId };
+    case "release":
+      return { kind: "delete_release_skip", snooze_id: snoozeId };
+    default:
+      return { kind: "delete_snooze", snooze_id: snoozeId };
+  }
+}
+
 export const useSettingsStore = defineStore("settings", () => {
   const settings = ref<SettingsResponse | null>(null);
   const onboarding = ref<OnboardingChecklistResponse | null>(null);
@@ -272,23 +283,8 @@ export const useSettingsStore = defineStore("settings", () => {
     state: SnoozeState,
     kind: SnoozeKind = "time",
   ): Promise<void> {
-    const operation: StateOperation =
-      kind === "dependency"
-        ? {
-            kind: "delete_dependency_snooze",
-            snooze_id: snoozeId,
-          }
-        : kind === "release"
-          ? {
-              kind: "delete_release_skip",
-              snooze_id: snoozeId,
-            }
-          : {
-              kind: "delete_snooze",
-              snooze_id: snoozeId,
-            };
     await mutateAndReload(
-      operation,
+      deleteSnoozeOperation(snoozeId, kind),
       async () => {
         snoozeStateFilter.value = state;
         snoozes.value = await webApi.snoozes(state);

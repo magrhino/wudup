@@ -51,8 +51,8 @@ export function usePendingReleaseSkip() {
         // Pending reads the active snooze list, whatever the Snoozes page last showed.
         "active",
       );
-    } catch (exc) {
-      releaseSkipError.value = `Could not skip this release: ${errorMessage(exc)}`;
+    } catch (error_) {
+      releaseSkipError.value = `Could not skip this release: ${errorMessage(error_)}`;
       return;
     } finally {
       releaseSkipSaving.value = false;

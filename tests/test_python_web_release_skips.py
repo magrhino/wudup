@@ -327,10 +327,15 @@ def test_pending_release_fields_hide_matches_and_remind_on_the_next_release() ->
     next_key, next_skip = fields("5.3.1-r0-ls420")
     digest_key, digest_skip = fields("", "sha256:abc")
 
-    assert rebuild_key is not None and rebuild_key.label == "5.3.0"
-    assert rebuild_skip is not None and rebuild_skip.matches is True
-    assert next_key is not None and next_key.line == "5.3"
-    assert next_skip is not None and next_skip.matches is False
+    assert rebuild_key is not None
+    assert rebuild_key.label == "5.3.0"
+    assert rebuild_skip is not None
+    assert rebuild_skip.matches is True
+    assert next_key is not None
+    assert next_key.line == "5.3"
+    assert next_skip is not None
+    assert next_skip.matches is False
     assert next_skip.reason == "stalls on magnet links"
-    assert digest_key is not None and digest_key.basis == "digest"
+    assert digest_key is not None
+    assert digest_key.basis == "digest"
     assert digest_skip is None
