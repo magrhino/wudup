@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Play, Repeat2, ShieldAlert, SkipForward } from "@lucide/vue";
-import { NButton, NCheckbox, NTag } from "naive-ui";
+import { computed, h } from "vue";
+import {
+  BellOff,
+  ChevronDown,
+  Play,
+  Repeat2,
+  ShieldAlert,
+  SkipForward,
+} from "@lucide/vue";
+import { NButton, NCheckbox, NDropdown, NTag, type DropdownOption } from "naive-ui";
 
 import type {
   PendingGroupedItem,
@@ -52,6 +59,8 @@ const props = defineProps<{
   stackHasSelection: boolean;
   stackIndeterminate: boolean;
   stackSelected: boolean;
+  snoozeDisabled: boolean;
+  snoozeDisabledMessage: string;
   tagInputProps: (item: Pick<PendingItem, "image">) => PendingTagInputProps;
   tagOverrideValue: (item: PendingItem) => string;
   updateDisabled: boolean;
@@ -60,10 +69,59 @@ const props = defineProps<{
 const emit = defineEmits<{
   previewStack: [group: PendingStackGroup];
   skipRelease: [group: PendingStackGroup, item: PendingGroupedItem];
+  snoozeItem: [group: PendingStackGroup, item: PendingGroupedItem];
   toggleItem: [item: PendingGroupedItem, checked: boolean];
   toggleStack: [group: PendingStackGroup, checked: boolean];
   updateTag: [item: PendingGroupedItem, value: string];
 }>();
+
+// Snooze and skip both hold an update back, so one trigger offers both.
+function holdOptions(item: PendingGroupedItem): DropdownOption[] {
+  if (!canSkipRelease(item) || !item.release_key) {
+    return [];
+  }
+  return [
+    {
+      key: "snooze",
+      label: "Snooze for a while",
+      hint: "Every update for this service",
+      icon: () => h(BellOff, { size: 15, "aria-hidden": "true" }),
+    },
+    {
+      key: "skip",
+      label: releaseSkipActionLabel(item.release_key),
+      hint:
+        item.release_key.basis === "digest"
+          ? "Until WUD offers a different build"
+          : "Until WUD offers a different release",
+      icon: () => h(SkipForward, { size: 15, "aria-hidden": "true" }),
+      disabled: Boolean(props.skipReleaseDisabledReason),
+    },
+  ];
+}
+
+// Two-line options need more than the library's single-line height.
+const holdMenuTheme = { optionHeightMedium: "50px" };
+
+// The menu renders in a teleported layer that scoped styles cannot reach.
+function renderHoldLabel(option: DropdownOption) {
+  return h("span", { style: "display: grid; align-content: center; height: 100%; line-height: 1.35" }, [
+    h("span", String(option.label)),
+    h(
+      "span",
+      { style: "color: var(--color-muted-text); font-size: var(--text-metadata-size)" },
+      String(option.hint),
+    ),
+  ]);
+}
+
+function selectHoldOption(key: string | number, item: PendingGroupedItem): void {
+  if (key === "skip") {
+    emit("skipRelease", props.group, item);
+  } else {
+    emit("snoozeItem", props.group, item);
+  }
+}
 
 function actionableRiskCues(item: PendingGroupedItem): SafetyCue[] {
   return props.riskCues(item).filter((cue) => cue.type === "warning" || cue.type === "error" || cue.key.startsWith("security-"));
@@ -231,21 +289,47 @@ const previewDisabledMessage = computed(() =>
             </template>
             Choose stream
           </n-button>
+          <n-dropdown
+            v-if="holdOptions(item).length"
+            trigger="click"
+            placement="bottom-end"
+            :options="holdOptions(item)"
+            :render-label="renderHoldLabel"
+            :theme-overrides="holdMenuTheme"
+            :disabled="snoozeDisabled"
+            @select="(key: string | number) => selectHoldOption(key, item)"
+          >
+            <n-button
+              size="tiny"
+              quaternary
+              class="stack-change-hold"
+              aria-haspopup="menu"
+              :disabled="snoozeDisabled"
+              :title="snoozeDisabledMessage || undefined"
+              :aria-label="`Snooze or skip ${item.image}`"
+            >
+              <template #icon>
+                <BellOff :size="14" aria-hidden="true" />
+              </template>
+              Snooze
+              <ChevronDown class="hold-chevron" :size="13" aria-hidden="true" />
+            </n-button>
+          </n-dropdown>
           <n-button
-            v-if="canSkipRelease(item) && item.release_key"
+            v-else
             size="tiny"
             quaternary
-            class="release-skip-trigger"
+            class="stack-change-hold"
             aria-haspopup="dialog"
-            :disabled="Boolean(skipReleaseDisabledReason)"
-            :title="skipReleaseDisabledReason || undefined"
-            :aria-label="`${releaseSkipActionLabel(item.release_key)} for ${groupedItemServices(item)}`"
-            @click="emit('skipRelease', group, item)"
+            :disabled="snoozeDisabled"
+            :title="snoozeDisabledMessage || undefined"
+            :aria-label="`Snooze ${item.image}`"
+            @click="emit('snoozeItem', group, item)"
           >
             <template #icon>
-              <SkipForward :size="14" aria-hidden="true" />
+              <BellOff :size="14" aria-hidden="true" />
             </template>
-            {{ releaseSkipActionLabel(item.release_key) }}
+            Snooze
           </n-button>
         </span>
         <PendingReleaseSkipNote
@@ -428,9 +512,19 @@ const previewDisabledMessage = computed(() =>
   font-size: 0.82rem;
 }
 
-.stream-choice-trigger,
-.release-skip-trigger {
+.stream-choice-trigger {
   margin-inline-start: 2px;
+}
+
+/* Quiet trailing control: holding an update back is a secondary decision. */
+.stack-change-hold {
+  margin-inline-start: auto;
+  color: var(--color-text-secondary);
+}
+
+.hold-chevron {
+  margin-inline-start: 3px;
+  opacity: 0.7;
 }
 
 .stack-advisory-tag {
@@ -536,6 +630,11 @@ const previewDisabledMessage = computed(() =>
 
   .stack-change-target > :deep(.n-tag) {
     width: fit-content;
+  }
+
+  .stack-change-hold {
+    justify-self: start;
+    margin-inline-start: 0;
   }
 
   .stack-change-target > span[aria-hidden="true"] {

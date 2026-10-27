@@ -210,6 +210,45 @@ export const naiveStubs: Record<string, Component> = {
         );
     },
   },
+  NDropdown: {
+    props: {
+      disabled: Boolean,
+      options: { type: Array, default: () => [] },
+      renderLabel: Function,
+    },
+    emits: ["select"],
+    setup(props, { emit, slots }) {
+      type Option = {
+        disabled?: boolean;
+        icon?: () => VNodeChild;
+        key: string;
+        label: string;
+      };
+      const renderLabel = (option: Option): VNodeChild =>
+        props.renderLabel ? (props.renderLabel as (option: Option) => VNodeChild)(option) : option.label;
+      return () =>
+        h("span", [
+          slots.default?.(),
+          h(
+            "span",
+            { role: "menu" },
+            (props.options as Option[]).map((option) =>
+              h(
+                "button",
+                {
+                  type: "button",
+                  role: "menuitem",
+                  "data-key": option.key,
+                  disabled: props.disabled || option.disabled,
+                  onClick: () => emit("select", option.key, option),
+                },
+                [option.icon?.(), renderLabel(option)],
+              ),
+            ),
+          ),
+        ]);
+    },
+  },
   NEmpty: {
     props: {
       description: String,
@@ -521,6 +560,7 @@ Object.assign(naiveStubs, {
   Checkbox: naiveStubs.NCheckbox,
   ConfigProvider: naiveStubs.NConfigProvider,
   DataTable: naiveStubs.NDataTable,
+  Dropdown: naiveStubs.NDropdown,
   Empty: naiveStubs.NEmpty,
   Flex: naiveStubs.NFlex,
   Form: naiveStubs.NForm,

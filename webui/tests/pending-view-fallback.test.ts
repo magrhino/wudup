@@ -1173,7 +1173,7 @@ describe("pending view fallback and release notes", () => {
     expect(wrapper.text()).toContain(
       "Only GHCR and mapped LinuxServer.io images have release-note links.",
     );
-    await wrapper.find('button[aria-label*="linuxserver/calibre"]').trigger("click");
+    await wrapper.find('button[aria-label^="Release notes for "][aria-label*="linuxserver/calibre"]').trigger("click");
     expect(wrapper.find(".release-panel").text()).toContain("LSIO release");
     expect(wrapper.find(".release-panel").text()).toContain("Upstream project");
   });

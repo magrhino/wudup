@@ -1734,6 +1734,8 @@ describe("queue evidence cues", () => {
         stackHasSelection: false,
         stackIndeterminate: false,
         stackSelected: false,
+        snoozeDisabled: false,
+        snoozeDisabledMessage: "",
         tagInputProps: () => ({ "aria-label": "New tag" }),
         tagOverrideValue: () => "",
         updateDisabled: false,

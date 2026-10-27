@@ -1,8 +1,9 @@
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SnoozeKind } from "../src/api/client";
+import PendingSnoozeDialog from "../src/components/pending/PendingSnoozeDialog.vue";
 import {
   applyJobResponse,
   pendingGroupedItem,
@@ -19,6 +20,7 @@ import {
   wudApiStatus,
   wudContainerMetadata,
 } from "./helpers/fixtures";
+import { naiveStubs } from "./helpers/mount";
 import {
   mockPendingLifecycle,
   mountPendingView,
@@ -1059,6 +1061,272 @@ describe("pending view selection actions", () => {
       [],
       [{ line_no: 2, selection_id: "selection-2" }],
     );
+  });
+
+  it("snoozes one image from the pending queue without leaving the page", async () => {
+    const appItem = pendingGroupedItem({
+      line_no: 1,
+      image: "repo/app:1.0",
+      repo: "repo/app",
+      services: ["app"],
+    });
+    const dbItem = pendingGroupedItem({
+      line_no: 2,
+      image: "repo/db:1.0",
+      repo: "repo/db",
+      services: ["db"],
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = {
+      ...pendingResponse([appItem, dbItem]),
+      grouping: pendingGrouping([appItem, dbItem]),
+    };
+    mockPendingLifecycle(settings, updates);
+    const createSnooze = vi
+      .spyOn(settings, "createSnooze")
+      .mockImplementation(async (serviceKey, snoozedUntil) => {
+        settings.snoozes = [
+          snooze({ service_key: serviceKey, snoozed_until: snoozedUntil }),
+        ];
+      });
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Snoozed pending entries");
+    await wrapper
+      .find('input[aria-label="Select update repo/app:1.0"]')
+      .setValue(true);
+    expect(wrapper.text()).toContain("Review selected (1)");
+    await wrapper.find('button[aria-label="Snooze repo/app:1.0"]').trigger("click");
+
+    const dialog = wrapper.find('[role="dialog"]');
+    expect(dialog.text()).toContain("Snooze update");
+    expect(dialog.text()).toContain("Holds every update for this service until");
+    expect(dialog.text()).toContain("Saved in WUDup only.");
+    expect(dialog.text()).toContain("media/app");
+    await dialog.find('select[aria-label="Snooze duration"]').setValue("168");
+    await dialog.find('input[aria-label="Snooze reason"]').setValue(" waiting on upstream fix ");
+    const before = Date.now();
+    await dialog
+      .findAll("button")
+      .find((button) => button.text() === "Snooze")
+      ?.trigger("click");
+    await flushPromises();
+
+    expect(createSnooze).toHaveBeenCalledTimes(1);
+    const [serviceKey, snoozedUntil, reason, state] = createSnooze.mock.calls[0]!;
+    expect([serviceKey, reason, state]).toEqual([
+      "media/app",
+      "waiting on upstream fix",
+      "active",
+    ]);
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    expect(Date.parse(snoozedUntil) - before).toBeGreaterThanOrEqual(weekMs);
+    expect(Date.parse(snoozedUntil) - Date.now()).toBeLessThanOrEqual(weekMs);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(
+      `Snoozed media/app until ${new Date(snoozedUntil).toLocaleString()}.`,
+    );
+    expect(wrapper.text()).toContain("Snoozed pending entries");
+    expect(wrapper.text()).toContain("Review selected (0)");
+    expect(wrapper.find('button[aria-label="Snooze repo/app:1.0"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="Snooze repo/db:1.0"]').exists()).toBe(true);
+  });
+
+  it("keeps the snooze dialog open with the error when the snooze is not saved", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(settings, "createSnooze").mockRejectedValue(new Error("CSRF token expired"));
+    vi.spyOn(settings, "loadSnoozes").mockResolvedValue();
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    await wrapper
+      .find('[role="dialog"]')
+      .findAll("button")
+      .find((button) => button.text() === "Snooze")
+      ?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').text()).toContain(
+      "Snooze was not saved: CSRF token expired",
+    );
+  });
+
+  it("reports a partial multi-service snooze and retries only the unsaved service", async () => {
+    const item = pendingGroupedItem({
+      line_no: 1,
+      image: "repo/app:1.0",
+      repo: "repo/app",
+      services: ["web", "worker"],
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = {
+      ...pendingResponse([item]),
+      grouping: pendingGrouping([item]),
+    };
+    mockPendingLifecycle(settings, updates);
+    let failWorker = true;
+    const createSnooze = vi
+      .spyOn(settings, "createSnooze")
+      .mockImplementation(async (serviceKey, snoozedUntil) => {
+        if (serviceKey === "media/worker" && failWorker) {
+          throw new Error("database is locked");
+        }
+        settings.snoozes = [
+          ...settings.snoozes,
+          snooze({ id: settings.snoozes.length + 1, service_key: serviceKey, snoozed_until: snoozedUntil }),
+        ];
+      });
+    const loadSnoozes = vi.spyOn(settings, "loadSnoozes").mockResolvedValue();
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+    const confirm = () =>
+      wrapper
+        .find('[role="dialog"]')
+        .findAll("button")
+        .find((button) => button.text() === "Snooze")
+        ?.trigger("click");
+
+    await wrapper.find('button[aria-label="Snooze repo/app:1.0"]').trigger("click");
+    expect(wrapper.find('[role="dialog"]').text()).toContain("media/web, media/worker");
+    await confirm();
+    await flushPromises();
+
+    expect(loadSnoozes).toHaveBeenCalledWith("active");
+    expect(wrapper.find('[role="dialog"]').text()).toContain(
+      "Snoozed media/web, but media/worker was not saved: database is locked. Try again to snooze the rest.",
+    );
+
+    failWorker = false;
+    await confirm();
+    await flushPromises();
+
+    expect(createSnooze.mock.calls.map(([serviceKey]) => serviceKey)).toEqual([
+      "media/web",
+      "media/worker",
+      "media/worker",
+    ]);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Snoozed media/web, media/worker until");
+  });
+
+  it("treats a snooze that saved before its refresh failed as saved", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(settings, "createSnooze").mockImplementation(async (serviceKey) => {
+      settings.snoozes = [snooze({ service_key: serviceKey })];
+      throw new Error("snooze list refresh failed");
+    });
+    vi.spyOn(settings, "loadSnoozes").mockResolvedValue();
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    await wrapper
+      .find('[role="dialog"]')
+      .findAll("button")
+      .find((button) => button.text() === "Snooze")
+      ?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Snoozed media/app until");
+  });
+
+  it("says it cannot confirm a snooze when the save and the re-read both fail", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    vi.spyOn(settings, "createSnooze").mockRejectedValue(new Error("network down"));
+    vi.spyOn(settings, "loadSnoozes").mockRejectedValue(new Error("network down"));
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    await wrapper
+      .find('[role="dialog"]')
+      .findAll("button")
+      .find((button) => button.text() === "Snooze")
+      ?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').text()).toContain(
+      "WUDup could not confirm whether the snooze was saved: network down. Check Snoozes before trying again.",
+    );
+  });
+
+  it("counts the snooze end time from each opening of the dialog", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const opened = new Date(2026, 9, 27, 9, 0, 0);
+      vi.setSystemTime(opened);
+      const item = pendingGroupedItem({ line_no: 1, image: "repo/app:1.0", repo: "repo/app" });
+      const target = { group: pendingGrouping([item]).groups[0]!, item };
+      const wrapper = mount(PendingSnoozeDialog, {
+        props: { target: null },
+        global: { plugins: [createPinia()], stubs: naiveStubs },
+      });
+      const dayMs = 24 * 60 * 60 * 1000;
+      const untilText = (from: Date) =>
+        `until ${new Date(from.getTime() + dayMs).toLocaleString()}`;
+
+      await wrapper.setProps({ target });
+      expect(wrapper.text()).toContain(untilText(opened));
+
+      await wrapper.setProps({ target: null });
+      const reopened = new Date(opened.getTime() + 2 * 60 * 60 * 1000);
+      vi.setSystemTime(reopened);
+      await wrapper.setProps({ target: { ...target } });
+      expect(wrapper.text()).toContain(untilText(reopened));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes the snooze dialog without saving", async () => {
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    const createSnooze = vi.spyOn(settings, "createSnooze");
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    await wrapper.find('button[aria-label^="Snooze "]').trigger("click");
+    wrapper
+      .findComponent(PendingSnoozeDialog)
+      .findComponent(naiveStubs.NModal)
+      .vm.$emit("update:show", false);
+    await flushPromises();
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(createSnooze).not.toHaveBeenCalled();
+  });
+
+  it("disables inline snoozing in read-only mode", async () => {
+    const { pinia, settings, updates } = setupStores(false);
+    settings.snoozes = [];
+    updates.pending = pendingResponse();
+    mockPendingLifecycle(settings, updates);
+    const createSnooze = vi.spyOn(settings, "createSnooze");
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    const button = wrapper.find('button[aria-label^="Snooze "]');
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toContain("Read-only mode is active.");
+    await button.trigger("click");
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(createSnooze).not.toHaveBeenCalled();
   });
 
   it("shows matched snoozes before stale entries without selecting them in bulk", async () => {
