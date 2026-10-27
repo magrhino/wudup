@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SnoozeKind } from "../src/api/client";
@@ -1262,6 +1262,34 @@ describe("pending view selection actions", () => {
     expect(wrapper.find('[role="dialog"]').text()).toContain(
       "WUDup could not confirm whether the snooze was saved: network down. Check Snoozes before trying again.",
     );
+  });
+
+  it("counts the snooze end time from each opening of the dialog", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const opened = new Date(2026, 9, 27, 9, 0, 0);
+      vi.setSystemTime(opened);
+      const item = pendingGroupedItem({ line_no: 1, image: "repo/app:1.0", repo: "repo/app" });
+      const target = { group: pendingGrouping([item]).groups[0]!, item };
+      const wrapper = mount(PendingSnoozeDialog, {
+        props: { target: null },
+        global: { plugins: [createPinia()], stubs: naiveStubs },
+      });
+      const dayMs = 24 * 60 * 60 * 1000;
+      const untilText = (from: Date) =>
+        `until ${new Date(from.getTime() + dayMs).toLocaleString()}`;
+
+      await wrapper.setProps({ target });
+      expect(wrapper.text()).toContain(untilText(opened));
+
+      await wrapper.setProps({ target: null });
+      const reopened = new Date(opened.getTime() + 2 * 60 * 60 * 1000);
+      vi.setSystemTime(reopened);
+      await wrapper.setProps({ target: { ...target } });
+      expect(wrapper.text()).toContain(untilText(reopened));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("closes the snooze dialog without saving", async () => {

@@ -32,6 +32,8 @@ const durationHours = ref(24);
 const reason = ref("");
 const error = ref("");
 const saving = ref(false);
+// Date.now() is not reactive, so the shown end time counts from when the dialog opened.
+const openedAt = ref(Date.now());
 
 const durationOptions = [
   { label: "1 day", value: 24 },
@@ -53,20 +55,21 @@ const changeLabels = computed(() =>
     : null,
 );
 const untilLabel = computed(() =>
-  new Date(futureMs(durationHours.value)).toLocaleString(),
+  new Date(futureMs(durationHours.value, openedAt.value)).toLocaleString(),
 );
 
 watch(
   () => props.target,
   () => {
+    openedAt.value = Date.now();
     durationHours.value = 24;
     reason.value = "";
     error.value = "";
   },
 );
 
-function futureMs(hours: number): number {
-  return Date.now() + Number(hours) * 60 * 60 * 1000;
+function futureMs(hours: number, from = Date.now()): number {
+  return from + Number(hours) * 60 * 60 * 1000;
 }
 
 function updateShow(show: boolean): void {
