@@ -118,7 +118,7 @@ def test_state_read_endpoints_list_existing_sqlite_rows(
                     log_file,
                     metadata_json
                 )
-                VALUES (?, ?, 'success', 0, 'apply', '', '', '{}')
+                VALUES (?, ?, 'success', 0, 'stop', '', '', '{}')
                 """,
                 (now.isoformat(), now.isoformat()),
             )

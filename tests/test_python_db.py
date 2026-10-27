@@ -28,6 +28,7 @@ from wudup.db import (
     insert_update_event,
     insert_update_run,
     open_db,
+    service_updated_since,
     update_pending_update,
     upsert_known_image,
     upsert_tag_exclusion_rule,
@@ -228,6 +229,49 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("idx_update_events_service_latest", indexes)
         self.assertEqual(tuple(event), ("bindery", "bindery"))
         self.assertEqual(migration_count, 1)
+
+    def test_service_updated_since_ignores_audit_and_dry_runs(self) -> None:
+        with db_connection(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            since = "2026-10-26T10:00:00+00:00"
+            later = "2026-10-27T10:00:00+00:00"
+            for mode, dry_run in (("web-state", False), ("web-auth", False), ("live", True)):
+                run_id = insert_update_run(
+                    conn, status="success", mode=mode, dry_run=dry_run
+                )
+                insert_update_event(
+                    conn,
+                    run_id=run_id,
+                    service_name="db",
+                    stack_name="stack",
+                    image="repo/db:1",
+                    status="success",
+                    created_at=later,
+                )
+            audit_only = service_updated_since(
+                conn, service_key="stack/db", created_at=since
+            )
+            run_id = insert_update_run(conn, status="success", mode="pause")
+            insert_update_event(
+                conn,
+                run_id=run_id,
+                service_name="db",
+                stack_name="stack",
+                image="repo/db:2",
+                status="success",
+                created_at=later,
+            )
+            updated = service_updated_since(
+                conn, service_key="stack/db", created_at=since
+            )
+            other_stack = service_updated_since(
+                conn, service_key="other/db", created_at=since
+            )
+
+        self.assertFalse(audit_only)
+        self.assertTrue(updated)
+        self.assertFalse(other_stack)
 
     def test_init_db_sets_user_version_to_current_schema(self) -> None:
         with db_connection(":memory:") as conn:
@@ -1132,6 +1176,7 @@ class DatabaseTests(unittest.TestCase):
                 conn,
                 started_at="2026-05-18T12:00:00+00:00",
                 status="success",
+                mode="stop",
             )
             insert_dependency_snooze(
                 conn,
