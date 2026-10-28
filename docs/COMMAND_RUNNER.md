@@ -128,6 +128,25 @@ runtime config model. It writes env files and optional Compose overrides that
 use the same variables documented in [Configuration](CONFIGURATION.md), refuses
 to overwrite existing files unless `--backup-existing` is set, and keeps
 `WUD_WEB_MUTATIONS_ENABLED=false` unless `--enable-web-mutations` is supplied.
+The `wudup` CLI runs outside the container and needs Python 3.11 or newer. The
+WebUI does not need it: [Start The WebUI](DEPLOYMENT.md#start-the-webui) uses
+the downloaded env example instead.
+
+To generate WebUI config, create WUD's password file as in
+[Start The WebUI](DEPLOYMENT.md#start-the-webui), then set `WUDUP_SECRETS_DIR`
+in the generated env file to the absolute path of its directory. Otherwise
+Compose looks for `secrets/` next to the example file, under `docs/examples/`:
+
+```bash
+wudup init --profile hardened --stack-root /srv/docker --non-interactive
+docker compose --env-file "$HOME/.config/wudup/hardened.env" \
+  -f docs/examples/docker-compose.hardened.yml \
+  -f "$HOME/.config/wudup/docker-compose.hardened.override.yml" \
+  up -d
+```
+
+Use `--profile webui` with `docs/examples/docker-compose.webui.yml` for the
+raw-socket example; it needs no override file.
 
 Helper-only container setup generates a Compose override by default:
 

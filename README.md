@@ -48,24 +48,12 @@ disabled unless `WUD_WEB_MUTATIONS_ENABLED=true` is set intentionally.
 
 ### Start The WebUI
 
-If the `wudup` CLI is available, generate first-run hardened WebUI config
-instead of downloading the env template:
+Create one directory for WUDup with the hardened Compose example, an env file,
+and WUD's administrator password, which WUD and WUDup both read from
+`secrets/`:
 
 ```bash
-wudup init --profile hardened --stack-root /srv/docker --non-interactive
-```
-
-That writes a hardened env file and Compose override under
-`$HOME/.config/wudup/`. Use them with the hardened Compose example before
-starting the service. Create WUD's password file as shown below and set
-`WUDUP_SECRETS_DIR` in the generated env file to the absolute path of its
-directory.
-
-To start without the CLI, download the published hardened WebUI Compose example
-plus an env template in your deployment directory, and generate WUD's
-administrator password. WUD and WUDup both read it from `secrets/`:
-
-```bash
+mkdir -p wudup && cd wudup
 curl -fsSLo docker-compose.yml \
   https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/docker-compose.hardened.yml
 curl -fsSLo .env \
@@ -91,9 +79,11 @@ a password with at least 12 characters, then sign in at
 `http://127.0.0.1:7417`. The example binds browser access to loopback by
 default.
 
-See the [WebUI container guide](docs/wiki/webui-container.md) for the full
-Compose walkthrough, login, admin recovery, LAN or reverse-proxy exposure,
-SQLite persistence, managed preferences, and mutation mode.
+See [Start The WebUI](docs/DEPLOYMENT.md#start-the-webui) for what each file
+does and other ways to start, and the
+[WebUI container guide](docs/wiki/webui-container.md) for login, admin
+recovery, LAN or reverse-proxy exposure, SQLite persistence, managed
+preferences, and mutation mode.
 
 ## Other Deployment Paths
 

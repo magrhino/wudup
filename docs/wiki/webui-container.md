@@ -6,35 +6,10 @@ and keeps browser access bound to loopback unless you expose it intentionally.
 
 ## Start The WebUI
 
-Download the Compose example and the env example into one deployment
-directory, generate WUD's administrator password, review the host stack path
-and browser exposure settings, then start the service:
-
-```bash
-mkdir -p wudup && cd wudup
-curl -fsSLo docker-compose.yml \
-  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/docker-compose.webui.yml
-curl -fsSLo .env \
-  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
-chmod 600 .env
-mkdir -m 700 secrets
-openssl rand -hex 24 > secrets/wud_api_password
-chmod 644 secrets/wud_api_password
-# Edit .env: set HOST_DOCKER_BASE.
-docker compose up -d
-docker compose logs wudup
-```
-
-WUD 9 requires an administrator. WUD creates it from `secrets/wud_api_password`
-on first start, and WUDup signs in to WUD's API with the same file, so there is
-one password to manage. See [WUD API authentication](#wud-api-authentication).
-
-Run every `docker compose` command in this guide from that directory. Compose
-reads `.env` from the directory that holds `docker-compose.yml`: it fills in
-`${VAR}` references, and the `wudup` service loads the same file with
-`env_file` (Compose 2.24 or newer). Passing the file with `--env-file` only fills
-in `${VAR}` references; to keep it elsewhere, set `WUDUP_ENV_FILE` in it to the
-file's own path. See
+Follow [Start The WebUI](../DEPLOYMENT.md#start-the-webui): it sets up one
+directory with `docker-compose.yml` (the hardened example), `.env`, and
+`secrets/`, then runs `docker compose up -d`. Run every `docker compose` command
+in this guide from that directory. For how `.env` reaches WUDup, see
 [Configuration](../CONFIGURATION.md#how-settings-reach-the-container).
 
 The example publishes the browser endpoint on loopback:
@@ -49,10 +24,10 @@ container so Docker Compose can resolve relative bind mounts, `.env` files,
 `env_file` entries, and build contexts from the host path the Docker daemon
 actually sees.
 
-For a socket-proxy deployment, use
-[`docs/examples/docker-compose.hardened.yml`](../examples/docker-compose.hardened.yml).
-That example exposes the Docker socket only to the socket proxy sidecar and
-points WUD/WUDup at `tcp://socket-proxy-wudup:2375`.
+The hardened example exposes the Docker socket only to the socket proxy
+sidecar and points WUD and WUDup at `tcp://socket-proxy-wudup:2375`.
+[`docker-compose.webui.yml`](../examples/docker-compose.webui.yml) mounts the
+raw socket into both instead; use it only when the socket proxy does not fit.
 
 Run `doctor` after changing mounts, Docker access, or helper environment:
 
