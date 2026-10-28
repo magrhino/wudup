@@ -201,7 +201,11 @@ def test_self_update_endpoint_marks_audit_failed_when_pull_fails(
     monkeypatch,
 ) -> None:
     fake_env, fake_root = _fake_docker_env(tmp_path)
-    (fake_root / "pull_fail").write_text("pull failed\n", encoding="utf-8")
+    (fake_root / "pull_fail").write_text(
+        "Error response from daemon: denied: requested access to the resource is denied"
+        " (config /root/.docker/config.json)\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(self_update_module, "current_tag", lambda: "v0.24.2")
     monkeypatch.setattr(self_update_module, "fetch_latest_release_tag", lambda: "v0.25.0")
     monkeypatch.setattr(
@@ -239,7 +243,10 @@ def test_self_update_endpoint_marks_audit_failed_when_pull_fails(
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"].startswith("could not pull self-update image")
+    assert response.json()["detail"] == (
+        "could not pull self-update image: Error response from daemon: denied: "
+        "requested access to the resource is denied (config [REDACTED_PATH])"
+    )
     calls = _fake_docker_calls(fake_root)
     assert "pull ghcr.io/magrhino/wudup:latest" in calls
     assert "restart --time 10 wudup" not in calls
@@ -253,7 +260,8 @@ def test_self_update_endpoint_marks_audit_failed_when_pull_fails(
     assert row["finished_at"]
     metadata = json.loads(row["metadata_json"])
     assert metadata["status"] == "failure"
-    assert "docker pull ghcr.io/magrhino/wudup:latest" in metadata["error"]
+    assert "requested access to the resource is denied" in metadata["error"]
+    assert "Command failed with exit code" not in metadata["error"]
 
 
 def test_self_update_endpoint_rejects_active_self_update(

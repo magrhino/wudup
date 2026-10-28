@@ -82,6 +82,9 @@ from .web_models import (
     WebSettings,
 )
 from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import (
+    redact_unknown_absolute_paths as _redact_unknown_absolute_paths,
+)
 from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
 
@@ -264,11 +267,8 @@ def _apply_self_update_pull(
         )
         raise HTTPException(
             status_code=500,
-            detail=_safe_exception_detail(
-                settings,
-                "could not pull self-update image",
-                exc,
-            ),
+            detail="could not pull self-update image: "
+            + _redact_unknown_absolute_paths(_redact_sensitive_text(settings, detail)),
         ) from exc
     prepared_image_id = docker.image_id(status.target_image)
     verified_running_image_id = docker.try_container_image_id(status.restart_container)
