@@ -131,7 +131,12 @@ def test_onboarding_wud_api_access_suggests_credentials(
         item for item in response.json()["items"] if item["key"] == "wud-api-access"
     )
 
+    body = response.json()
     assert response.status_code == 200
+    # A required item keeps the checklist open until WUD API access works.
+    assert "wud-api-access" in web_onboarding.ONBOARDING_REQUIRED_KEYS
+    assert body["visible"] is True
+    assert body["all_passed"] is False
     assert item["title"] == "WUD API access"
     assert item["status"] == "WARN"
     assert item["check_codes"] == ["wud-api"]
