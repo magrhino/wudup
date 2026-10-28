@@ -114,11 +114,11 @@
       "re_review": "When a change adds scanner execution or result storage that other routes also use."
     },
     "src/wudup/web_self_update.py": {
-      "ceiling": 1580,
-      "reason": "Owns WebUI self-update and also the separate container-restart route family and its web-container-restart audit records. Baseline size 1580 lines; no headroom while the extraction is deferred.",
+      "ceiling": 1581,
+      "reason": "Owns WebUI self-update and also the separate container-restart route family and its web-container-restart audit records. Baseline size 1580 lines; raised to 1581 for #817, which redacts absolute paths from the self-update pull error inside the existing pull handler (self-update work, not container restart). No other headroom while the extraction is deferred.",
       "deferred": true,
       "follow_up": "https://github.com/magrhino/wudup/issues/918",
-      "re_review": "When the container-restart extraction lands, lower or remove this ceiling."
+      "re_review": "When the container-restart extraction lands, lower or remove this ceiling; before any further raise, prefer landing that extraction."
     },
     "src/wudup/web_settings.py": {
       "ceiling": 1060,

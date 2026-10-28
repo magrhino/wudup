@@ -82,6 +82,9 @@ from .web_models import (
     WebSettings,
 )
 from .web_redaction import redact_sensitive_text as _redact_sensitive_text
+from .web_redaction import (
+    redact_unknown_absolute_paths as _redact_unknown_absolute_paths,
+)
 from .web_redaction import safe_exception_detail as _safe_exception_detail
 from .web_request_context import request_settings as _settings
 
@@ -249,26 +252,24 @@ def _apply_self_update_pull(
     try:
         docker.pull_image(status.target_image)
     except CommandError as exc:
-        detail = exc.result.stderr.strip() or str(exc)
+        detail = _redact_unknown_absolute_paths(
+            _redact_sensitive_text(settings, exc.result.stderr.strip() or str(exc))
+        )
         LOGGER.error(
             "WebUI self-update image pull failed for %s -> %s: %s",
             status.target_image,
             status.restart_container,
-            _redact_sensitive_text(settings, detail),
+            detail,
         )
         _safe_update_self_update_audit(
             settings,
             audit_run_id,
             status="failure",
-            error=_redact_sensitive_text(settings, detail),
+            error=detail,
         )
         raise HTTPException(
             status_code=500,
-            detail=_safe_exception_detail(
-                settings,
-                "could not pull self-update image",
-                exc,
-            ),
+            detail=f"could not pull self-update image: {detail}",
         ) from exc
     prepared_image_id = docker.image_id(status.target_image)
     verified_running_image_id = docker.try_container_image_id(status.restart_container)

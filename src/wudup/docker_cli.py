@@ -150,7 +150,9 @@ class DockerCli:
         )
 
     def pull_image(self, image: str) -> CommandResult:
-        return self.runner.run([self.executable, "pull", image], check=True)
+        # Stream pull progress to the container logs, keeping a bounded stderr
+        # tail so a failure can report Docker's error.
+        return self.runner.run_streaming([self.executable, "pull", image], check=True)
 
     def inspect(self, target: str, fmt: str) -> list[str]:
         return self.runner.capture_lines(
