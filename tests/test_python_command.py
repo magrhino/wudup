@@ -506,6 +506,7 @@ class CommandRunnerTests(unittest.TestCase):
             "COMPOSE_PATH_SEPARATOR": ":",
             "COMPOSE_PROFILES": "extras",
             "COMPOSE_ENV_FILES": ".env",
+            "COMPOSE_DISABLE_ENV_FILE": "1",
             "WUD_AUTH_ADMIN_USER": "admin",
             "WUD_AUTH_ADMIN_PASSWORD": "example-wud-admin-password",
         }

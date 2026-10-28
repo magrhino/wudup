@@ -33,16 +33,17 @@ A file passed with `--env-file` only fills in `${VAR}` references. To keep the
 env file somewhere else, set `WUDUP_ENV_FILE` in it to the file's own path (or
 export it in the shell) so the `wudup` service loads that file instead of
 `.env`. Variables exported only in the shell, or set in a Portainer stack's
-environment, fill in `${VAR}` references but do not reach WUDup unless the file
-`env_file` loads also contains them.
+environment, fill in `${VAR}` references. They reach WUDup only through the
+variables the `environment:` block interpolates (such as `HOST_DOCKER_BASE` and
+`WUD_WEB_PORT`) or when the file `env_file` loads also contains them.
 
 Every variable WUDup receives also reaches the `docker compose` commands it
 runs for your stacks, where it overrides the same name in a stack's own `.env`,
 so keep only WUDup and WUD settings in this file. WUDup removes
 `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`,
-`COMPOSE_PATH_SEPARATOR`, and WUD's `WUD_AUTH_ADMIN_USER`/`WUD_AUTH_ADMIN_PASSWORD`
-before it runs Compose for your stacks, because in its own environment they
-describe the WUDup deployment.
+`COMPOSE_PATH_SEPARATOR`, `COMPOSE_DISABLE_ENV_FILE`, and WUD's
+`WUD_AUTH_ADMIN_USER`/`WUD_AUTH_ADMIN_PASSWORD` before it runs Compose for your
+stacks, because in its own environment they describe the WUDup deployment.
 
 WUD receives only the variables listed under its own service and never loads
 `.env` with `env_file`. WUD reads its own `WUD_*` settings, so do not pass

@@ -57,9 +57,11 @@ When you switch to the current examples:
   `WUDUP_ENV_FILE=<absolute path to that file>` to it; `--env-file` alone only
   fills in `${VAR}` references. `wudup init` writes this line for you.
 - Values exported only in the shell, or set in a Portainer stack's
-  environment, no longer reach WUDup. Put them in the env file the `wudup`
-  service loads. In Portainer, set `WUDUP_ENV_FILE=stack.env` in the stack's
-  environment.
+  environment, no longer reach WUDup unless the `environment:` block
+  interpolates them (as it does `HOST_DOCKER_BASE`, `WUD_WEB_PORT`,
+  `WUD_API_STARTUP_WAIT_SECONDS`, and `OUT_UID`/`OUT_GID`). Put the rest in the
+  env file the `wudup` service loads. In Portainer, set
+  `WUDUP_ENV_FILE=stack.env` in the stack's environment.
 - Settings the earlier examples never passed to WUDup now take effect when they
   are in `.env`, for example `WUD_COMPOSE_IGNORE_PATHS`,
   `WUD_RELEASE_NOTES_ENABLED`, `WUD_WEB_RESTART_CONTAINER`, and
@@ -68,7 +70,8 @@ When you switch to the current examples:
   for your stacks, where it overrides the same name in a stack's own `.env`.
   Keep only WUDup and WUD settings in this file. WUDup removes
   `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`,
-  `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, and WUD's
+  `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, `COMPOSE_DISABLE_ENV_FILE`,
+  and WUD's
   `WUD_AUTH_ADMIN_USER`/`WUD_AUTH_ADMIN_PASSWORD` first, so those apply only to
   the WUDup deployment.
 - The hardened example now fixes `WUD_OUT_FILE` at `/out/images.todo`, like the

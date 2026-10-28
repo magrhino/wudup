@@ -181,7 +181,12 @@ def _sensitive_redaction_values(
 
 
 def _secret_url_fragments(value: str) -> list[str]:
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        # Not a usable URL, such as a password starting with "//["; the caller
+        # still redacts the whole value.
+        return []
     if not parsed.scheme or not parsed.netloc:
         return []
     fragments: list[str] = []

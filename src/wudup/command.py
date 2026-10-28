@@ -416,10 +416,12 @@ _COMPOSE_OPTIONS_WITH_VALUE = frozenset(
     {"-f", "--file", "-p", "--project-name", "--project-directory", "--env-file"}
 )
 # Compose reads these to choose a project's name, files, profiles, and env
-# files. In WUDup's environment they describe the WUDup deployment itself, so
-# they must not retarget the stacks WUDup runs Compose for.
+# files, or to skip the project's .env. In WUDup's environment they describe
+# the WUDup deployment itself, so they must not retarget the stacks WUDup runs
+# Compose for.
 _COMPOSE_PROJECT_ENV = frozenset(
     {
+        "COMPOSE_DISABLE_ENV_FILE",
         "COMPOSE_ENV_FILES",
         "COMPOSE_FILE",
         "COMPOSE_PATH_SEPARATOR",

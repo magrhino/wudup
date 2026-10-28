@@ -90,6 +90,18 @@ def test_wud_bootstrap_password_is_redacted_but_not_a_listed_setting():
     assert "WUD_AUTH_ADMIN_PASSWORD" not in redaction.SENSITIVE_ENV_KEYS
 
 
+def test_secret_that_is_not_a_valid_url_is_still_redacted():
+    settings = SimpleNamespace(
+        auth_token="",
+        wud_api_client=SimpleNamespace(secret_values=()),
+        command_env={"WUD_AUTH_ADMIN_PASSWORD": "//[ExamplePassword123!"},
+    )
+
+    assert redaction.redact_sensitive_text(
+        settings, "value=//[ExamplePassword123!"
+    ) == "value=<redacted>"
+
+
 @pytest.mark.parametrize(("dev", "authorization", "cookie", "actor"), [
     (True, "Bearer wrong", "", "dev"),
     (False, "Bearer example-token-value", "session-value", "bearer"),

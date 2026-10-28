@@ -371,7 +371,8 @@ docker compose pull wudup
 docker compose up -d --force-recreate wudup
 ```
 
-For local image development, use the build example instead:
+For local image development, run the build example from a repository checkout
+instead:
 
 ```bash
 docker compose -f docs/examples/docker-compose.build.yml build wudup
