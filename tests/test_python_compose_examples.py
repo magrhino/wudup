@@ -22,6 +22,7 @@ COMPOSE_EXAMPLES = (
 WEBUI_ENVIRONMENT = {
     "docker-compose.webui.yml": {
         "DOCKER_BASE",
+        "HOST_DOCKER_BASE",
         "WUD_OUT_FILE",
         "WUD_LOG_DIR",
         "WUD_DB_PATH",
@@ -33,7 +34,10 @@ WEBUI_ENVIRONMENT = {
     "docker-compose.hardened.yml": {
         "DOCKER_HOST",
         "DOCKER_BASE",
+        "HOST_DOCKER_BASE",
         "WUD_OUT_FILE",
+        "WUD_LOG_DIR",
+        "WUD_DB_PATH",
         "HOME",
         "WUD_WEB_PORT",
         "WUD_API_STARTUP_WAIT_SECONDS",
@@ -65,7 +69,7 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
                 wudup = _load(name)["services"]["wudup"]
                 self.assertEqual(
                     wudup["env_file"],
-                    [{"path": ".env", "required": False}],
+                    [{"path": "${WUDUP_ENV_FILE:-.env}", "required": False}],
                 )
 
     def test_wud_service_never_loads_dotenv(self) -> None:
@@ -78,6 +82,17 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
             with self.subTest(name=name):
                 environment = _load(name)["services"]["wudup"]["environment"]
                 self.assertEqual(set(environment), expected)
+                self.assertEqual(environment["WUD_OUT_FILE"], "/out/images.todo")
+
+    def test_host_docker_base_matches_the_mounted_docker_base(self) -> None:
+        # WUDup maps stacks from DOCKER_BASE to HOST_DOCKER_BASE, so both must
+        # come from the same interpolation as the stack mount, never from .env.
+        for name in COMPOSE_EXAMPLES:
+            with self.subTest(name=name):
+                environment = _load(name)["services"]["wudup"]["environment"]
+                self.assertEqual(
+                    environment["HOST_DOCKER_BASE"], environment["DOCKER_BASE"]
+                )
 
     @unittest.skipUnless(_docker_compose_available(), "docker compose unavailable")
     def test_dotenv_reaches_wudup_and_fixed_paths_win(self) -> None:
@@ -109,6 +124,7 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
         wudup = services["wudup"]["environment"]
         self.assertEqual(wudup["WUD_COMPOSE_IGNORE_PATHS"], "old,archive")
         self.assertEqual(wudup["DOCKER_BASE"], "/srv/stacks")
+        self.assertEqual(wudup["HOST_DOCKER_BASE"], "/srv/stacks")
         self.assertEqual(wudup["WUD_OUT_FILE"], "/out/images.todo")
         self.assertEqual(wudup["WUD_DB_PATH"], "/logs/wudup.sqlite")
         self.assertEqual(wudup["WUD_WEB_PORT"], "8080")

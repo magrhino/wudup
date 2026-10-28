@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from collections.abc import Sequence
@@ -46,6 +49,7 @@ class InitConfigTests(unittest.TestCase):
         run_init(answers)
 
         content = config_file.read_text(encoding="utf-8")
+        self.assertIn(f"WUDUP_ENV_FILE={config_file}", content)
         self.assertIn(f"HOST_DOCKER_BASE={self.root / 'docker'}", content)
         self.assertIn("WEBUI_HTTP_BIND=127.0.0.1", content)
         self.assertIn("WUD_WEB_PORT=7417", content)
@@ -628,6 +632,65 @@ class InitConfigTests(unittest.TestCase):
                     stdout.getvalue(),
                 )
                 self.assertIn(str(config_file), stdout.getvalue())
+
+    @unittest.skipUnless(
+        shutil.which("docker") is not None
+        and subprocess.run(
+            ["docker", "compose", "version"], capture_output=True, check=False
+        ).returncode
+        == 0,
+        "docker compose unavailable",
+    )
+    def test_generated_env_reaches_wudup_through_the_compose_examples(self) -> None:
+        for profile in ("webui", "hardened"):
+            with self.subTest(profile=profile):
+                answers = answers_from_namespace(
+                    self._args(
+                        profile=profile,
+                        config_file=str(self.root / f"{profile}.env"),
+                        # A relative log dir renders as a named volume (#949).
+                        log_dir=str(self.root / "logs"),
+                        compose_override=str(
+                            self.root / f"docker-compose.{profile}.override.yml"
+                        ),
+                        web_exposure="lan" if profile == "webui" else None,
+                        public_origin="http://wud.lan:7417"
+                        if profile == "webui"
+                        else None,
+                        enable_web_mutations=True,
+                        no_doctor=True,
+                    ),
+                    environ=self._env(),
+                )
+                run_init(answers)
+                with answers.config_file.open("a", encoding="utf-8") as env_file:
+                    env_file.write("WUD_API_AUTH_BASIC_USER=admin\n")
+                command = [
+                    "docker",
+                    "compose",
+                    "--env-file",
+                    str(answers.config_file),
+                    "-f",
+                    str(REPO_ROOT / "docs" / "examples" / f"docker-compose.{profile}.yml"),
+                ]
+                if answers.compose_override is not None:
+                    command.extend(("-f", str(answers.compose_override)))
+                result = subprocess.run(
+                    [*command, "config", "--format", "json"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                environment = json.loads(result.stdout)["services"]["wudup"][
+                    "environment"
+                ]
+                self.assertEqual(environment["WUD_API_AUTH_BASIC_USER"], "admin")
+                self.assertEqual(environment["WUD_TIMEZONE"], "UTC")
+                if profile == "webui":
+                    self.assertEqual(environment["WUD_WEB_MUTATIONS_ENABLED"], "true")
+                    self.assertEqual(
+                        environment["WUD_WEB_PUBLIC_ORIGIN"], "http://wud.lan:7417"
+                    )
 
     def _env(self) -> dict[str, str]:
         return {"HOME": str(self.root), "PATH": ""}

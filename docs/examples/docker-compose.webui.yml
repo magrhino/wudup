@@ -26,17 +26,19 @@ services:
     depends_on:
       wud:
         condition: service_healthy
-    # WUDup reads its settings from the .env file next to this Compose file.
-    # See docs/CONFIGURATION.md for every variable. WUD never receives this
-    # file, and the values below win over it.
+    # WUDup reads its settings from the .env file next to this Compose file,
+    # or from the file WUDUP_ENV_FILE names. See docs/CONFIGURATION.md for
+    # every variable. WUD never receives this file, and the values below win
+    # over it.
     # WUD 9 also requires WUD API credentials in .env; WUD's bootstrap
     # credentials are not reused. See wiki/webui-container.md#wud-api-authentication.
     env_file:
-      - path: .env
+      - path: ${WUDUP_ENV_FILE:-.env}
         required: false
     environment:
       # Fixed container paths that match the mounts below.
       DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
+      HOST_DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
       WUD_OUT_FILE: /out/images.todo
       WUD_LOG_DIR: /logs
       WUD_DB_PATH: /logs/wudup.sqlite

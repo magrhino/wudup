@@ -98,7 +98,7 @@ class CommandRunner:
 
         argv = normalize_args(args)
         cwd_path = Path(cwd) if cwd is not None else None
-        merged_env = self._merged_env(env)
+        merged_env = self._command_env(argv, env)
 
         def execute() -> tuple[CommandResult, OSError | None]:
             with request_scope.timed(_timing_phase(argv)):
@@ -196,7 +196,7 @@ class CommandRunner:
             completed = subprocess.run(
                 argv,
                 cwd=str(cwd_path) if cwd_path is not None else None,
-                env=self._merged_env(env),
+                env=self._command_env(argv, env),
                 stdin=subprocess.DEVNULL,
                 check=False,
             )
@@ -244,7 +244,7 @@ class CommandRunner:
             process = subprocess.Popen(
                 argv,
                 cwd=str(cwd_path) if cwd_path is not None else None,
-                env=self._merged_env(env),
+                env=self._command_env(argv, env),
                 stdin=subprocess.DEVNULL,
                 stdout=slave_fd,
                 stderr=slave_fd,
@@ -323,7 +323,7 @@ class CommandRunner:
             process = subprocess.Popen(
                 argv,
                 cwd=str(cwd_path) if cwd_path is not None else None,
-                env=self._merged_env(env),
+                env=self._command_env(argv, env),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -382,6 +382,23 @@ class CommandRunner:
 
         return None if self._env is None else tuple(sorted(self._env.items()))
 
+    def _command_env(
+        self,
+        argv: tuple[str, ...],
+        env: Mapping[str, str] | None,
+    ) -> dict[str, str] | None:
+        merged = self._merged_env(env)
+        if not _is_compose_command(argv):
+            return merged
+        source = os.environ if merged is None else merged
+        if _COMPOSE_EXCLUDED_ENV.isdisjoint(source):
+            return merged
+        return {
+            name: value
+            for name, value in source.items()
+            if name not in _COMPOSE_EXCLUDED_ENV
+        }
+
     def _merged_env(self, env: Mapping[str, str] | None) -> dict[str, str] | None:
         if self._env is None and env is None:
             return None
@@ -398,6 +415,22 @@ class CommandRunner:
 _COMPOSE_OPTIONS_WITH_VALUE = frozenset(
     {"-f", "--file", "-p", "--project-name", "--project-directory", "--env-file"}
 )
+# Compose reads these to choose a project's name, files, profiles, and env
+# files. In WUDup's environment they describe the WUDup deployment itself, so
+# they must not retarget the stacks WUDup runs Compose for.
+_COMPOSE_PROJECT_ENV = frozenset(
+    {
+        "COMPOSE_ENV_FILES",
+        "COMPOSE_FILE",
+        "COMPOSE_PATH_SEPARATOR",
+        "COMPOSE_PROFILES",
+        "COMPOSE_PROJECT_NAME",
+    }
+)
+# WUD's bootstrap administrator reaches WUDup's environment through the Compose
+# .env file. Keep it out of managed stacks, which could otherwise interpolate it.
+_WUD_BOOTSTRAP_ENV = frozenset({"WUD_AUTH_ADMIN_PASSWORD", "WUD_AUTH_ADMIN_USER"})
+_COMPOSE_EXCLUDED_ENV = _COMPOSE_PROJECT_ENV | _WUD_BOOTSTRAP_ENV
 _REUSABLE_DOCKER_READS = frozenset({"inspect", "ps", "version"})
 _REUSABLE_COMPOSE_READS = frozenset({"config", "ps", "version"})
 
@@ -417,6 +450,10 @@ def _compose_subcommand(tokens: Sequence[str]) -> str:
             return ""
         return token
     return ""
+
+
+def _is_compose_command(argv: Sequence[str]) -> bool:
+    return len(argv) > 1 and Path(argv[0]).name == "docker" and argv[1] == "compose"
 
 
 def _is_reusable_read(argv: tuple[str, ...]) -> bool:

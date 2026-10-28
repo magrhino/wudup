@@ -77,6 +77,19 @@ def test_recursive_redaction_preserves_input_and_exact_replacements(tmp_path: Pa
     ) == "could not read example: <redacted> [REDACTED_PATH]"
 
 
+def test_wud_bootstrap_password_is_redacted_but_not_a_listed_setting():
+    settings = SimpleNamespace(
+        auth_token="",
+        wud_api_client=SimpleNamespace(secret_values=()),
+        command_env={"WUD_AUTH_ADMIN_PASSWORD": "example-wud-admin-password"},
+    )
+
+    assert redaction.redact_sensitive_text(
+        settings, "compose config: WUD_AUTH_ADMIN_PASSWORD=example-wud-admin-password"
+    ) == "compose config: WUD_AUTH_ADMIN_PASSWORD=<redacted>"
+    assert "WUD_AUTH_ADMIN_PASSWORD" not in redaction.SENSITIVE_ENV_KEYS
+
+
 @pytest.mark.parametrize(("dev", "authorization", "cookie", "actor"), [
     (True, "Bearer wrong", "", "dev"),
     (False, "Bearer example-token-value", "session-value", "bearer"),

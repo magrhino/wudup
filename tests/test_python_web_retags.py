@@ -399,9 +399,11 @@ def test_retag_targets_does_not_match_a_custom_compose_project(
     assert response.json()["items"][0]["runtime_state"] == "not-running"
 
 
-def test_retag_targets_matches_the_configured_compose_project(
+def test_retag_targets_ignore_wudup_compose_project_name(
     tmp_path: Path,
 ) -> None:
+    # WUDup's own COMPOSE_PROJECT_NAME names the WUDup deployment, not the
+    # managed stack, so Compose must derive the stack's project itself.
     fixture = _make_retag_fixture(
         tmp_path,
         env={"COMPOSE_PROJECT_NAME": "custom"},
@@ -415,7 +417,7 @@ def test_retag_targets_matches_the_configured_compose_project(
     response = fixture.client.get("/api/v1/retag-targets")
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["runtime_state"] == "running"
+    assert response.json()["items"][0]["runtime_state"] == "not-running"
 
 
 def test_retag_targets_matches_the_compose_file_project_name(

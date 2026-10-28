@@ -52,16 +52,28 @@ working as it is.
 
 When you switch to the current examples:
 
-- Put the env file at `.env` next to `docker-compose.yml`. If you used
-  `--env-file "$HOME/.config/wudup/webui.env"`, move or copy that file there;
-  `--env-file` alone no longer passes settings to WUDup.
+- Put the env file at `.env` next to `docker-compose.yml`. If you keep it
+  elsewhere and pass it with `--env-file`, add
+  `WUDUP_ENV_FILE=<absolute path to that file>` to it; `--env-file` alone only
+  fills in `${VAR}` references. `wudup init` writes this line for you.
+- Values exported only in the shell, or set in a Portainer stack's
+  environment, no longer reach WUDup. Put them in the env file the `wudup`
+  service loads. In Portainer, set `WUDUP_ENV_FILE=stack.env` in the stack's
+  environment.
 - Settings the earlier examples never passed to WUDup now take effect when they
   are in `.env`, for example `WUD_COMPOSE_IGNORE_PATHS`,
   `WUD_RELEASE_NOTES_ENABLED`, `WUD_WEB_RESTART_CONTAINER`, and
   `WUD_UPDATE_MODE`. Remove any you do not want before recreating WUDup.
 - Every variable in `.env` also reaches the `docker compose` commands WUDup runs
   for your stacks, where it overrides the same name in a stack's own `.env`.
-  Keep only WUDup and WUD settings in this file.
+  Keep only WUDup and WUD settings in this file. WUDup removes
+  `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`,
+  `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, and WUD's
+  `WUD_AUTH_ADMIN_USER`/`WUD_AUTH_ADMIN_PASSWORD` first, so those apply only to
+  the WUDup deployment.
+- The hardened example now fixes `WUD_OUT_FILE` at `/out/images.todo`, like the
+  WebUI example. If you set another path, edit the `wudup` service's
+  `environment:` block instead.
 
 ## Requirements
 
@@ -165,8 +177,8 @@ docker compose logs wudup
 Run the `docker compose` commands in this guide from that directory. Compose
 reads `.env` next to `docker-compose.yml` to fill in `${VAR}` references, and
 the `wudup` service loads the same file with `env_file`, which needs Compose
-2.24 or newer. `--env-file` only fills in `${VAR}` references, so WUDup does not
-receive settings from a file passed that way.
+2.24 or newer. `--env-file` only fills in `${VAR}` references; to keep the file
+elsewhere, set `WUDUP_ENV_FILE` in it to the file's own path.
 
 Open the printed `/#/setup?claim=...` link, create the first admin username and
 a password with at least 12 characters, then sign in at

@@ -343,6 +343,9 @@ def _env_content(answers: InitAnswers) -> str:
 
 def _container_env_values(answers: InitAnswers) -> list[tuple[str, str]]:
     values = [
+        # The Compose examples load this file into the wudup service only when
+        # WUDUP_ENV_FILE names it; --env-file alone just fills in ${VAR}.
+        ("WUDUP_ENV_FILE", str(answers.config_file.absolute())),
         ("HOST_DOCKER_BASE", str(answers.stack_root)),
         ("WEBUI_LOG_DIR", str(answers.log_dir)),
         ("WUD_TIMEZONE", DEFAULT_TIMEZONE),

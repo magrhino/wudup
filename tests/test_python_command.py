@@ -495,6 +495,51 @@ class CommandRunnerTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["BASE"], "1")
         self.assertEqual(kwargs["env"]["CALL_VAR"], "3")
 
+    @mock.patch("wudup.command.subprocess.run")
+    def test_compose_commands_drop_wudup_deployment_env(
+        self, run_mock: mock.Mock
+    ) -> None:
+        run_mock.return_value = mock.Mock(returncode=0)
+        project_env = {
+            "COMPOSE_PROJECT_NAME": "wudup",
+            "COMPOSE_FILE": "docker-compose.yml",
+            "COMPOSE_PATH_SEPARATOR": ":",
+            "COMPOSE_PROFILES": "extras",
+            "COMPOSE_ENV_FILES": ".env",
+            "WUD_AUTH_ADMIN_USER": "admin",
+            "WUD_AUTH_ADMIN_PASSWORD": "example-wud-admin-password",
+        }
+
+        with mock.patch.dict(
+            os.environ,
+            {**project_env, "COMPOSE_PARALLEL_LIMIT": "2", "OS_VAR": "1"},
+            clear=True,
+        ):
+            CommandRunner().capture(["/usr/bin/docker", "compose", "-f", "a.yml", "ps"])
+            CommandRunner(env={"BASE": "1"}).run(["docker", "compose", "up", "-d"])
+            CommandRunner().capture(["docker", "ps"])
+
+        compose_capture, compose_run, docker_ps = (
+            call.kwargs["env"] for call in run_mock.call_args_list
+        )
+        for env in (compose_capture, compose_run):
+            self.assertTrue(set(project_env).isdisjoint(env))
+            self.assertEqual(env["COMPOSE_PARALLEL_LIMIT"], "2")
+            self.assertEqual(env["OS_VAR"], "1")
+        self.assertEqual(compose_run["BASE"], "1")
+        self.assertIsNone(docker_ps)
+
+    @mock.patch("wudup.command.subprocess.run")
+    def test_compose_commands_inherit_env_when_nothing_to_drop(
+        self, run_mock: mock.Mock
+    ) -> None:
+        run_mock.return_value = mock.Mock(returncode=0)
+
+        with mock.patch.dict(os.environ, {"OS_VAR": "1"}, clear=True):
+            CommandRunner().capture(["docker", "compose", "ps"])
+
+        self.assertIsNone(run_mock.call_args.kwargs["env"])
+
 
 if __name__ == "__main__":
     unittest.main()

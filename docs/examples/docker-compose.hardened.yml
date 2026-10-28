@@ -94,20 +94,24 @@ services:
         condition: service_started
       wud:
         condition: service_healthy
-    # WUDup reads its settings from the .env file next to this Compose file.
-    # See docs/CONFIGURATION.md for every variable. WUD never receives this
-    # file, and the values below win over it.
+    # WUDup reads its settings from the .env file next to this Compose file,
+    # or from the file WUDUP_ENV_FILE names. See docs/CONFIGURATION.md for
+    # every variable. WUD never receives this file, and the values below win
+    # over it.
     # WUD 9 also requires WUD API credentials in .env; WUD's bootstrap
     # credentials are not reused. See wiki/webui-container.md#wud-api-authentication.
     env_file:
-      - path: .env
+      - path: ${WUDUP_ENV_FILE:-.env}
         required: false
     environment:
       # The Docker CLI and Compose plugin use the same constrained proxy.
       DOCKER_HOST: tcp://socket-proxy-wudup:2375
       # Fixed container paths that match the mounts below.
       DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
-      WUD_OUT_FILE: "${WUD_OUT_FILE:-/out/images.todo}"
+      HOST_DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
+      WUD_OUT_FILE: /out/images.todo
+      WUD_LOG_DIR: /logs
+      WUD_DB_PATH: /logs/wudup.sqlite
       HOME: /tmp
       # Compose defaults that differ from WUDup's own defaults.
       WUD_WEB_PORT: "${WUD_WEB_PORT:-7417}"

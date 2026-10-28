@@ -30,7 +30,8 @@ Run every `docker compose` command in this guide from that directory. Compose
 reads `.env` from the directory that holds `docker-compose.yml`: it fills in
 `${VAR}` references, and the `wudup` service loads the same file with
 `env_file` (Compose 2.24 or newer). Passing the file with `--env-file` only fills
-in `${VAR}` references, so WUDup would not receive its settings. See
+in `${VAR}` references; to keep it elsewhere, set `WUDUP_ENV_FILE` in it to the
+file's own path. See
 [Configuration](../CONFIGURATION.md#how-settings-reach-the-container).
 
 The example publishes the browser endpoint on loopback:

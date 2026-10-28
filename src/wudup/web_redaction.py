@@ -20,6 +20,10 @@ SENSITIVE_ENV_KEYS = (
     "DISCORD_RELEASES_WEBHOOK",
     "ADMIN_WEBHOOK",
 )
+# Secrets for other services that can reach WUDup's environment, such as WUD's
+# bootstrap password loaded from the Compose .env. They are redacted but are
+# not WUDup settings, so Settings does not list them.
+REDACTED_ONLY_ENV_KEYS = ("WUD_AUTH_ADMIN_PASSWORD",)
 
 
 SENSITIVE_FIELD_KEY_PARTS = frozenset(
@@ -158,6 +162,7 @@ def _sensitive_redaction_values(
     values.append(settings.auth_token)
     values.extend(settings.wud_api_client.secret_values)
     values.extend(env.get(key, "") for key in SENSITIVE_ENV_KEYS)
+    values.extend(env.get(key, "") for key in REDACTED_ONLY_ENV_KEYS)
 
     expanded: list[str] = []
     for value in values:
