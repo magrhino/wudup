@@ -80,6 +80,7 @@ EOF
     tests/test-edge-catch-up.sh \
     tests/test-prune-edge-images.sh \
     tests/test-scan-main-image.sh \
+    tests/test-makefile-python-env.sh \
     .github/scripts/publish-release-image.sh \
     .github/scripts/edge-catch-up.sh \
     .github/scripts/prune-edge-images.sh \
@@ -102,6 +103,7 @@ EOF
     tests/test-edge-catch-up.sh \
     tests/test-prune-edge-images.sh \
     tests/test-scan-main-image.sh \
+    tests/test-makefile-python-env.sh \
     .github/scripts/publish-release-image.sh \
     .github/scripts/edge-catch-up.sh \
     .github/scripts/prune-edge-images.sh \

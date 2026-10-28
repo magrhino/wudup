@@ -70,6 +70,7 @@ Use the shell already used by the target script.
 | local build compose config check | `docker compose -f docs/examples/docker-compose.build.yml config` |
 | container image build | `docker build -t wudup:local .` |
 | Python dev dependency install | Check for `.venv/bin/python` first and activate it when present; otherwise run `python3 -m venv .venv`, `. .venv/bin/activate`, then `python -m pip install -e '.[dev]'` |
+| Python tests and Ruff (any worktree) | `make test` (subset: `make test ARGS="tests/test_python_cli.py -k name"`) and `make lint`; use these instead of activating the venv or exporting `PYTHONPATH`. |
 | Python backend validation | See `src/wudup/AGENTS.md`. |
 | update pip lockfile | `make lock` |
 | Live digest verification probe | `tests/live-digest-verification.py alpine:3.20 quay.io/prometheus/busybox:latest` |
