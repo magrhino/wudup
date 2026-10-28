@@ -142,6 +142,10 @@ wudup init --profile hardened --stack-root /srv/docker --non-interactive
 docker compose --env-file "$HOME/.config/wudup/hardened.env" \
   -f docs/examples/docker-compose.hardened.yml \
   -f "$HOME/.config/wudup/docker-compose.hardened.override.yml" \
+  run --rm wudup doctor
+docker compose --env-file "$HOME/.config/wudup/hardened.env" \
+  -f docs/examples/docker-compose.hardened.yml \
+  -f "$HOME/.config/wudup/docker-compose.hardened.override.yml" \
   up -d
 ```
 

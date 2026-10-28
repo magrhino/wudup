@@ -56,12 +56,13 @@ read the one-time setup link from the logs:
 
 ```bash
 docker compose up -d
-docker compose logs wudup
+docker compose logs -f wudup
 ```
 
-Open the printed `/#/setup?claim=...` link, create the first admin username and
-a password with at least 12 characters, then sign in at
-`http://127.0.0.1:7417`. Open **Doctor** in the WebUI to confirm that WUDup can
+The setup link appears once WUDup finishes starting; press Ctrl+C to stop
+following the logs. Open the printed `/#/setup?claim=...` link, create the
+first admin username and a password with at least 12 characters, then sign in
+at `http://127.0.0.1:7417`. Open **Doctor** in the WebUI to confirm that WUDup can
 reach Docker, your stacks, and WUD's API.
 
 What each file does:
@@ -83,6 +84,8 @@ Run every `docker compose` command in these guides from this directory.
 - Apply updates from the browser:
   [Read-only and mutations](wiki/webui-container.md#read-only-and-mutations).
 - Pin a release instead of `latest`: [Image Tags](#image-tags).
+- Recover a lost WebUI login, keep SQLite state, or turn on candidate security
+  scans: [WebUI Container](wiki/webui-container.md#admin-recovery).
 
 ### Other Ways To Start
 

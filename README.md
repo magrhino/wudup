@@ -71,7 +71,7 @@ link from the logs:
 
 ```bash
 docker compose up -d
-docker compose logs wudup
+docker compose logs -f wudup
 ```
 
 Open the printed `/#/setup?claim=...` link, create the first admin username and
