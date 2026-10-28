@@ -16,7 +16,8 @@ fail() {
 
 # Prints the interpreter the Makefile selects when run from $1.
 selected_python() {
-  make -s -C "$1" -f "$REPO_ROOT/Makefile" -f "$TMP_DIR/show.mk" show-python-bin
+  local dir="$1"
+  make -s -C "$dir" -f "$REPO_ROOT/Makefile" -f "$TMP_DIR/show.mk" show-python-bin
 }
 
 assert_selected() {
@@ -26,8 +27,9 @@ assert_selected() {
 }
 
 make_venv() {
-  mkdir -p "$1/.venv/bin"
-  ln -s "$TMP_DIR/bin/fakepython" "$1/.venv/bin/python"
+  local checkout="$1"
+  mkdir -p "$checkout/.venv/bin"
+  ln -s "$TMP_DIR/bin/fakepython" "$checkout/.venv/bin/python"
 }
 
 new_repo_with_worktree() {
