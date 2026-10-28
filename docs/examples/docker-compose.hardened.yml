@@ -63,15 +63,19 @@ services:
       - socket-proxy-wudup
     environment:
       # WUD 9 requires an administrator, including on private Docker networks.
-      # Set a strong password in a private Compose env file before first start.
+      # WUD reads its password from the wud_api_password secret below. This
+      # service drops every capability, so the secret file must be readable
+      # by other users (mode 0644); keep it inside a mode 0700 directory.
       WUD_AUTH_ADMIN_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
-      WUD_AUTH_ADMIN_PASSWORD: "${WUD_AUTH_ADMIN_PASSWORD:-}"
+      WUD_AUTH_ADMIN_PASSWORD__FILE: /run/secrets/wud_api_password
       # WUD watches Docker through the proxy.
       WUD_WATCHER_LOCAL_HOST: socket-proxy-wudup
       WUD_WATCHER_LOCAL_PORT: "2375"
       WUD_WATCHER_LOCAL_WATCHEVENTS: "true"
       WUD_REGISTRY_HUB_PUBLIC_WATCHDIGEST: "true"
       # WebUI release-note notifications poll WUD's API directly.
+    secrets:
+      - wud_api_password
     volumes:
       - wud-store:/store
     read_only: true
@@ -98,8 +102,6 @@ services:
     # or from the file WUDUP_ENV_FILE names. See docs/CONFIGURATION.md for
     # every variable. WUD never receives this file, and the values below win
     # over it.
-    # WUD 9 also requires WUD API credentials in .env; WUD's bootstrap
-    # credentials are not reused. See wiki/webui-container.md#wud-api-authentication.
     env_file:
       - path: ${WUDUP_ENV_FILE:-.env}
         required: false
@@ -118,6 +120,14 @@ services:
       WUD_API_STARTUP_WAIT_SECONDS: "${WUD_API_STARTUP_WAIT_SECONDS:-5}"
       OUT_UID: "${OUT_UID:-1000}"
       OUT_GID: "${OUT_GID:-1000}"
+      # WUDup signs in to WUD's API as WUD's administrator, using the same
+      # secret. To use a WUD API token instead, remove these two lines and the
+      # secret, then set WUD_API_AUTH_BEARER_TOKEN_FILE in .env. See
+      # wiki/webui-container.md#wud-api-authentication.
+      WUD_API_AUTH_BASIC_USER: "${WUD_AUTH_ADMIN_USER:-admin}"
+      WUD_API_AUTH_BASIC_PASSWORD_FILE: /run/secrets/wud_api_password
+    secrets:
+      - wud_api_password
     ports:
       - "${WEBUI_HTTP_BIND:-127.0.0.1}:${WUD_WEB_PORT:-7417}:${WUD_WEB_PORT:-7417}"
     volumes:
@@ -127,8 +137,6 @@ services:
       # WebUI logs and SQLite state are kept outside the Docker stack root.
       - ${WEBUI_LOG_DIR:-./logs}:/logs
       - wud-out:/out
-      # For basic API auth, mount a password-only file (example host path):
-      # - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
     read_only: true
     tmpfs:
       - /tmp
@@ -142,6 +150,13 @@ services:
       - FOWNER
     security_opt:
       - no-new-privileges:true
+
+secrets:
+  # A file holding only WUD's administrator password, created before first
+  # start. Keep it mode 0644 inside a mode 0700 directory. See
+  # wiki/webui-container.md#wud-api-authentication.
+  wud_api_password:
+    file: ${WUDUP_SECRETS_DIR:-./secrets}/wud_api_password
 
 networks:
   wudup-app:

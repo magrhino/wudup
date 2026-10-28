@@ -19,6 +19,12 @@ docker compose -f docs/examples/docker-compose.example.yml run --rm wudup doctor
 docker compose -f docs/examples/docker-compose.example.yml run --rm wudup docker-update-from-wud --dry-run
 ```
 
+These `run` commands start only the `wudup` helper. Before starting the example's
+`wud` service, put WUD's administrator password in
+`docs/examples/secrets/wud_api_password`, or set `WUDUP_SECRETS_DIR` to the
+directory that holds it; see
+[WUD password secret](CONFIGURATION.md#wud-password-secret).
+
 Apply every pending entry:
 
 ```bash

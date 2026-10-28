@@ -57,16 +57,23 @@ wudup init --profile hardened --stack-root /srv/docker --non-interactive
 
 That writes a hardened env file and Compose override under
 `$HOME/.config/wudup/`. Use them with the hardened Compose example before
-starting the service.
+starting the service. Create WUD's password file as shown below and set
+`WUDUP_SECRETS_DIR` in the generated env file to the absolute path of its
+directory.
 
 To start without the CLI, download the published hardened WebUI Compose example
-plus an env template in your deployment directory:
+plus an env template in your deployment directory, and generate WUD's
+administrator password. WUD and WUDup both read it from `secrets/`:
 
 ```bash
 curl -fsSLo docker-compose.yml \
   https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/docker-compose.hardened.yml
 curl -fsSLo .env \
   https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
+chmod 600 .env
+mkdir -m 700 secrets
+openssl rand -hex 24 > secrets/wud_api_password
+chmod 644 secrets/wud_api_password
 ```
 
 Review `.env` before starting: set `HOST_DOCKER_BASE` to your Compose stack

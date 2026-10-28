@@ -10,6 +10,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SECRET_PATH = "/run/secrets/wud_api_password"
 EXAMPLES = REPO_ROOT / "docs" / "examples"
 COMPOSE_EXAMPLES = (
     "docker-compose.example.yml",
@@ -30,6 +31,8 @@ WEBUI_ENVIRONMENT = {
         "WUD_API_STARTUP_WAIT_SECONDS",
         "OUT_UID",
         "OUT_GID",
+        "WUD_API_AUTH_BASIC_USER",
+        "WUD_API_AUTH_BASIC_PASSWORD_FILE",
     },
     "docker-compose.hardened.yml": {
         "DOCKER_HOST",
@@ -43,6 +46,8 @@ WEBUI_ENVIRONMENT = {
         "WUD_API_STARTUP_WAIT_SECONDS",
         "OUT_UID",
         "OUT_GID",
+        "WUD_API_AUTH_BASIC_USER",
+        "WUD_API_AUTH_BASIC_PASSWORD_FILE",
     },
 }
 
@@ -94,6 +99,43 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
                     environment["HOST_DOCKER_BASE"], environment["DOCKER_BASE"]
                 )
 
+    def test_wud_reads_its_password_from_the_shared_secret(self) -> None:
+        for name in COMPOSE_EXAMPLES:
+            with self.subTest(name=name):
+                example = _load(name)
+                wud = example["services"]["wud"]
+                self.assertEqual(
+                    wud["environment"]["WUD_AUTH_ADMIN_PASSWORD__FILE"],
+                    SECRET_PATH,
+                )
+                self.assertNotIn("WUD_AUTH_ADMIN_PASSWORD", wud["environment"])
+                self.assertEqual(wud["secrets"], ["wud_api_password"])
+                self.assertEqual(
+                    example["secrets"],
+                    {
+                        "wud_api_password": {
+                            "file": "${WUDUP_SECRETS_DIR:-./secrets}/wud_api_password"
+                        }
+                    },
+                )
+
+    def test_webui_wudup_signs_in_with_the_same_secret(self) -> None:
+        # One password file serves WUD's bootstrap and WUDup's API client, so
+        # the user must also match WUD's administrator.
+        for name in WEBUI_ENVIRONMENT:
+            with self.subTest(name=name):
+                services = _load(name)["services"]
+                wudup = services["wudup"]
+                self.assertEqual(wudup["secrets"], ["wud_api_password"])
+                self.assertEqual(
+                    wudup["environment"]["WUD_API_AUTH_BASIC_PASSWORD_FILE"],
+                    SECRET_PATH,
+                )
+                self.assertEqual(
+                    wudup["environment"]["WUD_API_AUTH_BASIC_USER"],
+                    services["wud"]["environment"]["WUD_AUTH_ADMIN_USER"],
+                )
+
     @unittest.skipUnless(_docker_compose_available(), "docker compose unavailable")
     def test_dotenv_reaches_wudup_and_fixed_paths_win(self) -> None:
         with tempfile.TemporaryDirectory(prefix="wudup-compose.") as tmp:
@@ -107,7 +149,9 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
                         "WUD_OUT_FILE=/elsewhere/images.todo",
                         "WUD_DB_PATH=/elsewhere/wudup.sqlite",
                         "WUD_WEB_PORT=8080",
+                        "WUD_AUTH_ADMIN_USER=example-admin",
                         "WUD_AUTH_ADMIN_PASSWORD=example-only",
+                        "WUD_API_AUTH_BASIC_USER=stale-user",
                     )
                 )
                 + "\n",
@@ -129,6 +173,12 @@ class ComposeExampleEnvFileTests(unittest.TestCase):
         self.assertEqual(wudup["WUD_DB_PATH"], "/logs/wudup.sqlite")
         self.assertEqual(wudup["WUD_WEB_PORT"], "8080")
         self.assertNotIn("WUD_COMPOSE_IGNORE_PATHS", services["wud"]["environment"])
+        self.assertNotIn("WUD_AUTH_ADMIN_PASSWORD", services["wud"]["environment"])
+        self.assertEqual(services["wud"]["environment"]["WUD_AUTH_ADMIN_USER"], "example-admin")
+        self.assertEqual(wudup["WUD_API_AUTH_BASIC_USER"], "example-admin")
+        self.assertEqual(
+            wudup["WUD_API_AUTH_BASIC_PASSWORD_FILE"], "/run/secrets/wud_api_password"
+        )
 
     @unittest.skipUnless(_docker_compose_available(), "docker compose unavailable")
     def test_examples_render_without_dotenv(self) -> None:

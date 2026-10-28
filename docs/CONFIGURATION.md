@@ -24,7 +24,11 @@ The `wudup` service's `environment:` block wins over `.env`. In the WebUI
 examples it pins the [fixed container paths](#fixed-container-paths) and sets
 the Compose defaults that differ from WUDup's own: `WUD_WEB_PORT`,
 `WUD_API_STARTUP_WAIT_SECONDS`, and `OUT_UID`/`OUT_GID`. Those defaults still
-come from `.env` through `${VAR}` references. `HOST_DOCKER_BASE` is set from the
+come from `.env` through `${VAR}` references. It also signs WUDup in to WUD's
+API with the shared [WUD password secret](#wud-password-secret):
+`WUD_API_AUTH_BASIC_USER` comes from `WUD_AUTH_ADMIN_USER`, and
+`WUD_API_AUTH_BASIC_PASSWORD_FILE` is fixed at `/run/secrets/wud_api_password`.
+`HOST_DOCKER_BASE` is set from the
 same `${HOST_DOCKER_BASE}` reference as `DOCKER_BASE` and the stack mount, so
 WUDup always maps stacks with the root Compose mounted. The command-runner
 examples pin only their fixed paths, `HOST_DOCKER_BASE`, and `OUT_UID`/`OUT_GID`.
@@ -70,6 +74,7 @@ the other defaults fit a loopback, read-only first run.
 | Variable | Default | Purpose |
 |---|---|---|
 | `WUDUP_ENV_FILE` | `.env` | Read only by Compose, from the shell or a file passed with `--env-file`. Names the env file the `wudup` service loads with `env_file`; a relative path is relative to the Compose file. `wudup init` writes it into the env file it generates. |
+| `WUDUP_SECRETS_DIR` | `./secrets` | Read only by Compose. Directory that holds `wud_api_password`, the [WUD password secret](#wud-password-secret); a relative path is relative to the Compose file. |
 | `HOST_DOCKER_BASE` | Compose examples: `/srv/docker`; host commands: unset | Host directory that contains your Compose stacks. The Compose examples mount it at the same absolute path and set `DOCKER_BASE` from it. For host commands it is an optional daemon-visible host root matching `DOCKER_BASE` inside the helper. The path must also be mounted/readable inside the helper because Compose uses it as `--project-directory`. |
 | `WEBUI_LOG_DIR` | `./logs` | Host-side directory mounted at `/logs` by the long-running WebUI Compose examples; persists updater logs and SQLite state. |
 | `WEBUI_HTTP_BIND` | `127.0.0.1` | Host-side bind address used by the long-running WebUI Compose examples. Keep loopback for first run; use a LAN address or `0.0.0.0` only with `WUD_WEB_PUBLIC_ORIGIN` configured. |
@@ -104,7 +109,8 @@ have `_FILE` forms today.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WUD_AUTH_ADMIN_USER` / `WUD_AUTH_ADMIN_PASSWORD` | `admin` / unset | Read by **WUD**, not WUDup. Bootstraps WUD's local administrator; see the note below. |
+| `WUD_AUTH_ADMIN_USER` | `admin` | Read by **WUD** to bootstrap its local administrator. The Compose examples also use it as `WUD_API_AUTH_BASIC_USER`; see [WUD password secret](#wud-password-secret). |
+| `WUD_AUTH_ADMIN_PASSWORD` | unset | Read by **WUD**. The Compose examples no longer pass it; they pass the [WUD password secret](#wud-password-secret) as `WUD_AUTH_ADMIN_PASSWORD__FILE` instead. |
 | `WUD_API_AUTH_BEARER_TOKEN_FILE` / `WUD_API_AUTH_BEARER_TOKEN` | unset | Optional bearer token for WUDup's outbound WUD API calls. Prefer the `_FILE` form in containers; direct values are intended for local development. Do not combine bearer and basic auth. |
 | `WUD_API_AUTH_BASIC_USER` + `WUD_API_AUTH_BASIC_PASSWORD_FILE` / `WUD_API_AUTH_BASIC_PASSWORD` | unset | Optional basic auth credentials for WUDup's outbound WUD API calls. The user and one password source must be set together. Prefer the `_FILE` password form in containers. |
 | `WUD_API_HEADERS_FILE` | unset | Optional UTF-8 JSON object of static WUD API request headers, such as `{"X-Api-Key":"example"}`. Header names and values are validated, values are redacted, and an `Authorization` header cannot be combined with bearer or basic auth. |
@@ -117,17 +123,22 @@ network. A successful unauthenticated `/health` probe does not establish API
 access. Configure one of the outbound credential methods above using a **WUD**
 account or personal API token; the WUDup WebUI login is separate.
 
-The Compose examples also pass `WUD_AUTH_ADMIN_USER` (default `admin`) and
-`WUD_AUTH_ADMIN_PASSWORD` to **WUD** to bootstrap its local administrator. Set a
-strong password before first start and preserve the `wud-store:/store` volume.
-These bootstrap variables do not configure WUDup's outbound API credentials.
-See [WUD API authentication](wiki/webui-container.md#wud-api-authentication)
-for the password-file mount and internal-port setup.
-
 Provide GitHub tokens through the WUDup/WebUI runtime environment or another
 host-local secret store. Discord release webhooks can also be saved from
 WebUI Settings; the raw URL is stored in SQLite, so protect `WUD_DB_PATH` as a
 secret-bearing file.
+
+### WUD Password Secret
+
+The Compose examples keep WUD's administrator password in one file,
+`${WUDUP_SECRETS_DIR:-./secrets}/wud_api_password`, and mount it in both
+services as the `wud_api_password` Compose secret. WUD reads it with
+`WUD_AUTH_ADMIN_PASSWORD__FILE` (WUD 9.3.0 or newer) to bootstrap its
+administrator, and the WebUI examples' `wudup` service reads it with
+`WUD_API_AUTH_BASIC_PASSWORD_FILE`. Create the file before first start, keep it
+mode `0644` inside a mode `0700` directory, and preserve the `wud-store:/store`
+volume. See [WUD API authentication](wiki/webui-container.md#wud-api-authentication)
+for generating the password, changing it, and using a WUD API token instead.
 
 ## Exposure And Mutation Policy
 
