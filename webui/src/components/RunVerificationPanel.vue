@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { NFlex, NTag } from "naive-ui";
+import { computed } from "vue";
 
 import type {
   RunVerificationContainerStatus,
@@ -11,10 +12,17 @@ import type {
 
 type TagType = "default" | "error" | "info" | "success" | "warning";
 
-defineProps<{
+const props = defineProps<{
   verification: RunVerificationSummary;
   title?: string;
 }>();
+
+// Lead with the rows an operator has to act on; the sort is stable otherwise.
+const orderedItems = computed(() =>
+  [...props.verification.items].sort(
+    (a, b) => Number(b.follow_up_needed) - Number(a.follow_up_needed),
+  ),
+);
 
 function overallLabel(status: RunVerificationSummary["status"]): string {
   return status === "verified" ? "Verified" : "Needs review";
@@ -83,11 +91,11 @@ function healthLabel(status: RunVerificationHealthStatus): string {
 
 function wudLabel(status: RunVerificationWudStatus): string {
   return {
-    removed: "WUD line removed",
-    restored: "WUD line restored",
-    stale_removed: "Stale line removed",
+    removed: "Removed from WUD",
+    restored: "Kept pending in WUD",
+    stale_removed: "Stale WUD entry removed",
     removed_before_run: "Removed before run",
-    unknown: "WUD line unknown",
+    unknown: "WUD state unknown",
   }[status] ?? fallbackStatusLabel(status);
 }
 </script>
@@ -112,12 +120,11 @@ function wudLabel(status: RunVerificationWudStatus): string {
     </div>
     <div class="run-verification-list">
       <article
-        v-for="item in verification.items"
+        v-for="item in orderedItems"
         :key="`${item.line_no}-${item.service_key}-${item.image}`"
         class="run-verification-row"
       >
         <div class="run-verification-main">
-          <span>#{{ item.line_no }}</span>
           <strong class="wrap-anywhere">{{ item.service_key || item.service_name || item.image }}</strong>
           <em class="wrap-anywhere">{{ item.target_image || item.image }}</em>
         </div>
@@ -182,16 +189,10 @@ function wudLabel(status: RunVerificationWudStatus): string {
 
 .run-verification-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 0.75fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
   gap: 8px;
   align-items: baseline;
   min-width: 0;
-}
-
-.run-verification-main span {
-  color: var(--color-muted-text);
-  font-size: var(--text-label-size);
-  font-weight: 700;
 }
 
 .run-verification-main strong {
@@ -214,11 +215,8 @@ function wudLabel(status: RunVerificationWudStatus): string {
 
 @media (--wud-app-shell) {
   .run-verification-main {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .run-verification-main em {
-    grid-column: 2;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 }
 </style>

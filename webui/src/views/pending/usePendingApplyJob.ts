@@ -136,7 +136,7 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
 
   const applyJobAlertType = computed(() => {
     if (updates.applyJob?.status === "failure") {
-      return "error";
+      return applyJobPartlyApplied.value ? "warning" : "error";
     }
     if (updates.applyJob?.status === "success") {
       return "success";
@@ -167,7 +167,7 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
       return "Apply complete";
     }
     if (updates.applyJob.status === "failure") {
-      return "Apply failed";
+      return applyJobPartlyApplied.value ? "Partially applied" : "Apply failed";
     }
     return "Apply job";
   });
@@ -185,6 +185,11 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
       return options.successStatusMessage
         ? options.successStatusMessage(applyJobUpdateLabel.value)
         : `${applyJobUpdateLabel.value} finished. Pending updates and run history were refreshed.`;
+    }
+    if (applyJobPartlyApplied.value) {
+      const { verified_count: verified, total_count: total, needs_review_count: review } =
+        applyJobVerification.value;
+      return `${verified} of ${pluralize(total, updateNoun)} verified; ${review} ${review === 1 ? "needs" : "need"} review.`;
     }
     if (updates.applyJob.error) {
       return updates.applyJob.error;
@@ -320,7 +325,31 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
     );
     return lastPhase ? lastPhase.label : applyJobUpdateLabel.value;
   });
+  const applyJobLatestProgressStep = computed<ApplyJobProgressStep | null>(() => {
+    const latest = applyJobProgressEvents(updates.applyJob).at(-1);
+    if (!latest) {
+      return null;
+    }
+    const key =
+      applyJobProgressMode.value === "stack" ? `stack:${latest.stack}` : latest.phase;
+    const step = applyJobProgressSteps.value.find((candidate) => candidate.key === key);
+    if (!step) {
+      return null;
+    }
+    // Step cards keep an earlier stack's failure; the live status follows the newest event.
+    return {
+      ...step,
+      status: latest.status,
+      statusLabel: progressStatusLabel(latest.status),
+      message: latest.message || step.waitingMessage,
+      detail: progressEventDetail(latest),
+      event: latest,
+    };
+  });
   const applyJobCurrentStep = computed<ApplyJobProgressStep | null>(() => {
+    if (applyJobActive.value && applyJobLatestProgressStep.value) {
+      return applyJobLatestProgressStep.value;
+    }
     const failed = applyJobProgressSteps.value.find(
       (step) => step.status === "failure",
     );
@@ -369,6 +398,14 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
     applyJobRunDetail.value?.verification ??
     fallbackVerification(updates.applyJob, applyJobSnapshot.value),
   );
+  // Some updates landed even though the job failed; report that instead of a total failure.
+  const applyJobPartlyApplied = computed(() => {
+    if (updates.applyJob?.status !== "failure") {
+      return false;
+    }
+    const verification = applyJobVerification.value;
+    return verification.verified_count > 0 && verification.needs_review_count > 0;
+  });
   const applyJobNowTitle = computed(() => {
     if (!updates.applyJob) {
       return "";
@@ -386,6 +423,12 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
     if (step?.status === "success") {
       return `Completed: ${step.label}`;
     }
+    if (step?.status === "failure") {
+      return `Failed: ${step.label}`;
+    }
+    if (step?.status === "skipped") {
+      return `Skipped: ${step.label}`;
+    }
     if (updates.applyJob.status === "queued") {
       return "Queued to start";
     }
@@ -395,10 +438,16 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
     if (!updates.applyJob) {
       return "";
     }
-    if (updates.applyJob.status === "failure" && updates.applyJob.error) {
-      return updates.applyJob.error;
+    const step = applyJobCurrentStep.value;
+    if (updates.applyJob.status === "failure") {
+      if (step?.status === "failure" && step.event?.message) {
+        return step.event.message;
+      }
+      if (updates.applyJob.error) {
+        return updates.applyJob.error;
+      }
     }
-    return applyJobCurrentStep.value?.message || applyJobStatusMessage.value;
+    return step?.message || applyJobStatusMessage.value;
   });
   const applyJobNowDetail = computed(
     () => applyJobCurrentStep.value?.detail || applyJobImpactLabel.value,
@@ -413,7 +462,11 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
       return "Complete";
     }
     if (updates.applyJob?.status === "failure") {
-      return "Failed";
+      return applyJobPartlyApplied.value ? "Needs review" : "Failed";
+    }
+    const step = applyJobActive.value ? applyJobLatestProgressStep.value : null;
+    if (step) {
+      return step.status === "failure" ? `${step.label} failed` : step.label;
     }
     return applyJobProgressSummary.value;
   });
@@ -428,7 +481,7 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
       return "Complete";
     }
     if (updates.applyJob?.status === "failure") {
-      return "Failed";
+      return applyJobPartlyApplied.value ? "Needs review" : "Failed";
     }
     return "Job";
   });
@@ -601,7 +654,8 @@ export function usePendingApplyJob(options: UsePendingApplyJobOptions) {
         key: `${stack}-${line.line_no}-${line.service}`,
         lineNo: line.line_no,
         stackName: stack,
-        serviceLabel: planLineServiceLabel(plan.summary.stack_count, stack, line),
+        scopeLabel: stack,
+        serviceLabel: planLineServiceLabel(1, stack, line),
         tagRewriteLabel: planLineTagRewriteLabel(line),
         digestPinLabel: planLineDigestPinLabel(line),
         composeImage: line.compose_image,
@@ -820,9 +874,6 @@ function progressEventDetail(event: ApplyJobProgressEvent | null): string {
   if (event.services.length) {
     parts.push(event.services.join(", "));
   }
-  if (event.line_numbers.length) {
-    parts.push(`lines ${event.line_numbers.join(", ")}`);
-  }
   return parts.join(" / ");
 }
 
@@ -875,14 +926,15 @@ function fallbackVerificationItem(
   line: VerificationSnapshotLine,
 ): RunVerificationItem {
   const progress = applyJobProgressEvents(job);
+  const preflight = progressForLine(progress, "preflight", line.lineNo);
   const pull = progressForLine(progress, "pull", line.lineNo);
   const recreate = progressForLine(progress, "recreate", line.lineNo);
   const health = progressForLine(progress, "health", line.lineNo);
   const cleanup = progressForLine(progress, "cleanup", line.lineNo);
-  const imageStatus = fallbackImageStatus(job, pull);
+  const imageStatus = fallbackImageStatus(preflight, pull);
   const containerStatus = fallbackContainerStatus(recreate);
   const healthStatus = fallbackHealthStatus(health);
-  const wudStatus = fallbackWudStatus(job, cleanup);
+  const wudStatus = fallbackWudStatus(preflight, cleanup);
   const followUpNeeded = verificationFollowUpNeeded(
     imageStatus,
     containerStatus,
@@ -891,8 +943,8 @@ function fallbackVerificationItem(
   );
   return {
     line_no: line.lineNo,
-    service_key: line.serviceLabel,
-    stack_name: "",
+    service_key: `${line.stackName}/${line.serviceLabel}`,
+    stack_name: line.stackName,
     service_name: line.serviceLabel,
     image: line.composeImage,
     target_image: line.targetImage,
@@ -921,11 +973,12 @@ function progressForLine(
     .find((event) => event.phase === phase && event.line_numbers.includes(lineNo)) ?? null;
 }
 
+// Judge each line by its own events: a partial failure exits the whole job non-zero.
 function fallbackImageStatus(
-  job: ApplyJobResponse,
+  preflight: ApplyJobProgressEvent | null,
   event: ApplyJobProgressEvent | null,
 ): RunVerificationImageStatus {
-  if (event?.status === "failure" || job.status === "failure") {
+  if (preflight?.status === "failure" || event?.status === "failure") {
     return "failed";
   }
   if (event?.status === "success") {
@@ -970,14 +1023,15 @@ function fallbackHealthStatus(
 }
 
 function fallbackWudStatus(
-  job: ApplyJobResponse,
+  preflight: ApplyJobProgressEvent | null,
   event: ApplyJobProgressEvent | null,
 ): RunVerificationWudStatus {
-  if (event?.status === "success" && job.status === "success") {
+  if (event?.status === "success") {
     return "removed";
   }
+  // Preflight failures are either removed (stale digest) or restored; only the run record knows which.
   if (event?.status === "failure") {
-    return "restored";
+    return preflight?.status === "failure" ? "unknown" : "restored";
   }
   return "unknown";
 }

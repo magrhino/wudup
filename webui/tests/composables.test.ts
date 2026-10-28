@@ -401,6 +401,58 @@ function setupPendingApplyJob() {
   };
 }
 
+function progressEvent(
+  overrides: Partial<ApplyJobProgressEvent> &
+    Pick<ApplyJobProgressEvent, "phase" | "status" | "message">,
+): ApplyJobProgressEvent {
+  return {
+    job_id: "job-test",
+    created_at: "2026-10-22T04:15:00+00:00",
+    stack: "",
+    services: [],
+    line_numbers: [],
+    ...overrides,
+  };
+}
+
+function multiStackPlan(stacks: Array<[name: string, service: string, lineNo: number]>) {
+  const basePlan = planResponse();
+  const baseStack = basePlan.stacks[0];
+  return planResponse({
+    selected_line_numbers: stacks.map(([, , lineNo]) => lineNo),
+    summary: {
+      ...basePlan.summary,
+      target_count: stacks.length,
+      matched_target_count: stacks.length,
+      stack_count: stacks.length,
+      service_count: stacks.length,
+    },
+    stacks: stacks.map(([name, service, lineNo]) => ({
+      ...baseStack,
+      name,
+      directory: `/docker/${name}`,
+      project_directory: `/docker/${name}`,
+      services_label: service,
+      services: [service],
+      pull_services: [service],
+      stop_services: [service],
+      actions: [],
+      lines: [
+        {
+          ...baseStack.lines[0],
+          line_no: lineNo,
+          raw: `repo/${service}:1.0`,
+          image: `repo/${service}:1.0`,
+          resolved_image: `repo/${service}:1.0`,
+          compose_image: `repo/${service}:1.0`,
+          target_image: `repo/${service}:1.1`,
+          service,
+        },
+      ],
+    })),
+  });
+}
+
 function digestPinApprovalIssue(
   overrides: Partial<PlanIssue> = {},
 ): PlanIssue {
@@ -1238,7 +1290,7 @@ describe("usePendingApplyJob", () => {
     expect(state.applyJobProgressSteps.value.find((step) => step.key === "pull")).toMatchObject({
       status: "failure",
       message: "[media] Pull failed.",
-      detail: "media / calibre / lines 1",
+      detail: "media / calibre",
     });
 
     updates.setApplyJob(
@@ -1251,7 +1303,148 @@ describe("usePendingApplyJob", () => {
 
     expect(state.applyJobTitle.value).toBe("Apply failed");
     expect(state.applyJobNowTitle.value).toBe("Failed: Pull images");
-    expect(state.applyJobNowMessage.value).toBe("updater exited with status 1");
+    expect(state.applyJobNowMessage.value).toBe("[media] Pull failed.");
+    expect(state.applyJobStatusMessage.value).toBe("updater exited with status 1");
+    expect(state.applyJobAlertType.value).toBe("error");
+  });
+
+  it("follows the newest event after an earlier stack fails preflight", () => {
+    const { state, updates } = setupPendingApplyJob();
+    const staleAutoheal = progressEvent({
+      phase: "preflight",
+      status: "failure",
+      message: "[auto-heal] Pending WUD digest is stale; no update was applied.",
+      stack: "auto-heal",
+      services: ["autoheal"],
+      line_numbers: [23],
+    });
+    const homepageRecreated = progressEvent({
+      phase: "recreate",
+      status: "success",
+      message: "[homepage] Containers were recreated with their prior running state.",
+      stack: "homepage",
+      services: ["homepage"],
+      line_numbers: [5],
+    });
+    const seerrPulling = progressEvent({
+      phase: "pull",
+      status: "running",
+      message: "[jellyseerr] Pulling selected image updates.",
+      stack: "jellyseerr",
+      services: ["seerr"],
+      line_numbers: [14],
+    });
+
+    updates.setApplyJob(
+      applyJobResponse({
+        status: "running",
+        progress: [staleAutoheal, homepageRecreated, seerrPulling],
+      }),
+    );
+
+    expect(state.applyJobNowTitle.value).toBe("Running: Pull images");
+    expect(state.applyJobNowMessage.value).toBe("[jellyseerr] Pulling selected image updates.");
+    expect(state.applyJobNowDetail.value).toBe("jellyseerr / seerr");
+    expect(state.applyJobNowStatusLabel.value).toBe("Pull images");
+    expect(state.applyJobProgressSummary.value).toBe("Preflight failed");
+
+    updates.setApplyJob(
+      applyJobResponse({
+        status: "running",
+        progress: [staleAutoheal, homepageRecreated],
+      }),
+    );
+
+    expect(state.applyJobNowTitle.value).toBe("Completed: Recreate");
+    expect(state.applyJobNowDetail.value).toBe("homepage / homepage");
+
+    updates.setApplyJob(
+      applyJobResponse({ status: "running", progress: [staleAutoheal] }),
+    );
+
+    expect(state.applyJobNowTitle.value).toBe("Failed: Preflight");
+    expect(state.applyJobNowStatusLabel.value).toBe("Preflight failed");
+    expect(state.applyJobNowDetail.value).toBe("auto-heal / autoheal");
+  });
+
+  it("verifies each line from its own events after a partial failure", () => {
+    const { state, updates } = setupPendingApplyJob();
+    updates.plan = multiStackPlan([
+      ["homepage", "homepage", 5],
+      ["auto-heal", "autoheal", 23],
+    ]);
+    state.applyJobSnapshot.value = state.createApplyJobSnapshot();
+    const homepage = { stack: "homepage", services: ["homepage"], line_numbers: [5] };
+
+    updates.setApplyJob(
+      applyJobResponse({
+        status: "failure",
+        run_id: 394,
+        error: "updater exited with status 1",
+        selected_line_numbers: [5, 23],
+        progress: [
+          progressEvent({
+            phase: "preflight",
+            status: "failure",
+            message: "[auto-heal] Pending WUD digest is stale; no update was applied.",
+            stack: "auto-heal",
+            services: ["autoheal"],
+            line_numbers: [23],
+          }),
+          progressEvent({ phase: "pull", status: "success", message: "Pulled.", ...homepage }),
+          progressEvent({ phase: "recreate", status: "success", message: "Recreated.", ...homepage }),
+          progressEvent({ phase: "health", status: "success", message: "Healthy.", ...homepage }),
+          progressEvent({
+            phase: "cleanup",
+            status: "success",
+            message: "Pending entries were reconciled.",
+            line_numbers: [5],
+          }),
+          progressEvent({
+            phase: "cleanup",
+            status: "failure",
+            message: "Failed entries were reconciled; stale digest entries were removed.",
+            line_numbers: [23],
+          }),
+        ],
+      }),
+    );
+
+    const verification = state.applyJobVerification.value;
+    expect(verification).toMatchObject({
+      status: "needs_review",
+      verified_count: 1,
+      needs_review_count: 1,
+    });
+    expect(
+      verification.items.map((item) => ({
+        service_key: item.service_key,
+        image_status: item.image_status,
+        wud_status: item.wud_status,
+        follow_up_needed: item.follow_up_needed,
+      })),
+    ).toEqual([
+      {
+        service_key: "homepage/homepage",
+        image_status: "new_image_running",
+        wud_status: "removed",
+        follow_up_needed: false,
+      },
+      {
+        service_key: "auto-heal/autoheal",
+        image_status: "failed",
+        wud_status: "unknown",
+        follow_up_needed: true,
+      },
+    ]);
+    expect(state.applyJobAlertType.value).toBe("warning");
+    expect(state.applyJobTitle.value).toBe("Partially applied");
+    expect(state.applyJobStatusMessage.value).toBe("1 of 2 updates verified; 1 needs review.");
+    expect(state.applyJobPanelStatusLabel.value).toBe("Needs review");
+    expect(state.applyJobNowTitle.value).toBe("Failed: auto-heal");
+    expect(state.applyJobNowMessage.value).toBe(
+      "[auto-heal] Pending WUD digest is stale; no update was applied.",
+    );
   });
 
   it("shows multi-stack apply progress without marking future stacks complete", () => {

@@ -253,7 +253,7 @@ describe("pending view apply jobs", () => {
     expect(wrapper.find(".apply-job-panel").text()).toContain("Running");
     expect(wrapper.find(".apply-job-panel").text()).toContain("media");
     expect(wrapper.find(".apply-job-panel").text()).toContain("Running: Pull images");
-    expect(wrapper.find(".apply-job-panel").text()).toContain("media / calibre / lines 1");
+    expect(wrapper.find(".apply-job-panel").text()).toContain("media / calibre");
     expect(wrapper.find(".apply-progress-step-running").attributes("aria-current")).toBe(
       "step",
     );
@@ -283,7 +283,9 @@ describe("pending view apply jobs", () => {
     expect(wrapper.find(".apply-job-panel").text()).toContain("Post-update verification");
     expect(wrapper.find(".apply-job-panel").text()).toContain("Verified");
     expect(wrapper.find(".apply-job-panel").text()).toContain("New image running");
-    expect(wrapper.find(".apply-job-panel").text()).toContain("WUD line removed");
+    expect(wrapper.find(".apply-job-panel").text()).toContain("Removed from WUD");
+    expect(wrapper.find(".run-verification-panel").text()).not.toMatch(/#\d/);
+    expect(wrapper.find(".apply-job-panel").text()).not.toMatch(/lines \d/);
     await wrapper
       .find(".apply-job-panel")
       .findAll("button")
@@ -631,7 +633,7 @@ describe("pending view apply jobs", () => {
     expect(wrapper.find(".apply-job-panel").text()).toContain("Pull images failed");
     expect(wrapper.find(".apply-job-panel").text()).toContain("[media] Pull failed.");
     expect(wrapper.find(".apply-job-panel").text()).toContain(
-      "media / calibre / lines 1",
+      "media / calibre",
     );
     expect(wrapper.find(".apply-job-panel").text()).toContain("Pull images failed");
 
@@ -647,7 +649,7 @@ describe("pending view apply jobs", () => {
     expect(wrapper.find(".apply-job-panel").text()).toContain("Failed: Pull images");
     expect(wrapper.find(".apply-job-panel").text()).toContain("[media] Pull failed.");
     expect(wrapper.find(".apply-job-panel").text()).toContain(
-      "media / calibre / lines 1",
+      "media / calibre",
     );
   });
 

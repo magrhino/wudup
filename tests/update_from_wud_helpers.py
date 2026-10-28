@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -28,6 +29,7 @@ from wudup.updater import (
 from wudup.updater_models import (
     DigestPinUpdate,
     UpdaterOptions,
+    UpdaterProgressEvent,
 )
 
 MANIFEST_INDEX_TYPE = "application/vnd.oci.image.index.v1+json"
@@ -331,6 +333,7 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
         digest_pin_plan: tuple[DigestPinUpdate, ...] = (),
         exclude_tag_lines: str = "",
         recreate_excluded_services: bool = False,
+        progress_callback: Callable[[UpdaterProgressEvent], None] | None = None,
     ) -> tuple[int, str, str]:
         command_runner = CommandRunner(env=self.env)
         docker = DockerCli(runner=command_runner)
@@ -357,6 +360,7 @@ class UpdateFromWudRunnerTestCase(FakeDockerTestCase):
                 primary_resolver=FailingManifestResolver(),
                 fallback_resolver=DockerManifestResolver(docker),
             ),
+            progress_callback=progress_callback,
         )
         stdout = StringIO()
         stderr = StringIO()

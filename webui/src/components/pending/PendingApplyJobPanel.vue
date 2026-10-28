@@ -107,10 +107,7 @@ function progressTagType(
 function snapshotLineScope(
   line: ApplyJobPlanSnapshot["lines"][number],
 ): string {
-  if (line.scopeLabel) {
-    return line.scopeLabel;
-  }
-  return line.lineNo === null ? "Apply" : `#${line.lineNo}`;
+  return line.scopeLabel || line.stackName || "Apply";
 }
 </script>
 
@@ -150,7 +147,8 @@ function snapshotLineScope(
       class="apply-job-now"
       :class="{
         'apply-job-now-success': job.status === 'success',
-        'apply-job-now-failure': job.status === 'failure',
+        'apply-job-now-failure': job.status === 'failure' && alertType === 'error',
+        'apply-job-now-warning': job.status === 'failure' && alertType === 'warning',
       }"
       aria-live="polite"
       aria-atomic="true"
@@ -372,7 +370,7 @@ function snapshotLineScope(
     <n-alert
       v-if="job.error"
       class="plan-section"
-      type="error"
+      :type="alertType === 'warning' ? 'warning' : 'error'"
     >
       {{ job.error }}
     </n-alert>
@@ -498,6 +496,13 @@ function snapshotLineScope(
   background: color-mix(in srgb,
       var(--color-surface) 90%,
       var(--color-error-fg) 10%);
+}
+
+.apply-job-now-warning {
+  border-color: color-mix(in srgb,
+      var(--color-border) 54%,
+      var(--color-warning-fg) 46%);
+  background: var(--color-warning-bg);
 }
 
 .apply-job-now-copy {
