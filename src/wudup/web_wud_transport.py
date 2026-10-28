@@ -117,7 +117,15 @@ def _configured_authorization_header(
         file_name=WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV,
     )
     if bearer_token and (basic_user or basic_password):
-        raise WebConfigError("WUD API bearer and basic auth cannot both be configured")
+        raise WebConfigError(
+            "WUD API bearer and basic auth cannot both be configured. Keep one: "
+            f"remove {WUD_API_AUTH_BEARER_TOKEN_FILE_ENV}/"
+            f"{WUD_API_AUTH_BEARER_TOKEN_ENV}, or remove "
+            f"{WUD_API_AUTH_BASIC_USER_ENV} and "
+            f"{WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}/"
+            f"{WUD_API_AUTH_BASIC_PASSWORD_ENV}. The WUDup Compose examples set "
+            "the basic-auth pair in the wudup service's environment block."
+        )
     if bool(basic_user) != bool(basic_password):
         raise WebConfigError(
             f"{WUD_API_AUTH_BASIC_USER_ENV} and "

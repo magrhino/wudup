@@ -1611,7 +1611,7 @@ def test_wud_api_auth_config_rejects_malformed_inputs(tmp_path: Path) -> None:
                 web_wud_api.WUD_API_AUTH_BASIC_USER_ENV: "wud-user",
                 web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_ENV: "basic-password",
             },
-            "bearer and basic auth cannot both be configured",
+            "bearer and basic auth cannot both be configured. Keep one",
         ),
         (
             {web_wud_api.WUD_API_AUTH_BASIC_USER_ENV: "wud-user"},

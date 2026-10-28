@@ -256,6 +256,11 @@ def test_doctor_endpoint_suggests_wud_api_auth_configuration(
     assert "WUD_API_AUTH_BEARER_TOKEN_FILE" in suggestions[0]["description"]
     assert "WUD_API_AUTH_BASIC_PASSWORD_FILE" in suggestions[0]["description"]
     assert "WUD_API_HEADERS_FILE" in suggestions[0]["description"]
+    assert "WUD_API_AUTH_BASIC_USER" in suggestions[0]["description"]
+    assert "secrets/wud_api_password" in suggestions[0]["description"]
+    assert suggestions[0]["snippet"] == (
+        "WUD_API_AUTH_BASIC_PASSWORD_FILE=/run/secrets/wud_api_password"
+    )
     assert "authentication support is added" not in suggestions[0]["description"]
 
 
@@ -289,6 +294,38 @@ def test_doctor_warns_when_wud_metadata_contains_degraded_observations(
     assert response.status_code == 200
     assert check["status"] == "WARN"
     assert "The last WUD update check failed for 1 container" in check["detail"]
+
+
+def test_doctor_points_rejected_basic_auth_at_the_shared_password_secret(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    password_file = tmp_path / "wud_api_password"
+    password_file.write_text("rejected-wud-password\n", encoding="utf-8")
+    _install_wud_api(monkeypatch, health=(401, {"error": "authentication required"}))
+    client = _doctor_client(
+        tmp_path,
+        {
+            "WUD_API_BASE_URL": "https://wud.doctor-basic-rejected.test:3000",
+            "WUD_API_AUTH_BASIC_USER": "admin",
+            "WUD_API_AUTH_BASIC_PASSWORD_FILE": str(password_file),
+        },
+    )
+
+    response = client.post("/api/v1/doctor", headers=_csrf_headers(client))
+    body = response.json()
+    suggestion = {check["code"]: check for check in body["checks"]}["wud-api"][
+        "suggestions"
+    ][0]
+
+    assert response.status_code == 200
+    assert suggestion["label"] == "Verify WUD API credentials"
+    assert "secrets/wud_api_password" in suggestion["description"]
+    assert "WUD_API_AUTH_BASIC_USER" in suggestion["description"]
+    assert suggestion["snippet"] == (
+        "WUD_API_AUTH_BASIC_PASSWORD_FILE=/run/secrets/wud_api_password"
+    )
+    assert "rejected-wud-password" not in json.dumps(body)
 
 
 def test_doctor_endpoint_suggests_verifying_rejected_wud_api_auth(

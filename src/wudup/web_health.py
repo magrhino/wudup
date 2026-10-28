@@ -468,6 +468,25 @@ def _web_wud_api_doctor_check(settings: WebSettings) -> DoctorDataCheck:
 
 
 def _wud_api_auth_suggestion(settings: WebSettings) -> DoctorDataSuggestion:
+    if _uses_basic_auth(settings):
+        # The Compose examples sign WUDup in as WUD's administrator from the
+        # shared password secret, so a rejection usually means a mismatch there.
+        return DoctorDataSuggestion(
+            label="Verify WUD API credentials",
+            description=(
+                "WUD rejected WUDup's basic-auth credentials. Check that the file "
+                f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV} names holds "
+                "WUD's administrator password (secrets/wud_api_password in the "
+                f"Compose examples) and that {web_wud_api.WUD_API_AUTH_BASIC_USER_ENV} "
+                "names that administrator, then recreate the wud and wudup "
+                "services. A password changed in WUD's own UI is reset from the "
+                "file when WUD restarts."
+            ),
+            snippet=(
+                f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}="
+                "/run/secrets/wud_api_password"
+            ),
+        )
     if settings.wud_api_client.configured:
         return DoctorDataSuggestion(
             label="Verify WUD API credentials",
@@ -489,12 +508,22 @@ def _wud_api_auth_suggestion(settings: WebSettings) -> DoctorDataSuggestion:
             "Set bearer, basic, or static header credentials for WUDup outbound "
             f"WUD API calls with {web_wud_api.WUD_API_AUTH_BEARER_TOKEN_FILE_ENV}, "
             f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}, or "
-            f"{web_wud_api.WUD_API_HEADERS_FILE_ENV}."
+            f"{web_wud_api.WUD_API_HEADERS_FILE_ENV}. A basic-auth password "
+            f"file also needs {web_wud_api.WUD_API_AUTH_BASIC_USER_ENV}. The "
+            "Compose examples set both from WUD's administrator and "
+            "secrets/wud_api_password."
         ),
         snippet=(
-            f"{web_wud_api.WUD_API_AUTH_BEARER_TOKEN_FILE_ENV}="
-            "/run/secrets/wud_api_token"
+            f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}="
+            "/run/secrets/wud_api_password"
         ),
+    )
+
+
+def _uses_basic_auth(settings: WebSettings) -> bool:
+    return any(
+        name.lower() == "authorization" and value.startswith("Basic ")
+        for name, value in settings.wud_api_client.header_items
     )
 
 

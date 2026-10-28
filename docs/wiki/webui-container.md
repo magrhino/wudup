@@ -7,10 +7,8 @@ and keeps browser access bound to loopback unless you expose it intentionally.
 ## Start The WebUI
 
 Download the Compose example and the env example into one deployment
-directory, review the host stack path and browser exposure settings, and
-configure [WUD API authentication](#wud-api-authentication) before starting the
-service. WUD 9 needs administrator bootstrap credentials on first start and
-WUDup needs separate outbound API settings:
+directory, generate WUD's administrator password, review the host stack path
+and browser exposure settings, then start the service:
 
 ```bash
 mkdir -p wudup && cd wudup
@@ -19,12 +17,17 @@ curl -fsSLo docker-compose.yml \
 curl -fsSLo .env \
   https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
 chmod 600 .env
-# Edit .env: set HOST_DOCKER_BASE, WUD_AUTH_ADMIN_PASSWORD, and one WUD API
-# credential method. For a _FILE credential, also add its read-only mount as
-# described below.
+mkdir -m 700 secrets
+openssl rand -hex 24 > secrets/wud_api_password
+chmod 644 secrets/wud_api_password
+# Edit .env: set HOST_DOCKER_BASE.
 docker compose up -d
 docker compose logs wudup
 ```
+
+WUD 9 requires an administrator. WUD creates it from `secrets/wud_api_password`
+on first start, and WUDup signs in to WUD's API with the same file, so there is
+one password to manage. See [WUD API authentication](#wud-api-authentication).
 
 Run every `docker compose` command in this guide from that directory. Compose
 reads `.env` from the directory that holds `docker-compose.yml`: it fills in
@@ -164,31 +167,34 @@ edit the same Compose file manually while a WUDup rewrite or repair is running.
 
 ## WUD API Authentication
 
-WUD and WUDup have separate accounts. In the Compose env file, set
-`WUD_AUTH_ADMIN_USER=admin` and a strong generated `WUD_AUTH_ADMIN_PASSWORD`
-before WUD's first start. WUD stores its account in the named `/store` volume;
-preserve that volume when recreating the service. Supplying bootstrap credentials
-again updates that administrator's password. An existing deployment with a
-stored administrator can leave the bootstrap password unset.
+WUD's administrator account is separate from the WUDup WebUI login. The Compose
+examples keep its password in one file, `secrets/wud_api_password` next to
+`docker-compose.yml`, and pass that file to both services as a Compose secret:
 
-For basic API authentication, create a private host file containing **only the
-WUD password**, with mode `0600`, readable by the WUDup runtime user. Do not
-mount the entire Compose env file as the password file. Add this read-only mount
-to the `wudup` service's existing `volumes` list (example host path):
+- WUD reads it with `WUD_AUTH_ADMIN_PASSWORD__FILE` and creates or updates its
+  administrator, named by `WUD_AUTH_ADMIN_USER` in `.env` (default `admin`),
+  on every start. This needs WUD 9.3.0 or newer.
+- WUDup reads it with `WUD_API_AUTH_BASIC_PASSWORD_FILE` and signs in to WUD's
+  API as that administrator.
 
-```yaml
-      - /srv/wudup/secrets/wud_api_password:/run/secrets/wud_api_password:ro
-```
+The file must hold **only the password**, without a `:` (WUD's basic auth
+rejects it). `openssl rand -hex 24` generates a suitable one. Keep the file mode
+`0644` inside a mode `0700` directory: the hardened example's WUD service drops
+every capability, so it can read the file only through its world-readable bit,
+and the directory keeps other host users out. If the file is missing,
+`docker compose up` stops with `bind source path does not exist`. To keep it
+somewhere else, set `WUDUP_SECRETS_DIR` in `.env` to the directory that holds
+it.
 
-Then set these values in the Compose env file:
+To change the password, edit the file and run `docker compose up -d
+--force-recreate wud wudup`. WUD resets its administrator to the file's password
+on every start, so a password changed in WUD's own UI does not survive a
+restart. WUD stores its account in the named `/store` volume; preserve that
+volume when recreating the service.
 
-```dotenv
-WUD_API_BASE_URL=http://wud:3000
-WUD_API_AUTH_BASIC_USER=admin
-WUD_API_AUTH_BASIC_PASSWORD_FILE=/run/secrets/wud_api_password
-```
-
-Use the WUD service name and its **container listening port**. If WUD listens on
+WUDup reaches WUD at `http://wud:3000` by default. Set `WUD_API_BASE_URL` in
+`.env` only when the service name or port differs. Use the WUD service name and
+its **container listening port**. If WUD listens on
 a custom port, change `WUD_API_BASE_URL` accordingly; a published host port does
 not change the container port. Keep both services on the same Docker network.
 Direct internal access avoids reverse-proxy access lists and interactive SSO;
@@ -198,9 +204,12 @@ private Docker network; use HTTPS for traffic over untrusted networks.
 For a dedicated integration identity, create a WUD user or personal API token
 with permissions for the features you use. Read-only access covers container
 metadata; rescans require write permission, and configuration diagnostics may
-require administrator access. For a token, mount a token-only file read-only and
-set `WUD_API_AUTH_BEARER_TOKEN_FILE` instead of the basic-auth variables. Browser
-login cookies and reverse-proxy authentication do not configure this client.
+require administrator access. For a token, mount a token-only file read-only,
+remove `WUD_API_AUTH_BASIC_USER`, `WUD_API_AUTH_BASIC_PASSWORD_FILE`, and the
+`wud_api_password` secret from the `wudup` service, and set
+`WUD_API_AUTH_BEARER_TOKEN_FILE` in `.env`; WUDup refuses to start with both
+basic and bearer credentials. Browser login cookies and reverse-proxy
+authentication do not configure this client.
 
 Recreate WUDup after changing its credentials or mounts. Confirm the WUD API
 check in WebUI **Doctor**, including access to `/api/containers`: `/health` can

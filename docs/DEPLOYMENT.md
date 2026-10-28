@@ -78,6 +78,30 @@ When you switch to the current examples:
   WebUI example. If you set another path, edit the `wudup` service's
   `environment:` block instead.
 
+## Moving To The WUD Password Secret
+
+The Compose examples now pass WUD's administrator password to WUD and WUDup as
+one Compose secret instead of `WUD_AUTH_ADMIN_PASSWORD` in `.env` plus a
+separately mounted password file. A Compose file copied from an earlier example
+keeps working as it is. When you switch to the current examples:
+
+- Write WUD's current administrator password to `secrets/wud_api_password`
+  next to the Compose file (mode `0644`, directory mode `0700`), or set
+  `WUDUP_SECRETS_DIR` in `.env` to the directory of the password file you
+  already mount. WUD resets its administrator to the file's password on every
+  start, so a new password in the file replaces the old one.
+- Remove `WUD_AUTH_ADMIN_PASSWORD`, `WUD_API_AUTH_BASIC_USER`, and
+  `WUD_API_AUTH_BASIC_PASSWORD_FILE` from `.env`. The examples set the WUDup
+  values in the `wudup` service, where they win over `.env`, and no longer pass
+  `WUD_AUTH_ADMIN_PASSWORD` to WUD.
+- If WUDup signs in another way, remove the two basic-auth lines and the
+  secret from the `wudup` service, and keep your setting in `.env`: a WUD API
+  token (`WUD_API_AUTH_BEARER_TOKEN_FILE` or `WUD_API_AUTH_BEARER_TOKEN`), a
+  direct `WUD_API_AUTH_BASIC_PASSWORD`, or an `Authorization` header in
+  `WUD_API_HEADERS_FILE`. WUDup refuses to start when those are combined with
+  the example's basic-auth lines.
+- The secret needs WUD 9.3.0 or newer; the examples use `getwud/wud:latest`.
+
 ## Requirements
 
 - Docker with the Compose plugin on the host. The Compose examples need Compose
@@ -133,13 +157,18 @@ docker build -t wudup:local .
 ## Start The WebUI
 
 WUD 9 requires an administrator and authenticated API requests, even on the
-private Compose network. Before starting a generated or copied configuration,
-set WUD's bootstrap password and configure WUDup's outbound credentials and any
-secret-file mount as described in
+private Compose network. The Compose examples read WUD's administrator password
+from one file, `secrets/wud_api_password` next to the Compose file: WUD creates
+its administrator from it, and WUDup signs in to WUD's API with it. Create that
+file before the first start, as shown below; see
 [WUD API authentication](wiki/webui-container.md#wud-api-authentication).
-The bootstrap password is not automatically passed to WUDup's API client.
 
-If the `wudup` CLI is available, generate first-run WebUI config:
+If the `wudup` CLI is available, generate first-run WebUI config. With either
+profile below, create WUD's password file with the `mkdir`, `openssl`, and
+`chmod` lines from the download example further down, then set
+`WUDUP_SECRETS_DIR` in the generated env file to the absolute path of its
+directory. Otherwise Compose looks for `secrets/` next to the example file,
+under `docs/examples/`:
 
 ```bash
 wudup init --profile webui --stack-root /srv/docker --non-interactive
@@ -173,6 +202,9 @@ curl -fsSLo docker-compose.yml \
 curl -fsSLo .env \
   https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
 chmod 600 .env
+mkdir -m 700 secrets
+openssl rand -hex 24 > secrets/wud_api_password
+chmod 644 secrets/wud_api_password
 docker compose up -d
 docker compose logs wudup
 ```
