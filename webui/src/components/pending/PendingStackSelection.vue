@@ -11,7 +11,6 @@ import type {
 } from "../../api/client";
 import type {
   RuntimeDeferredPendingItem,
-  SelfUpdatePendingItem,
   SnoozedPendingItem,
 } from "../../views/pending/snoozeSelection";
 import {
@@ -47,7 +46,7 @@ defineProps<{
   snoozedItems: SnoozedPendingItem[];
   stackGroups: PendingStackGroup[];
   stoppedItems: RuntimeDeferredPendingItem[];
-  selfUpdateItems: SelfUpdatePendingItem[];
+  selfUpdateItems: SnoozedPendingItem[];
   stackHasSelection: (group: PendingStackGroup) => boolean;
   stackIndeterminate: (group: PendingStackGroup) => boolean;
   stackSelected: (group: PendingStackGroup) => boolean;

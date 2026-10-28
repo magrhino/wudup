@@ -9,7 +9,6 @@ import type {
 } from "../../api/client";
 import type {
   RuntimeDeferredPendingItem,
-  SelfUpdatePendingItem,
   SnoozedPendingItem,
 } from "../../views/pending/snoozeSelection";
 import {
@@ -32,7 +31,7 @@ defineProps<{
   snoozedCandidates: PendingSnoozedCandidate[];
   snoozedItems: SnoozedPendingItem[];
   stoppedItems: RuntimeDeferredPendingItem[];
-  selfUpdateItems: SelfUpdatePendingItem[];
+  selfUpdateItems: SnoozedPendingItem[];
   tagInputProps: (item: Pick<PendingItem, "image">) => PendingTagInputProps;
   tagOverrideValue: (item: PendingItem) => string;
 }>();

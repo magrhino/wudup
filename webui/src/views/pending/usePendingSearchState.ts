@@ -12,7 +12,6 @@ import type { ReleaseChangelogState } from "../../utils/releaseChangelog";
 import type { SafetyCue } from "./safetyCues";
 import type {
   RuntimeDeferredPendingItem,
-  SelfUpdatePendingItem,
   SnoozedPendingItem,
 } from "./snoozeSelection";
 import {
@@ -30,7 +29,7 @@ type UsePendingSearchStateOptions = {
   snoozedCandidates: ComputedRef<PendingSnoozedCandidate[]>;
   snoozedItems: ComputedRef<SnoozedPendingItem[]>;
   stoppedItems: ComputedRef<RuntimeDeferredPendingItem[]>;
-  selfUpdateItems: ComputedRef<SelfUpdatePendingItem[]>;
+  selfUpdateItems: ComputedRef<SnoozedPendingItem[]>;
   selectableLineNumbers: ComputedRef<number[]>;
   selectableSelections: ComputedRef<PlanSelectionRequest[]>;
   selectAllLabel: ComputedRef<string>;

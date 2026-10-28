@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -485,12 +486,19 @@ def self_scope_issues(
     matches: Sequence[Match],
     update_scope: Callable[..., UpdateScope],
     *,
-    protected_container: str,
-    environ: Mapping[str, str],
+    protected_container: str | None,
+    environ: Mapping[str, str] | None,
 ) -> list[DryRunPlanIssue]:
-    """Report stacks the apply preflight would block because they stop WUDup."""
+    """Report stacks the apply preflight would block because they stop WUDup.
 
-    identity = self_scope_identity(docker, protected_container, environ)
+    Only WebUI plans pass a protected container ("" when unset); other plans skip this.
+    """
+
+    if protected_container is None:
+        return []
+    identity = self_scope_identity(
+        docker, protected_container, os.environ if environ is None else environ,
+    )
     if identity is None:
         return []
     issues: list[DryRunPlanIssue] = []

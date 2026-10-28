@@ -20,8 +20,6 @@ export type SnoozedPendingItem = {
 
 export type RuntimeDeferredPendingItem = SnoozedPendingItem;
 
-export type SelfUpdatePendingItem = SnoozedPendingItem;
-
 export function activeSnoozedServiceKeys(
   snoozes: SnoozeSelectionRecord[],
 ): Set<string> {
@@ -115,7 +113,7 @@ export function itemUpdatesWudup(item: PendingGroupedItem): boolean {
 
 export function selfUpdateItemsForGroups(
   groups: PendingStackGroup[],
-): SelfUpdatePendingItem[] {
+): SnoozedPendingItem[] {
   return groups.flatMap((group) =>
     group.items
       .filter(itemUpdatesWudup)

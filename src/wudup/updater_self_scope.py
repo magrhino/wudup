@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .command import CommandError
@@ -32,6 +32,15 @@ _SELF_UPDATE_MESSAGE = (
 )
 # Bound on following network_mode container:<name> links before failing closed.
 _NETWORK_MODE_HOP_LIMIT = 5
+_SCOPE_LOOKUP_MESSAGE = (
+    "Could not verify the update's recreate scope; no update was applied. "
+    "Check Docker access and the Compose configuration, then retry."
+)
+_CONTAINER_LOOKUP_MESSAGE = (
+    "Could not verify whether this update includes the WUDup "
+    "container; no update was applied. Check Docker access and "
+    "the Compose configuration, then retry."
+)
 _DOCKER_ENDPOINT_LOOKUP_MESSAGE = (
     "Could not check whether this update would stop the Docker endpoint "
     "WUDup uses (DOCKER_HOST); no update was applied. Check Docker access "
@@ -109,66 +118,94 @@ def self_scope_block(
 ) -> tuple[UpdateScope | None, SelfScopeBlock | None]:
     """Check one stack's strict recreate scope; shared by apply preflight and plan review."""
 
-    message = identity.identity_error
-    reason = _SELF_UPDATE_BLOCKED
-    protected_services: set[str] = set()
-    scope = None
-    endpoint = identity.endpoint
-    if not message:
-        try:
-            scope = update_scope()
-        except (CommandError, ValueError):
-            message = (
-                "Could not verify the update's recreate scope; no update was applied. "
-                "Check Docker access and the Compose configuration, then retry."
+    if identity.identity_error:
+        return None, SelfScopeBlock(
+            _SELF_UPDATE_BLOCKED, identity.identity_error, frozenset(),
+        )
+    try:
+        scope = update_scope()
+    except (CommandError, ValueError):
+        reason = _SELF_UPDATE_BLOCKED if identity.protect_self else _DOCKER_ENDPOINT_BLOCKED
+        return None, SelfScopeBlock(reason, _SCOPE_LOOKUP_MESSAGE, frozenset())
+    return scope, _scoped_block(identity, docker, compose, stack, scope)
+
+
+def _scoped_block(
+    identity: SelfScopeIdentity,
+    docker: Any,
+    compose: Any,
+    stack: ComposeStack,
+    scope: UpdateScope,
+) -> SelfScopeBlock | None:
+    services = set(runtime_services_for_scope(scope))
+    protected_services = {
+        item.service for item in stack.service_images
+        if identity.protect_self
+        and item.service in services
+        and is_self_update_target(item.image)
+    }
+    container_ids, lookup_block = _scope_container_ids(identity, compose, stack, services)
+    if lookup_block is not None:
+        return replace(lookup_block, services=frozenset(protected_services))
+    if identity.protected_id and identity.protected_id in container_ids:
+        protected_services.update(services)
+    if protected_services:
+        return SelfScopeBlock(
+            _SELF_UPDATE_BLOCKED, _SELF_UPDATE_MESSAGE, frozenset(protected_services),
+        )
+    if identity.endpoint is None:
+        return None
+    return _endpoint_block(identity, docker, container_ids)
+
+
+def _scope_container_ids(
+    identity: SelfScopeIdentity,
+    compose: Any,
+    stack: ComposeStack,
+    services: set[str],
+) -> tuple[list[str], SelfScopeBlock | None]:
+    """Return the scope's container IDs, or a fail-closed block when they cannot be read."""
+
+    if not identity.protected_id and identity.endpoint is None:
+        return [], None
+    try:
+        container_ids = compose.ps_quiet_checked(
+            stack.directory, stack.file, tuple(sorted(services)),
+            project_directory=stack.project_directory,
+        )
+    except CommandError:
+        if identity.protected_id:
+            return [], SelfScopeBlock(
+                _SELF_UPDATE_BLOCKED, _CONTAINER_LOOKUP_MESSAGE, frozenset(),
             )
-            if not identity.protect_self:
-                reason = _DOCKER_ENDPOINT_BLOCKED
-    if scope is not None:
-        services = set(runtime_services_for_scope(scope))
-        if identity.protect_self:
-            protected_services = {
-                item.service for item in stack.service_images
-                if item.service in services and is_self_update_target(item.image)
-            }
-        container_ids: list[str] = []
-        if identity.protected_id or endpoint is not None:
-            try:
-                container_ids = compose.ps_quiet_checked(
-                    stack.directory, stack.file, tuple(sorted(services)),
-                    project_directory=stack.project_directory,
-                )
-            except CommandError:
-                if identity.protected_id:
-                    message = (
-                        "Could not verify whether this update includes the WUDup "
-                        "container; no update was applied. Check Docker access and "
-                        "the Compose configuration, then retry."
-                    )
-                else:
-                    message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
-                    reason = _DOCKER_ENDPOINT_BLOCKED
-        if identity.protected_id and identity.protected_id in container_ids:
-            protected_services.update(services)
-        if endpoint is not None and not message and not protected_services:
-            try:
-                endpoint_services = _docker_endpoint_services(
-                    docker, container_ids, identity.resolved_endpoint,
-                )
-            except (CommandError, TypeError, ValueError):
-                message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
-                reason = _DOCKER_ENDPOINT_BLOCKED
-            else:
-                if endpoint_services:
-                    protected_services = endpoint_services
-                    reason = _DOCKER_ENDPOINT_BLOCKED
-                    message = _docker_endpoint_message(endpoint.host, endpoint_services)
-    if not message and not protected_services:
-        return scope, None
-    return scope, SelfScopeBlock(
-        reason=reason,
-        message=message or _SELF_UPDATE_MESSAGE,
-        services=frozenset(protected_services),
+        return [], SelfScopeBlock(
+            _DOCKER_ENDPOINT_BLOCKED, _DOCKER_ENDPOINT_LOOKUP_MESSAGE, frozenset(),
+        )
+    return container_ids, None
+
+
+def _endpoint_block(
+    identity: SelfScopeIdentity,
+    docker: Any,
+    container_ids: Sequence[str],
+) -> SelfScopeBlock | None:
+    endpoint = identity.endpoint
+    if endpoint is None:
+        return None
+    try:
+        endpoint_services = _docker_endpoint_services(
+            docker, container_ids, identity.resolved_endpoint,
+        )
+    except (CommandError, TypeError, ValueError):
+        return SelfScopeBlock(
+            _DOCKER_ENDPOINT_BLOCKED, _DOCKER_ENDPOINT_LOOKUP_MESSAGE, frozenset(),
+        )
+    if not endpoint_services:
+        return None
+    return SelfScopeBlock(
+        _DOCKER_ENDPOINT_BLOCKED,
+        _docker_endpoint_message(endpoint.host, endpoint_services),
+        frozenset(endpoint_services),
     )
 
 

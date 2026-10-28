@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -140,6 +139,13 @@ class _TagStreamPlanInputs:
     tag_overrides: Sequence[TagOverride] = ()
     decisions: Sequence[TagStreamDecision] = ()
     label_rewrite_approvals: Sequence[TagStreamLabelRewriteApproval] = ()
+
+
+@dataclass(frozen=True)
+class _PlanHostInputs:
+    host_docker_base: Path | None = None
+    environ: Mapping[str, str] | None = None
+    protected_container: str | None = None
 
 
 @dataclass
@@ -354,17 +360,16 @@ class _PlanBuilder(_UpdateScopeMixin):
             issues.extend(
                 preflight_issues(self.config, self.compose, matches, self._update_scope)
             )
-            if self.protected_container is not None:
-                issues.extend(
-                    self_scope_issues(
-                        self.docker,
-                        self.compose,
-                        matches,
-                        self._update_scope,
-                        protected_container=self.protected_container,
-                        environ=os.environ if self.environ is None else self.environ,
-                    )
+            issues.extend(
+                self_scope_issues(
+                    self.docker,
+                    self.compose,
+                    matches,
+                    self._update_scope,
+                    protected_container=self.protected_container,
+                    environ=self.environ,
                 )
+            )
 
         targets_by_line = {target.line_no: target for target in parsed.targets}
         plan_stacks = self._plan_stacks(matches)
@@ -873,10 +878,12 @@ def build_dry_run_plan_from_pending_source(
             label_rewrite_approvals=tag_stream_label_rewrite_approvals,
         ),
         digest_pin_label_rewrite_approvals=digest_pin_label_rewrite_approvals,
-        host_docker_base=host_docker_base,
-        environ=environ,
+        host_inputs=_PlanHostInputs(
+            host_docker_base=host_docker_base,
+            environ=environ,
+            protected_container=protected_container,
+        ),
         known_digest_provenance_by_service=known_digest_provenance_by_service,
-        protected_container=protected_container,
     )
 
 
@@ -894,12 +901,13 @@ def _build_dry_run_plan_from_pending_source(
     digest_pin_label_rewrite_approvals: Sequence[
         DigestPinLabelRewriteApproval
     ] = (),
-    host_docker_base: Path | None = None,
-    environ: Mapping[str, str] | None = None,
+    host_inputs: _PlanHostInputs | None = None,
     known_digest_provenance_by_service: _DigestProvenanceByService | None = None,
-    protected_container: str | None = None,
 ) -> DryRunPlan:
-    runner = CommandRunner(env=environ) if environ is not None else CommandRunner()
+    host = host_inputs or _PlanHostInputs()
+    runner = (
+        CommandRunner(env=host.environ) if host.environ is not None else CommandRunner()
+    )
     selections = selection_scope or _PlanSelectionScope()
     stream_inputs = tag_stream_inputs or _TagStreamPlanInputs()
     return _PlanBuilder(
@@ -911,15 +919,15 @@ def _build_dry_run_plan_from_pending_source(
         tag_stream_decisions=stream_inputs.decisions,
         tag_stream_label_rewrite_approvals=stream_inputs.label_rewrite_approvals,
         digest_pin_label_rewrite_approvals=digest_pin_label_rewrite_approvals,
-        host_docker_base=host_docker_base,
+        host_docker_base=host.host_docker_base,
         command_runner=runner,
         source_parsed=parsed,
         source_file=source_file,
         source_hash=source_hash,
         source=source,
         known_digest_provenance_by_service=known_digest_provenance_by_service or {},
-        protected_container=protected_container,
-        environ=environ,
+        protected_container=host.protected_container,
+        environ=host.environ,
     ).build()
 
 
