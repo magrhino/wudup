@@ -14,28 +14,40 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 
 ## How Settings Reach The Container
 
-In the Compose examples, Compose reads the env file (`.env` next to the Compose
-file, or the file passed with `--env-file`) only to fill in `${VAR}` references
-in the Compose file. The `wudup` service receives just the variables its
-`environment:` block lists, so a variable missing from that block never reaches
-WUDup, even when the env file sets it.
+In the Compose examples, keep the env file at `.env` next to the Compose file.
+Compose uses it twice: it fills in `${VAR}` references in the Compose file, and
+the `wudup` service loads the same file with `env_file`, so every variable in
+it reaches WUDup. The `env_file` entry is optional (`required: false`) and needs
+Compose 2.24 or newer.
 
-The WebUI Compose examples (`docker-compose.webui.yml` and
-`docker-compose.hardened.yml`) do not list `WUD_COMPOSE_IGNORE_PATHS`,
-`WUD_DIGEST_PIN_UPDATES`, `WUD_RELEASE_NOTES_ENABLED`, `WUD_WEB_TOKEN`,
-`WUD_WEB_ALLOWED_ORIGINS`, `WUD_WEB_RESTART_CONTAINER`, or any variable in
-[Advanced Settings](#advanced-settings) and
-[Development And Image-Internal](#development-and-image-internal) other than
-`WUD_API_BASE_URL`, `WUD_API_STARTUP_WAIT_SECONDS`,
-`WUD_SECURITY_SCANNING_ENABLED`, `WUD_SECURITY_SCAN_CACHE_DIR`, and
-`WUD_SECURITY_SCAN_TIMEOUT_SECONDS`. The command-runner examples
-(`docker-compose.example.yml` and `docker-compose.build.yml`) list only their
-fixed paths and `OUT_UID`/`OUT_GID`. To set another variable, add it to the
-`wudup` service's `environment:` block, for example
-`WUD_UPDATE_MODE: "${WUD_UPDATE_MODE:-stop}"`.
+The `wudup` service's `environment:` block wins over `.env`. In the WebUI
+examples it pins the [fixed container paths](#fixed-container-paths) and sets
+the Compose defaults that differ from WUDup's own: `WUD_WEB_PORT`,
+`WUD_API_STARTUP_WAIT_SECONDS`, and `OUT_UID`/`OUT_GID`. Those defaults still
+come from `.env` through `${VAR}` references. `HOST_DOCKER_BASE` is set from the
+same `${HOST_DOCKER_BASE}` reference as `DOCKER_BASE` and the stack mount, so
+WUDup always maps stacks with the root Compose mounted. The command-runner
+examples pin only their fixed paths, `HOST_DOCKER_BASE`, and `OUT_UID`/`OUT_GID`.
 
-WUD receives only the variables listed under its own service. WUD reads its own
-`WUD_*` settings, so do not pass WUDup variables to the `wud` service.
+A file passed with `--env-file` only fills in `${VAR}` references. To keep the
+env file somewhere else, set `WUDUP_ENV_FILE` in it to the file's own path (or
+export it in the shell) so the `wudup` service loads that file instead of
+`.env`. Variables exported only in the shell, or set in a Portainer stack's
+environment, fill in `${VAR}` references. They reach WUDup only through the
+variables the `environment:` block interpolates (such as `HOST_DOCKER_BASE` and
+`WUD_WEB_PORT`) or when the file `env_file` loads also contains them.
+
+Every variable WUDup receives also reaches the `docker compose` commands it
+runs for your stacks, where it overrides the same name in a stack's own `.env`,
+so keep only WUDup and WUD settings in this file. WUDup removes
+`COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`,
+`COMPOSE_PATH_SEPARATOR`, `COMPOSE_DISABLE_ENV_FILE`, and WUD's
+`WUD_AUTH_ADMIN_USER`/`WUD_AUTH_ADMIN_PASSWORD` before it runs Compose for your
+stacks, because in its own environment they describe the WUDup deployment.
+
+WUD receives only the variables listed under its own service and never loads
+`.env` with `env_file`. WUD reads its own `WUD_*` settings, so do not pass
+WUDup variables to the `wud` service.
 
 ## Variable Groups
 
@@ -57,6 +69,7 @@ the other defaults fit a loopback, read-only first run.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `WUDUP_ENV_FILE` | `.env` | Read only by Compose, from the shell or a file passed with `--env-file`. Names the env file the `wudup` service loads with `env_file`; a relative path is relative to the Compose file. `wudup init` writes it into the env file it generates. |
 | `HOST_DOCKER_BASE` | Compose examples: `/srv/docker`; host commands: unset | Host directory that contains your Compose stacks. The Compose examples mount it at the same absolute path and set `DOCKER_BASE` from it. For host commands it is an optional daemon-visible host root matching `DOCKER_BASE` inside the helper. The path must also be mounted/readable inside the helper because Compose uses it as `--project-directory`. |
 | `WEBUI_LOG_DIR` | `./logs` | Host-side directory mounted at `/logs` by the long-running WebUI Compose examples; persists updater logs and SQLite state. |
 | `WEBUI_HTTP_BIND` | `127.0.0.1` | Host-side bind address used by the long-running WebUI Compose examples. Keep loopback for first run; use a LAN address or `0.0.0.0` only with `WUD_WEB_PUBLIC_ORIGIN` configured. |

@@ -6,21 +6,33 @@ and keeps browser access bound to loopback unless you expose it intentionally.
 
 ## Start The WebUI
 
-Copy the env example, review the host stack path and browser exposure settings,
-and configure [WUD API authentication](#wud-api-authentication) before starting
-the service. WUD 9 needs administrator bootstrap credentials on first start and
+Download the Compose example and the env example into one deployment
+directory, review the host stack path and browser exposure settings, and
+configure [WUD API authentication](#wud-api-authentication) before starting the
+service. WUD 9 needs administrator bootstrap credentials on first start and
 WUDup needs separate outbound API settings:
 
 ```bash
-WEBUI_ENV="$HOME/.config/wudup/webui.env"
-mkdir -p "$HOME/.config/wudup"
-test -f "$WEBUI_ENV" || cp docs/examples/webui.env.example "$WEBUI_ENV"
-chmod 600 "$WEBUI_ENV"
-# Edit WEBUI_ENV: set WUD_AUTH_ADMIN_PASSWORD and one WUD_API_AUTH_* method.
-# For a _FILE credential, also add its read-only mount as described below.
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml logs wudup
+mkdir -p wudup && cd wudup
+curl -fsSLo docker-compose.yml \
+  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/docker-compose.webui.yml
+curl -fsSLo .env \
+  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
+chmod 600 .env
+# Edit .env: set HOST_DOCKER_BASE, WUD_AUTH_ADMIN_PASSWORD, and one WUD API
+# credential method. For a _FILE credential, also add its read-only mount as
+# described below.
+docker compose up -d
+docker compose logs wudup
 ```
+
+Run every `docker compose` command in this guide from that directory. Compose
+reads `.env` from the directory that holds `docker-compose.yml`: it fills in
+`${VAR}` references, and the `wudup` service loads the same file with
+`env_file` (Compose 2.24 or newer). Passing the file with `--env-file` only fills
+in `${VAR}` references; to keep it elsewhere, set `WUDUP_ENV_FILE` in it to the
+file's own path. See
+[Configuration](../CONFIGURATION.md#how-settings-reach-the-container).
 
 The example publishes the browser endpoint on loopback:
 
@@ -42,7 +54,7 @@ points WUD/WUDup at `tcp://socket-proxy-wudup:2375`.
 Run `doctor` after changing mounts, Docker access, or helper environment:
 
 ```bash
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml run --rm wudup doctor
+docker compose run --rm wudup doctor
 ```
 
 The authenticated WebUI Doctor page runs the same deployment checks from the
@@ -342,7 +354,7 @@ For the Compose example, run it through the WebUI container so it uses the
 mounted SQLite database:
 
 ```bash
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml run --rm wudup web reset-admin --user admin
+docker compose run --rm wudup web reset-admin --user admin
 ```
 
 The command prints one `/#/reset-admin?claim=...` link. Opening that link lets
@@ -355,12 +367,12 @@ without storing or printing the raw recovery claim.
 Pull the new image and recreate WUDup:
 
 ```bash
-WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml pull wudup
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d --force-recreate wudup
+docker compose pull wudup
+docker compose up -d --force-recreate wudup
 ```
 
-For local image development, use the build example instead:
+For local image development, run the build example from a repository checkout
+instead:
 
 ```bash
 docker compose -f docs/examples/docker-compose.build.yml build wudup
