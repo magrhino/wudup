@@ -508,8 +508,10 @@ def _wud_api_auth_suggestion(settings: WebSettings) -> DoctorDataSuggestion:
             "Set bearer, basic, or static header credentials for WUDup outbound "
             f"WUD API calls with {web_wud_api.WUD_API_AUTH_BEARER_TOKEN_FILE_ENV}, "
             f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}, or "
-            f"{web_wud_api.WUD_API_HEADERS_FILE_ENV}. The Compose examples "
-            "read WUD's administrator password from secrets/wud_api_password."
+            f"{web_wud_api.WUD_API_HEADERS_FILE_ENV}. A basic-auth password "
+            f"file also needs {web_wud_api.WUD_API_AUTH_BASIC_USER_ENV}. The "
+            "Compose examples set both from WUD's administrator and "
+            "secrets/wud_api_password."
         ),
         snippet=(
             f"{web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_FILE_ENV}="

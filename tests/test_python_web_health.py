@@ -256,6 +256,11 @@ def test_doctor_endpoint_suggests_wud_api_auth_configuration(
     assert "WUD_API_AUTH_BEARER_TOKEN_FILE" in suggestions[0]["description"]
     assert "WUD_API_AUTH_BASIC_PASSWORD_FILE" in suggestions[0]["description"]
     assert "WUD_API_HEADERS_FILE" in suggestions[0]["description"]
+    assert "WUD_API_AUTH_BASIC_USER" in suggestions[0]["description"]
+    assert "secrets/wud_api_password" in suggestions[0]["description"]
+    assert suggestions[0]["snippet"] == (
+        "WUD_API_AUTH_BASIC_PASSWORD_FILE=/run/secrets/wud_api_password"
+    )
     assert "authentication support is added" not in suggestions[0]["description"]
 
 
