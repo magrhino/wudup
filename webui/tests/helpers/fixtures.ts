@@ -26,6 +26,8 @@ import type {
   RunVerificationSummary,
   RunSummary,
   SecurityScanInfo,
+  SecurityScanJobResponse,
+  SecurityScansResponse,
   ServicePolicyRecord,
   TrackedContainerItem,
   TrackedContainersResponse,
@@ -807,6 +809,67 @@ export function securityScanInfo(
     error_message: "",
     ...overrides,
     severity_counts: severityCounts,
+  };
+}
+
+export function completeSecurityScanInfo(
+  overrides: Partial<SecurityScanInfo> = {},
+): SecurityScanInfo {
+  return securityScanInfo({
+    state: "complete",
+    verdict: "findings",
+    scanner_version: "test",
+    scanner_schema: "2",
+    scanned_at: "2026-06-26T00:00:00+00:00",
+    severity_counts: { critical: 0, high: 1, medium: 0, low: 0, unknown: 0 },
+    fixable_counts: { critical: 0, high: 1, medium: 0, low: 0, unknown: 0 },
+    subject: {
+      requested_ref: "repo/app:1.0",
+      reported_digest: "sha256:test",
+      manifest_digest: "sha256:test-child",
+      platform: "linux/amd64",
+    },
+    ...overrides,
+  });
+}
+
+export function securityScansResponse(
+  items: SecurityScanInfo[],
+  overrides: Partial<SecurityScansResponse> = {},
+): SecurityScansResponse {
+  return {
+    source_file: "/out/images.todo",
+    source: {
+      configured: "file",
+      active: "file",
+      label: "Pending file",
+      fresh: true,
+      degraded: false,
+      fallback_reason: "",
+      detail: "",
+    },
+    source_hash: "pending-source-hash",
+    scanning_enabled: true,
+    scanner: "trivy",
+    scan_mode: "registry",
+    count: items.length,
+    items,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+export function securityScanJobResponse(
+  overrides: Partial<SecurityScanJobResponse> = {},
+): SecurityScanJobResponse {
+  return {
+    job_id: "security-scan-test",
+    status: "success",
+    total_count: 1,
+    completed_count: 1,
+    result: securityScansResponse([completeSecurityScanInfo()]),
+    error: "",
+    ...overrides,
   };
 }
 
