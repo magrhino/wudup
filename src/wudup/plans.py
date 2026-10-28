@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -29,6 +30,7 @@ from .plan_issues import (
     digest_unpin_plan_issues,
     manifest_issues,
     preflight_issues,
+    self_scope_issues,
     tag_update_plan_issues,
     unmatched_issues,
 )
@@ -65,6 +67,7 @@ from .plan_models import (
     PlanInputError,
     UnmatchedDiagnostic,
 )
+from .self_update import is_self_update_target
 from .tag_streams import pending_tag_stream_hint, plan_tag_stream_changes
 from .updater_digest_pin import _digest_pin_match_tag
 from .updater_lifecycle_scope import (
@@ -160,6 +163,10 @@ class _PlanBuilder(_UpdateScopeMixin):
     known_digest_provenance_by_service: _DigestProvenanceByService = field(
         default_factory=dict,
     )
+    # WebUI plans pass WUD_WEB_RESTART_CONTAINER ("" when unset) so review
+    # blocks the same WUDup recreate scopes as the apply preflight.
+    protected_container: str | None = None
+    environ: Mapping[str, str] | None = None
     docker: DockerCli = field(init=False)
     compose: ComposeCli = field(init=False)
     digest_pin_updates_by_stack: dict[int, tuple[DigestPinUpdate, ...]] = field(
@@ -347,6 +354,17 @@ class _PlanBuilder(_UpdateScopeMixin):
             issues.extend(
                 preflight_issues(self.config, self.compose, matches, self._update_scope)
             )
+            if self.protected_container is not None:
+                issues.extend(
+                    self_scope_issues(
+                        self.docker,
+                        self.compose,
+                        matches,
+                        self._update_scope,
+                        protected_container=self.protected_container,
+                        environ=os.environ if self.environ is None else self.environ,
+                    )
+                )
 
         targets_by_line = {target.line_no: target for target in parsed.targets}
         plan_stacks = self._plan_stacks(matches)
@@ -838,6 +856,7 @@ def build_dry_run_plan_from_pending_source(
     host_docker_base: Path | None = None,
     environ: Mapping[str, str] | None = None,
     known_digest_provenance_by_service: _DigestProvenanceByService | None = None,
+    protected_container: str | None = None,
 ) -> DryRunPlan:
     return _build_dry_run_plan_from_pending_source(
         config,
@@ -857,6 +876,7 @@ def build_dry_run_plan_from_pending_source(
         host_docker_base=host_docker_base,
         environ=environ,
         known_digest_provenance_by_service=known_digest_provenance_by_service,
+        protected_container=protected_container,
     )
 
 
@@ -877,6 +897,7 @@ def _build_dry_run_plan_from_pending_source(
     host_docker_base: Path | None = None,
     environ: Mapping[str, str] | None = None,
     known_digest_provenance_by_service: _DigestProvenanceByService | None = None,
+    protected_container: str | None = None,
 ) -> DryRunPlan:
     runner = CommandRunner(env=environ) if environ is not None else CommandRunner()
     selections = selection_scope or _PlanSelectionScope()
@@ -897,6 +918,8 @@ def _build_dry_run_plan_from_pending_source(
         source_hash=source_hash,
         source=source,
         known_digest_provenance_by_service=known_digest_provenance_by_service or {},
+        protected_container=protected_container,
+        environ=environ,
     ).build()
 
 
@@ -1141,9 +1164,23 @@ def _pending_grouping_items(
                 target_image=_pending_digest_unpin_target_image(digest_unpin),
                 digest_pin_updates_enabled=digest_pin_updates_enabled,
                 selection_id=selection_id_for_matches(line_matches),
+                self_update_services=_self_update_services(stack, runtime_services),
             )
         )
     return tuple(items)
+
+
+def _self_update_services(
+    stack: ComposeStack,
+    runtime_services: Sequence[str],
+) -> tuple[str, ...]:
+    """Name only; apply preflight still checks container identity and DOCKER_HOST."""
+    scoped = set(runtime_services)
+    return _ordered_unique(
+        item.service
+        for item in stack.service_images
+        if item.service in scoped and is_self_update_target(item.image)
+    )
 
 
 def _pending_grouping_digest_provenance(
@@ -1180,6 +1217,7 @@ def _pending_grouping_item(
     target_image: str = "",
     digest_pin_updates_enabled: bool = True,
     selection_id: str = "",
+    self_update_services: Sequence[str] = (),
 ) -> PendingGroupingItem:
     resolved = resolved_image or target.first
     resolved_target_image = _pending_grouping_target_image(
@@ -1211,6 +1249,7 @@ def _pending_grouping_item(
         runtime_services=tuple(runtime_services),
         action=action,
         selection_id=selection_id,
+        self_update_services=tuple(self_update_services),
         platform=target.platform_value,
         platform_os=target.platform.os if target.platform is not None else "",
         platform_architecture=(

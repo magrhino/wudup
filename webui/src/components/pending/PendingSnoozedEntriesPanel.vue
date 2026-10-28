@@ -9,6 +9,7 @@ import type {
 } from "../../api/client";
 import type {
   RuntimeDeferredPendingItem,
+  SelfUpdatePendingItem,
   SnoozedPendingItem,
 } from "../../views/pending/snoozeSelection";
 import {
@@ -31,6 +32,7 @@ defineProps<{
   snoozedCandidates: PendingSnoozedCandidate[];
   snoozedItems: SnoozedPendingItem[];
   stoppedItems: RuntimeDeferredPendingItem[];
+  selfUpdateItems: SelfUpdatePendingItem[];
   tagInputProps: (item: Pick<PendingItem, "image">) => PendingTagInputProps;
   tagOverrideValue: (item: PendingItem) => string;
 }>();
@@ -98,9 +100,59 @@ function runtimeMeta(item: PendingGroupedItem): string {
   }
   return "Runtime state could not be verified. WUDup will check again before making changes.";
 }
+
+function selfUpdateMeta(item: PendingGroupedItem): string {
+  const services = item.self_update_services ?? [];
+  return `${services.join(", ")} runs WUDup, and an update job would stop it partway through. Use the self-update action, or update this stack from the host.`;
+}
 </script>
 
 <template>
+  <article v-if="selfUpdateItems.length" class="stack-card needs-review">
+    <div class="stack-card-header">
+      <div class="stack-title-block">
+        <strong class="wrap-anywhere">Updates to WUDup itself</strong>
+        <span class="stack-path wrap-anywhere">
+          Cannot be selected here. Use the self-update action for WUDup.
+        </span>
+      </div>
+      <div class="stack-card-side">
+        <div class="stack-card-tags">
+          <n-tag size="small" type="error">
+            {{ pluralize(selfUpdateItems.length, "item") }}
+          </n-tag>
+        </div>
+      </div>
+    </div>
+    <details class="stack-details">
+      <summary
+        class="disclosure-summary disclosure-summary-triangle"
+        aria-label="Details for updates to WUDup itself"
+      >
+        Details
+      </summary>
+      <div class="stack-items">
+        <PendingUpdateRow
+          v-for="{ group, item } in selfUpdateItems"
+          :key="`self-update-${pendingSelectionKey(pendingSelectionForItem(item))}`"
+          :item="item"
+          :selected="false"
+          select-disabled
+          :group-name="group.name"
+          :service-label="groupedItemServices(item)"
+          status-label="WUDup itself"
+          status-tag-type="error"
+          :risk-cues="riskCues(item)"
+          :security-scan="securityScanFor(item)"
+          :meta-detail="selfUpdateMeta(item)"
+          :show-diagnostic="false"
+          :show-release-notes="false"
+          :show-tag-input="false"
+        />
+      </div>
+    </details>
+  </article>
+
   <article v-if="stoppedItems.length" class="stack-card needs-review">
     <div class="stack-card-header">
       <div class="stack-title-block">

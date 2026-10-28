@@ -10,17 +10,9 @@ from typing import Any
 from . import compose_rewrite, updater_audit, updater_logging
 from .command import CommandError
 from .compose import ComposeBindMount, ComposeRuntimePortIssue, ComposeStack
-from .container_identity import (
-    DockerEndpoint,
-    container_serves_docker_endpoint,
-    docker_endpoint,
-    network_mode_container,
-    resolve_docker_endpoint,
-)
+from .container_identity import DockerEndpoint
 from .images import image_tag
-from .self_update import is_self_update_target
 from .updater_digest_pin import _digest_pin_match_tag
-from .updater_lifecycle_scope import runtime_services_for_scope
 from .updater_matching import (
     _preflight_status_reason,
     _stacks_to_update,
@@ -33,6 +25,13 @@ from .updater_models import (
     UpdaterError,
 )
 from .updater_planning import _container_bind_mount_path_issue
+from .updater_self_scope import (
+    _DOCKER_ENDPOINT_BLOCKED,
+    _SELF_UPDATE_BLOCKED,
+    _docker_endpoint_services,
+    self_scope_block,
+    self_scope_identity,
+)
 from .wud_file import ParsedWudFile, WudTarget
 
 
@@ -63,20 +62,6 @@ _ComposePreflightValidator = Callable[
 ]
 
 
-_SELF_UPDATE_BLOCKED = "self-update-recreate-blocked"
-_DOCKER_ENDPOINT_BLOCKED = "docker-endpoint-recreate-blocked"
-_SELF_UPDATE_MESSAGE = (
-    "This update would stop or recreate WUDup itself. "
-    "Use the self-update action for WUDup, or update this stack from "
-    "the host. Remove it from this selection to update other services."
-)
-# Bound on following network_mode container:<name> links before failing closed.
-_NETWORK_MODE_HOP_LIMIT = 5
-_DOCKER_ENDPOINT_LOOKUP_MESSAGE = (
-    "Could not check whether this update would stop the Docker endpoint "
-    "WUDup uses (DOCKER_HOST); no update was applied. Check Docker access "
-    "and the Compose configuration, then retry."
-)
 _COMPOSE_PROJECT_CONTAINER_FORMAT = (
     '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t'
     '{{.Label "com.docker.compose.service"}}'
@@ -86,18 +71,11 @@ _COMPOSE_PROJECT_CONTAINER_FORMAT = (
 def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
     """Block stacks whose recreate scope includes WUDup or its Docker endpoint."""
 
-    protect_self = runner.options.protected_container is not None
-    endpoint = docker_endpoint(runner.environ)
-    if not protect_self and endpoint is None:
+    identity = self_scope_identity(
+        runner.docker, runner.options.protected_container, runner.environ,
+    )
+    if identity is None:
         return True
-
-    @functools.cache
-    def resolved_endpoint() -> DockerEndpoint:
-        # A slow resolver only delays runs that have a container to check.
-        if endpoint is None:
-            # Raised inside the guard's lookup handler, so the stack is blocked.
-            raise ValueError("DOCKER_HOST is not a network endpoint")
-        return resolve_docker_endpoint(endpoint)
 
     @functools.cache
     def project_containers() -> tuple[tuple[str, str, str], ...]:
@@ -112,18 +90,6 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
             containers.append((fields[0], fields[1], fields[2]))
         return tuple(containers)
 
-    protected_id = ""
-    identity_error = ""
-    if runner.options.protected_container:
-        try:
-            protected_id = runner.docker.container_id(runner.options.protected_container)
-        except CommandError:
-            pass
-        if not protected_id:
-            identity_error = (
-                "Could not verify the WUDup container identity; no update was applied. "
-                "Check Docker access and WUD_WEB_RESTART_CONTAINER, then retry."
-            )
     records_by_reason = {
         _SELF_UPDATE_BLOCKED: _PreflightIssueRecords(),
         _DOCKER_ENDPOINT_BLOCKED: _PreflightIssueRecords(),
@@ -131,75 +97,27 @@ def validate_self_update_scope(runner: Any, matches: Sequence[Match]) -> bool:
     stacks = _stacks_to_update(matches)
     for stack in stacks:
         stack_matches = _matches_for_stack(matches, stack)
-        message = identity_error
-        reason = _SELF_UPDATE_BLOCKED
-        protected_services: set[str] = set()
-        scope = None
-        if not message:
-            try:
-                scope = runner.lifecycle._update_scope(stack, stack_matches, strict=True)
-            except (CommandError, ValueError):
-                message = (
-                    "Could not verify the update's recreate scope; no update was applied. "
-                    "Check Docker access and the Compose configuration, then retry."
-                )
-                if not protect_self:
-                    reason = _DOCKER_ENDPOINT_BLOCKED
-        if scope is not None:
-            services = set(runtime_services_for_scope(scope))
-            if protect_self:
-                protected_services = {
-                    item.service for item in stack.service_images
-                    if item.service in services and is_self_update_target(item.image)
-                }
-            container_ids: list[str] = []
-            if protected_id or endpoint is not None:
-                try:
-                    container_ids = runner.compose.ps_quiet_checked(
-                        stack.directory, stack.file, tuple(sorted(services)),
-                        project_directory=stack.project_directory,
-                    )
-                except CommandError:
-                    if protected_id:
-                        message = (
-                            "Could not verify whether this update includes the WUDup "
-                            "container; no update was applied. Check Docker access and "
-                            "the Compose configuration, then retry."
-                        )
-                    else:
-                        message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
-                        reason = _DOCKER_ENDPOINT_BLOCKED
-            if protected_id and protected_id in container_ids:
-                protected_services.update(services)
-            if endpoint is not None and not message and not protected_services:
-                try:
-                    endpoint_services = _docker_endpoint_services(
-                        runner.docker, container_ids, resolved_endpoint,
-                    )
-                except (CommandError, TypeError, ValueError):
-                    message = _DOCKER_ENDPOINT_LOOKUP_MESSAGE
-                    reason = _DOCKER_ENDPOINT_BLOCKED
-                else:
-                    if endpoint_services:
-                        protected_services = endpoint_services
-                        reason = _DOCKER_ENDPOINT_BLOCKED
-                        message = _docker_endpoint_message(endpoint.host, endpoint_services)
-        if not message and not protected_services:
+        scope, block = self_scope_block(
+            identity, runner.docker, runner.compose, stack,
+            functools.partial(runner.lifecycle._update_scope, stack, stack_matches, strict=True),
+        )
+        if block is None:
             runner.lifecycle.verified_update_scopes[(stack.index, _update_services(stack_matches))] = scope
-            if protected_id or endpoint is not None:
+            if identity.protected_id or identity.endpoint is not None:
                 _keep_protected_orphans(
-                    runner, stack, protected_id, endpoint, resolved_endpoint, project_containers,
+                    runner, stack, identity.protected_id, identity.endpoint,
+                    identity.resolved_endpoint, project_containers,
                 )
             continue
-        message = f"[{stack.name}] " + (message or _SELF_UPDATE_MESSAGE)
+        message = f"[{stack.name}] {block.message}"
         runner.log.error(message)
         runner._progress(
             "preflight", "failure", message, stack=stack.name,
-            services=tuple(sorted(protected_services)), matches=stack_matches,
+            services=tuple(sorted(block.services)), matches=stack_matches,
         )
-        records = records_by_reason[reason]
+        records = records_by_reason[block.reason]
         records.messages_by_stack[stack.index] = [message]
-        records.services_by_stack[stack.index] = protected_services
+        records.services_by_stack[stack.index] = set(block.services)
     for stack in stacks:
         for reason, records in records_by_reason.items():
             _record_compose_preflight_failures(runner, matches, (stack,), records, reason=reason)
@@ -264,59 +182,6 @@ def _keep_protected_orphans(
         "--remove-orphans so WUDup keeps Docker access; other leftover containers "
         f"in the project are kept too. To clear this warning, add that service back "
         f"to {stack.file} or recreate it from the Compose file that now defines it."
-    )
-
-
-def _docker_endpoint_services(
-    docker: Any,
-    container_ids: Sequence[str],
-    endpoint: Callable[[], DockerEndpoint],
-) -> set[str]:
-    """Return services of scoped containers that may serve ``endpoint()``.
-
-    A container that shares another container's network (``network_mode``) is
-    reached through that container's names, addresses, and published ports.
-    """
-
-    details_by_container: dict[str, dict[str, object]] = {}
-
-    def inspect(container: str) -> dict[str, object]:
-        if container not in details_by_container:
-            details_by_container[container] = docker.container_dns_details(container)
-        return details_by_container[container]
-
-    services: set[str] = set()
-    for container_id in container_ids:
-        details = inspect(container_id)
-        network_details = _network_owner_details(details, inspect)
-        if container_serves_docker_endpoint(network_details, endpoint()):
-            service = details.get("Service")
-            services.add(service if isinstance(service, str) and service else container_id)
-    return services
-
-
-def _network_owner_details(
-    details: dict[str, object],
-    inspect: Callable[[str], dict[str, object]],
-) -> dict[str, object]:
-    """Follow ``network_mode: container:<name>`` to the container owning the network."""
-
-    seen: set[str] = set()
-    while provider := network_mode_container(details):
-        if provider in seen or len(seen) >= _NETWORK_MODE_HOP_LIMIT:
-            raise ValueError("network_mode container chain does not end")
-        seen.add(provider)
-        details = inspect(provider)
-    return details
-
-
-def _docker_endpoint_message(endpoint_host: str, services: Iterable[str]) -> str:
-    return (
-        f"This update would stop or recreate {', '.join(sorted(services))}, which serves "
-        f"the Docker endpoint WUDup uses (DOCKER_HOST host {endpoint_host}). WUDup would "
-        "lose Docker access and could not finish or roll back the update. Update that "
-        "service from the host instead, and remove it from this selection to update "
-        "other services."
     )
 
 

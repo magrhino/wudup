@@ -231,6 +231,7 @@ def build_web_plan(
         known_digest_provenance_by_service=(
             web_database.known_digest_provenance_by_service(settings)
         ),
+        protected_container=settings.restart_container,
     )
 
 

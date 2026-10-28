@@ -306,6 +306,7 @@ describe("release skips", () => {
           { group, item: snoozed },
         ],
         stoppedItems: [],
+        selfUpdateItems: [],
         tagInputProps: () => ({}),
         tagOverrideValue: () => "",
       },

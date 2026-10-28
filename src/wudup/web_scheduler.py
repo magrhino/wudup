@@ -455,6 +455,7 @@ def _build_auto_update_plan(
         host_docker_base=settings.host_docker_base,
         environ=settings.command_env,
         known_digest_provenance_by_service=known_digest_provenance_by_service,
+        protected_container=settings.restart_container,
     )
 
 

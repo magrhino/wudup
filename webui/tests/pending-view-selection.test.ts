@@ -210,6 +210,52 @@ describe("pending view selection actions", () => {
     );
   });
 
+  it("keeps updates to WUDup itself out of every selection", async () => {
+    const wud = pendingGroupedItem({
+      line_no: 1,
+      image: "getwud/wud:9.5.0",
+      repo: "getwud/wud",
+      services: ["wud"],
+      running_services: ["wud"],
+    });
+    const wudup = pendingGroupedItem({
+      line_no: 2,
+      image: "ghcr.io/magrhino/wudup:edge",
+      repo: "ghcr.io/magrhino/wudup",
+      services: ["wudup"],
+      running_services: ["wudup"],
+      self_update_services: ["wudup"],
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    updates.pending = {
+      ...pendingResponse([wud, wudup]),
+      grouping: pendingGrouping([wud, wudup]),
+    };
+    mockPendingLifecycle(settings, updates);
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Updates to WUDup itself");
+    expect(wrapper.text()).toContain("WUDup itself");
+    expect(wrapper.text()).toContain(
+      "Use the self-update action, or update this stack from the host.",
+    );
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Select all stack updates"))
+      ?.trigger("click");
+
+    const wudInput = wrapper.find<HTMLInputElement>(
+      'input[aria-label="Select update getwud/wud:9.5.0"]',
+    );
+    const wudupInput = wrapper.find<HTMLInputElement>(
+      'input[aria-label="Select update ghcr.io/magrhino/wudup:edge"]',
+    );
+    expect(wudInput.element.checked).toBe(true);
+    expect(wudupInput.element.checked).toBe(false);
+    expect(wudupInput.element.disabled).toBe(true);
+  });
+
   it("offers only the verified subset of a mixed metadata selection", async () => {
     const fresh = pendingItem({
       line_no: 1,

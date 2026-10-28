@@ -210,6 +210,8 @@ export interface PendingGroupedItem extends PendingItem {
   compose_images: string[];
   services: string[];
   action: string;
+  // Runtime services that run WUDup's own image; WebUI apply always blocks them.
+  self_update_services?: string[];
   diagnostic: PendingDiagnostic | null;
   runtime_state: PendingRuntimeState;
   running_services: string[];

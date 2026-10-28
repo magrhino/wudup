@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -43,6 +44,7 @@ from .updater_models import (
     UpdateScope,
 )
 from .updater_planning import _container_bind_mount_path_issue, _tag_updates
+from .updater_self_scope import self_scope_block, self_scope_identity
 from .wud_file import WudTarget
 
 
@@ -472,6 +474,48 @@ def preflight_issues(
                 stack,
                 scoped_services,
                 mounts,
+            )
+        )
+    return issues
+
+
+def self_scope_issues(
+    docker: DockerCli,
+    compose: ComposeCli,
+    matches: Sequence[Match],
+    update_scope: Callable[..., UpdateScope],
+    *,
+    protected_container: str,
+    environ: Mapping[str, str],
+) -> list[DryRunPlanIssue]:
+    """Report stacks the apply preflight would block because they stop WUDup."""
+
+    identity = self_scope_identity(docker, protected_container, environ)
+    if identity is None:
+        return []
+    issues: list[DryRunPlanIssue] = []
+    for stack in _stacks_to_update(matches):
+        stack_matches = [
+            match for match in matches if match.stack.index == stack.index
+        ]
+        _scope, block = self_scope_block(
+            identity,
+            docker,
+            compose,
+            stack,
+            functools.partial(update_scope, stack, stack_matches, strict=True),
+        )
+        if block is None:
+            continue
+        services = sorted(block.services)
+        issues.append(
+            DryRunPlanIssue(
+                severity="error",
+                code=block.reason,
+                message=block.message,
+                stack=stack.name,
+                service=", ".join(services),
+                details={"services": services},
             )
         )
     return issues

@@ -18,11 +18,14 @@ import {
 } from "./safetyCues";
 import {
   activeSnoozedServiceKeys as buildActiveSnoozedServiceKeys,
+  itemUpdatesWudup,
   matchingSnoozedServiceKeys,
   pendingServiceKeysForGroups,
   runtimeDeferredItemsForGroups,
   selectableLineNumbersForGroups,
+  selfUpdateItemsForGroups,
   snoozedItemsForGroups,
+  stackGroupsWithoutSelfUpdateItems,
   stackGroupsWithoutSnoozedItems,
   stackGroupsWithoutRuntimeDeferredItems,
 } from "./snoozeSelection";
@@ -84,11 +87,18 @@ export function usePendingQueueState() {
       bulkSnoozedServiceKeys.value,
     ),
   );
+  // WUDup cannot recreate itself from an apply job, so these never join a selection.
+  const selfUpdateItems = computed(() =>
+    selfUpdateItemsForGroups(unsnoozedStackGroups.value),
+  );
+  const applyableStackGroups = computed(() =>
+    stackGroupsWithoutSelfUpdateItems(unsnoozedStackGroups.value),
+  );
   const stoppedItems = computed(() =>
-    runtimeDeferredItemsForGroups(unsnoozedStackGroups.value),
+    runtimeDeferredItemsForGroups(applyableStackGroups.value),
   );
   const stackGroups = computed(() =>
-    stackGroupsWithoutRuntimeDeferredItems(unsnoozedStackGroups.value),
+    stackGroupsWithoutRuntimeDeferredItems(applyableStackGroups.value),
   );
   const unmatchedItems = computed(() =>
     groupingReady.value ? (updates.pending?.grouping.unmatched ?? []) : [],
@@ -120,7 +130,9 @@ export function usePendingQueueState() {
   const availableSelections = computed(() => {
     if (groupingReady.value) {
       return selectionsForItems([
-        ...rawStackGroups.value.flatMap((group) => group.items),
+        ...rawStackGroups.value
+          .flatMap((group) => group.items)
+          .filter((item) => !itemUpdatesWudup(item)),
         ...unmatchedItems.value,
       ]);
     }
@@ -234,6 +246,7 @@ export function usePendingQueueState() {
     selectableSelections,
     availableSelections,
     selectAllLabel,
+    selfUpdateItems,
     snoozedCandidates,
     snoozedItems,
     stackGroups,

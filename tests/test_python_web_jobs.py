@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -903,17 +904,116 @@ def test_scoped_apply_mutates_only_the_selected_stack(
     } == {"active"}
 
 
+def _review_and_reject_apply(client, headers: dict[str, str], selections) -> SimpleNamespace:
+    plan_response = client.post(
+        "/api/v1/plans", json={"selections": selections}, headers=headers,
+    )
+    plan = plan_response.json()
+    apply_response = client.post(
+        "/api/v1/jobs",
+        json={
+            "plan_id": plan["plan_id"],
+            "selections": plan["selected_selections"],
+            "confirmation": "apply",
+        },
+        headers=headers,
+    )
+    assert plan_response.status_code == 200
+    assert plan["can_apply"] is False
+    assert apply_response.status_code == 409
+    return SimpleNamespace(plan=plan, plan_response=plan_response)
+
+
 @pytest.mark.parametrize("mode", ["stop", "pause", "live"])
 @pytest.mark.parametrize("image", [
     "ghcr.io/magrhino/wudup:latest-trivy",
     "ghcr.io/magrhino/wud-updater:v0.24.2",
 ])
-def test_apply_job_blocks_self_recreate_before_mutation(
+def test_plan_review_blocks_self_recreate_before_apply(
     tmp_path: Path, mode: str, image: str,
 ) -> None:
     case = _shared_update_case(
         tmp_path, wud_line=image, compose_image=image, pull_image=image, update_mode=mode,
     )
+    original_compose = (case.active_dir / "docker-compose.yml").read_text()
+    pending = case.client.get("/api/v1/pending").json()
+    active = next(g for g in pending["grouping"]["groups"] if g["name"] == "active")
+    assert active["items"][0]["self_update_services"] == ["app"]
+
+    result = _review_and_reject_apply(
+        case.client, case.headers, [_selection_for_group(case.client, "active")],
+    )
+
+    blocked = [
+        issue for issue in result.plan["issues"]
+        if issue["code"] == "self-update-recreate-blocked"
+    ]
+    assert blocked == [{
+        "severity": "error",
+        "code": "self-update-recreate-blocked",
+        "message": (
+            "This update would stop or recreate WUDup itself. Use the self-update "
+            "action for WUDup, or update this stack from the host. Remove it from "
+            "this selection to update other services."
+        ),
+        "line_no": None,
+        "stack": "active",
+        "service": "app",
+        "hint": "",
+        "details": {"services": ["app"]},
+    }]
+    assert case.wud_file.read_text() == case.original
+    assert (case.active_dir / "docker-compose.yml").read_text() == original_compose
+    calls = _fake_docker_calls(case.fake_root)
+    assert not any(
+        mutation in calls for mutation in (" pull ", " stop ", " pause ", " up -d ")
+    )
+
+
+def test_plan_review_blocks_service_serving_docker_endpoint(tmp_path: Path) -> None:
+    # The fake Docker environment sets DOCKER_HOST=tcp://docker:2375.
+    case = _shared_update_case(tmp_path)
+    (case.fake_root / "containers" / "cid-active.dns.json").write_text(
+        json.dumps({
+            "Id": "cid-active",
+            "Name": "/active-app-1",
+            "Service": "app",
+            "Networks": {"active": {"Aliases": ["docker"]}},
+        }),
+        encoding="utf-8",
+    )
+    pending = case.client.get("/api/v1/pending").json()
+    active = next(g for g in pending["grouping"]["groups"] if g["name"] == "active")
+    assert active["items"][0]["self_update_services"] == []
+
+    result = _review_and_reject_apply(
+        case.client, case.headers, [_selection_for_group(case.client, "active")],
+    )
+
+    blocked = [
+        issue for issue in result.plan["issues"]
+        if issue["code"] == "docker-endpoint-recreate-blocked"
+    ]
+    assert len(blocked) == 1
+    assert blocked[0]["severity"] == "error"
+    assert blocked[0]["stack"] == "active"
+    assert blocked[0]["service"] == "app"
+    assert (
+        "would stop or recreate app, which serves the Docker endpoint WUDup uses "
+        "(DOCKER_HOST host docker)"
+    ) in blocked[0]["message"]
+    assert case.wud_file.read_text() == case.original
+
+
+def test_apply_job_blocks_self_recreate_when_review_missed_it(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # The apply preflight stays authoritative if Compose changes after review.
+    image = "ghcr.io/magrhino/wudup:latest-trivy"
+    case = _shared_update_case(
+        tmp_path, wud_line=image, compose_image=image, pull_image=image,
+    )
+    monkeypatch.setattr("wudup.plans.self_scope_issues", lambda *_a, **_k: [])
     original_compose = (case.active_dir / "docker-compose.yml").read_text()
     result = _plan_and_apply(
         case.client, case.headers, [_selection_for_group(case.client, "active")],
@@ -932,7 +1032,7 @@ def test_apply_job_blocks_self_recreate_before_mutation(
 
 
 @pytest.mark.parametrize("lookup_result", ["error", "empty", "compose_error"])
-def test_apply_job_fails_closed_when_protected_identity_is_unavailable(
+def test_plan_review_fails_closed_when_protected_identity_is_unavailable(
     tmp_path: Path, monkeypatch, lookup_result: str,
 ) -> None:
     image = "example/custom-updater:latest"
@@ -960,21 +1060,25 @@ def test_apply_job_fails_closed_when_protected_identity_is_unavailable(
 
         monkeypatch.setattr(ComposeCli, "ps_quiet_checked", fail_compose_lookup)
     original_compose = (case.active_dir / "docker-compose.yml").read_text()
-    result = _plan_and_apply(
+    pending = case.client.get("/api/v1/pending").json()
+    active = next(g for g in pending["grouping"]["groups"] if g["name"] == "active")
+    # A custom image is not WUDup by name; only the container identity check catches it.
+    assert active["items"][0]["self_update_services"] == []
+    result = _review_and_reject_apply(
         case.client, case.headers, [_selection_for_group(case.client, "active")],
     )
-    assert result.job["status"] == "failure"
-    assert result.job["run_id"] is not None
     expected_message = (
         "Could not verify the update's recreate scope"
         if lookup_result == "compose_error"
         else "Could not verify the WUDup container identity"
     )
     assert any(
-        expected_message in event["message"]
-        for event in result.job["progress"]
+        issue["code"] == "self-update-recreate-blocked"
+        and issue["severity"] == "error"
+        and expected_message in issue["message"]
+        for issue in result.plan["issues"]
     )
-    assert "private daemon detail" not in str(result.job)
+    assert "private daemon detail" not in result.plan_response.text
     assert case.wud_file.read_text() == case.original
     assert (case.active_dir / "docker-compose.yml").read_text() == original_compose
     assert not any(

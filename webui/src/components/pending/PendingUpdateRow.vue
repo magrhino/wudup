@@ -44,6 +44,7 @@ withDefaults(defineProps<{
   showTagInput?: boolean;
   tagInputProps?: InputHTMLAttributes;
   showReleaseSkipNote?: boolean;
+  selectDisabled?: boolean;
 }>(), {
   groupName: "",
   riskCues: () => [],
@@ -58,6 +59,7 @@ withDefaults(defineProps<{
   showTagInput: false,
   tagInputProps: () => ({}),
   showReleaseSkipNote: true,
+  selectDisabled: false,
 });
 
 const emit = defineEmits<{
@@ -76,6 +78,7 @@ function groupedItemTarget(item: PendingGroupedItem): string {
     <div class="pending-update-main">
       <n-checkbox
         :checked="selected"
+        :disabled="selectDisabled"
         :aria-label="`Select update ${item.image}`"
         @update:checked="emit('toggle', item.line_no, Boolean($event))"
       >

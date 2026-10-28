@@ -62,8 +62,10 @@ import { mountWithApp, naiveStubs } from "./helpers/mount";
 import {
   activeSnoozedServiceKeys,
   runtimeDeferredItemsForGroups,
+  selfUpdateItemsForGroups,
   snoozedItemsForGroups,
   stackGroupsWithoutRuntimeDeferredItems,
+  stackGroupsWithoutSelfUpdateItems,
 } from "../src/views/pending/snoozeSelection";
 
 type RenderColumn = {
@@ -329,6 +331,25 @@ describe("pending helper modules", () => {
     ).toEqual([2]);
     expect(
       stackGroupsWithoutRuntimeDeferredItems(groups).flatMap((group) =>
+        group.items.map((item) => item.line_no),
+      ),
+    ).toEqual([1]);
+  });
+
+  it("keeps updates to WUDup itself out of stack groups", () => {
+    const wud = pendingGroupedItem({ line_no: 1, services: ["wud"] });
+    const wudup = pendingGroupedItem({
+      line_no: 2,
+      services: ["wudup"],
+      self_update_services: ["wudup"],
+    });
+    const groups = pendingGrouping([wud, wudup]).groups;
+
+    expect(
+      selfUpdateItemsForGroups(groups).map(({ item }) => item.line_no),
+    ).toEqual([2]);
+    expect(
+      stackGroupsWithoutSelfUpdateItems(groups).flatMap((group) =>
         group.items.map((item) => item.line_no),
       ),
     ).toEqual([1]);
