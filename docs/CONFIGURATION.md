@@ -14,28 +14,26 @@ Boolean values use `true` and `false`; legacy aliases `1`, `0`, `yes`, `no`,
 
 ## How Settings Reach The Container
 
-In the Compose examples, Compose reads the env file (`.env` next to the Compose
-file, or the file passed with `--env-file`) only to fill in `${VAR}` references
-in the Compose file. The `wudup` service receives just the variables its
-`environment:` block lists, so a variable missing from that block never reaches
-WUDup, even when the env file sets it.
+In the Compose examples, keep the env file at `.env` next to the Compose file.
+Compose uses it twice: it fills in `${VAR}` references in the Compose file, and
+the `wudup` service loads the same file with `env_file`, so every variable in
+it reaches WUDup. The `env_file` entry is optional (`required: false`) and needs
+Compose 2.24 or newer.
 
-The WebUI Compose examples (`docker-compose.webui.yml` and
-`docker-compose.hardened.yml`) do not list `WUD_COMPOSE_IGNORE_PATHS`,
-`WUD_DIGEST_PIN_UPDATES`, `WUD_RELEASE_NOTES_ENABLED`, `WUD_WEB_TOKEN`,
-`WUD_WEB_ALLOWED_ORIGINS`, `WUD_WEB_RESTART_CONTAINER`, or any variable in
-[Advanced Settings](#advanced-settings) and
-[Development And Image-Internal](#development-and-image-internal) other than
-`WUD_API_BASE_URL`, `WUD_API_STARTUP_WAIT_SECONDS`,
-`WUD_SECURITY_SCANNING_ENABLED`, `WUD_SECURITY_SCAN_CACHE_DIR`, and
-`WUD_SECURITY_SCAN_TIMEOUT_SECONDS`. The command-runner examples
-(`docker-compose.example.yml` and `docker-compose.build.yml`) list only their
-fixed paths and `OUT_UID`/`OUT_GID`. To set another variable, add it to the
-`wudup` service's `environment:` block, for example
-`WUD_UPDATE_MODE: "${WUD_UPDATE_MODE:-stop}"`.
+The `wudup` service's `environment:` block wins over `.env`. It sets the
+[fixed container paths](#fixed-container-paths) and the Compose defaults that
+differ from WUDup's own: `WUD_WEB_PORT`, `WUD_API_STARTUP_WAIT_SECONDS`, and
+`OUT_UID`/`OUT_GID`. Those defaults still come from `.env` through `${VAR}`
+references.
 
-WUD receives only the variables listed under its own service. WUD reads its own
-`WUD_*` settings, so do not pass WUDup variables to the `wud` service.
+A file passed with `--env-file` only fills in `${VAR}` references; WUDup does
+not receive its other settings. Every variable WUDup receives also reaches the
+`docker compose` commands it runs for your stacks, where it overrides the same
+name in a stack's own `.env`, so keep only WUDup and WUD settings in this file.
+
+WUD receives only the variables listed under its own service and never loads
+`.env` with `env_file`. WUD reads its own `WUD_*` settings, so do not pass
+WUDup variables to the `wud` service.
 
 ## Variable Groups
 

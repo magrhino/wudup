@@ -15,6 +15,12 @@ services:
   wudup:
     build: ../..
     image: magrhino/wudup:local
+    # WUDup reads its settings from the .env file next to this Compose file.
+    # See docs/CONFIGURATION.md for every variable. WUD never receives this
+    # file, and the values below win over it.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
       WUD_OUT_FILE: /out/images.todo

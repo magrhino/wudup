@@ -26,40 +26,25 @@ services:
     depends_on:
       wud:
         condition: service_healthy
+    # WUDup reads its settings from the .env file next to this Compose file.
+    # See docs/CONFIGURATION.md for every variable. WUD never receives this
+    # file, and the values below win over it.
+    # WUD 9 also requires WUD API credentials in .env; WUD's bootstrap
+    # credentials are not reused. See wiki/webui-container.md#wud-api-authentication.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Fixed container paths that match the mounts below.
       DOCKER_BASE: ${HOST_DOCKER_BASE:-/srv/docker}
       WUD_OUT_FILE: /out/images.todo
       WUD_LOG_DIR: /logs
       WUD_DB_PATH: /logs/wudup.sqlite
-      WUD_TIMEZONE: "${WUD_TIMEZONE:-UTC}"
+      # Compose defaults that differ from WUDup's own defaults.
       WUD_WEB_PORT: "${WUD_WEB_PORT:-7417}"
-      WUD_WEB_MUTATIONS_ENABLED: "${WUD_WEB_MUTATIONS_ENABLED:-false}"
-      WUD_WEB_PUBLIC_ORIGIN: "${WUD_WEB_PUBLIC_ORIGIN:-}"
-      WUD_WEB_ALLOWED_HOSTS: "${WUD_WEB_ALLOWED_HOSTS:-}"
-      WUD_WEB_TRUSTED_PROXIES: "${WUD_WEB_TRUSTED_PROXIES:-}"
-      WUD_WEB_SECURE_COOKIES: "${WUD_WEB_SECURE_COOKIES:-auto}"
-      # WUD 9 also requires outbound API credentials; bootstrap credentials
-      # above are not inherited here. See wiki/webui-container.md#wud-api-authentication.
-      WUD_API_BASE_URL: "${WUD_API_BASE_URL:-http://wud:3000}"
       WUD_API_STARTUP_WAIT_SECONDS: "${WUD_API_STARTUP_WAIT_SECONDS:-5}"
-      WUD_API_AUTH_BEARER_TOKEN: "${WUD_API_AUTH_BEARER_TOKEN:-}"
-      WUD_API_AUTH_BEARER_TOKEN_FILE: "${WUD_API_AUTH_BEARER_TOKEN_FILE:-}"
-      WUD_API_AUTH_BASIC_USER: "${WUD_API_AUTH_BASIC_USER:-}"
-      WUD_API_AUTH_BASIC_PASSWORD: "${WUD_API_AUTH_BASIC_PASSWORD:-}"
-      WUD_API_AUTH_BASIC_PASSWORD_FILE: "${WUD_API_AUTH_BASIC_PASSWORD_FILE:-}"
-      WUD_API_HEADERS_FILE: "${WUD_API_HEADERS_FILE:-}"
-      # Leave unset to manage from Settings; uncomment to force the env override.
-      # WUD_RELEASE_NOTES_ENABLED: "true"
-      # Use WUDUP_IMAGE=ghcr.io/magrhino/wudup:latest-trivy when enabling scans.
-      WUD_SECURITY_SCANNING_ENABLED: "${WUD_SECURITY_SCANNING_ENABLED:-false}"
-      # Optional advanced override when trivy is installed at a non-standard path.
-      # WUD_SECURITY_SCANNER_EXECUTABLE: "${WUD_SECURITY_SCANNER_EXECUTABLE:-trivy}"
-      WUD_SECURITY_SCAN_CACHE_DIR: "${WUD_SECURITY_SCAN_CACHE_DIR:-/logs/trivy-cache}"
-      WUD_SECURITY_SCAN_TIMEOUT_SECONDS: "${WUD_SECURITY_SCAN_TIMEOUT_SECONDS:-300}"
       OUT_UID: "${OUT_UID:-1000}"
       OUT_GID: "${OUT_GID:-1000}"
-      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
-      DISCORD_WEBHOOK: "${DISCORD_WEBHOOK:-}"
     networks:
       - wudup-app
       - wudup-egress

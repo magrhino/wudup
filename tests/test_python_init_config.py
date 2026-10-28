@@ -546,11 +546,11 @@ class InitConfigTests(unittest.TestCase):
                         "wudup-app",
                         compose["services"][service_name]["networks"],
                     )
-                self.assertEqual(
-                    compose["services"]["wudup"]["environment"][
-                        "WUD_API_BASE_URL"
-                    ],
-                    "${WUD_API_BASE_URL:-http://wud:3000}",
+                # WUD_API_BASE_URL comes from .env when set, otherwise from
+                # WUDup's http://wud:3000 default on the shared app network.
+                self.assertNotIn(
+                    "WUD_API_BASE_URL",
+                    compose["services"]["wudup"]["environment"],
                 )
                 self.assertNotIn(
                     "WUD_PENDING_SOURCE",

@@ -43,9 +43,30 @@ Existing deployments can delete the `wud-scripts` volume, its `/wud` and
 `WUD_SYNC_SCRIPTS`, `WUD_SCRIPTS_DIR`, `WUD_PENDING_SOURCE` and
 `WUDUP_LEGACY_SCRIPTS` settings, which are now ignored with a startup warning.
 
+## Moving To The env_file Compose Examples
+
+The Compose examples now load `.env` into the `wudup` service with `env_file`
+instead of listing each variable under `environment:`. Variable names and
+defaults are unchanged, and a Compose file copied from an earlier example keeps
+working as it is.
+
+When you switch to the current examples:
+
+- Put the env file at `.env` next to `docker-compose.yml`. If you used
+  `--env-file "$HOME/.config/wudup/webui.env"`, move or copy that file there;
+  `--env-file` alone no longer passes settings to WUDup.
+- Settings the earlier examples never passed to WUDup now take effect when they
+  are in `.env`, for example `WUD_COMPOSE_IGNORE_PATHS`,
+  `WUD_RELEASE_NOTES_ENABLED`, `WUD_WEB_RESTART_CONTAINER`, and
+  `WUD_UPDATE_MODE`. Remove any you do not want before recreating WUDup.
+- Every variable in `.env` also reaches the `docker compose` commands WUDup runs
+  for your stacks, where it overrides the same name in a stack's own `.env`.
+  Keep only WUDup and WUD settings in this file.
+
 ## Requirements
 
-- Docker with the Compose plugin on the host.
+- Docker with the Compose plugin on the host. The Compose examples need Compose
+  2.24 or newer for their optional `env_file` entry.
 - A Compose stack root mounted where WUDup and the Docker daemon can both see
   the same paths.
 - Python 3.11 or newer only when running the `wudup` CLI, such as
@@ -81,11 +102,10 @@ the [Maintenance](#maintenance) commands. Set `WUDUP_IMAGE` back to `latest` or
 a release tag to receive stable releases again.
 
 On an `edge` image, the WebUI sidebar shows `edge <sha>` linked to the running
-commit. From the host, read the same commit from the running container:
+commit. From the deployment directory, read the same commit from the running container:
 
 ```bash
-WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml exec wudup printenv WUDUP_BUILD_VERSION
+docker compose exec wudup printenv WUDUP_BUILD_VERSION
 ```
 
 Build a local helper image from this repository only for development or smoke
@@ -127,16 +147,26 @@ docker compose --env-file "$HOME/.config/wudup/hardened.env" \
   up -d
 ```
 
-Without the CLI, copy the env example, review `HOST_DOCKER_BASE` and browser
-exposure settings, then start the WebUI:
+Without the CLI, download the Compose example and the env example into one
+deployment directory, review `HOST_DOCKER_BASE` and browser exposure settings,
+then start the WebUI:
 
 ```bash
-WEBUI_ENV="$HOME/.config/wudup/webui.env"
-mkdir -p "$HOME/.config/wudup"
-test -f "$WEBUI_ENV" || cp docs/examples/webui.env.example "$WEBUI_ENV"
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml logs wudup
+mkdir -p wudup && cd wudup
+curl -fsSLo docker-compose.yml \
+  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/docker-compose.webui.yml
+curl -fsSLo .env \
+  https://raw.githubusercontent.com/magrhino/wudup/main/docs/examples/webui.env.example
+chmod 600 .env
+docker compose up -d
+docker compose logs wudup
 ```
+
+Run the `docker compose` commands in this guide from that directory. Compose
+reads `.env` next to `docker-compose.yml` to fill in `${VAR}` references, and
+the `wudup` service loads the same file with `env_file`, which needs Compose
+2.24 or newer. `--env-file` only fills in `${VAR}` references, so WUDup does not
+receive settings from a file passed that way.
 
 Open the printed `/#/setup?claim=...` link, create the first admin username and
 a password with at least 12 characters, then sign in at
@@ -153,8 +183,7 @@ Run `doctor` after changing container mounts, Docker access, stack paths, or
 helper environment variables:
 
 ```bash
-WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml run --rm wudup doctor
+docker compose run --rm wudup doctor
 ```
 
 Doctor is read-only except for short-lived permission probe files that it
@@ -187,9 +216,8 @@ and mutation-gate checks.
 For container-first deployments, pull the new image and recreate WUDup:
 
 ```bash
-WEBUI_ENV="${WEBUI_ENV:-$HOME/.config/wudup/webui.env}"
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml pull wudup
-docker compose --env-file "$WEBUI_ENV" -f docs/examples/docker-compose.webui.yml up -d --force-recreate wudup
+docker compose pull wudup
+docker compose up -d --force-recreate wudup
 ```
 
 For local image development, see [Command Runner](COMMAND_RUNNER.md). For every supported
