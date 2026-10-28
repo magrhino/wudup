@@ -664,6 +664,7 @@ class PendingGroupedItem(PendingItem):
     services: list[str] = Field(default_factory=list)
     action: str
     selection_id: str = ""
+    self_update_services: list[str] = Field(default_factory=list)
     diagnostic: PendingDiagnostic | None = None
     runtime_state: PendingRuntimeState = "unknown"
     running_services: list[str] = Field(default_factory=list)

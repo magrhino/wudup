@@ -29,6 +29,7 @@ type UsePendingSearchStateOptions = {
   snoozedCandidates: ComputedRef<PendingSnoozedCandidate[]>;
   snoozedItems: ComputedRef<SnoozedPendingItem[]>;
   stoppedItems: ComputedRef<RuntimeDeferredPendingItem[]>;
+  selfUpdateItems: ComputedRef<SnoozedPendingItem[]>;
   selectableLineNumbers: ComputedRef<number[]>;
   selectableSelections: ComputedRef<PlanSelectionRequest[]>;
   selectAllLabel: ComputedRef<string>;
@@ -85,6 +86,13 @@ export function usePendingSearchState(options: UsePendingSearchStateOptions) {
       pendingSearchContext,
     ),
   );
+  const filteredSelfUpdateItems = computed(() =>
+    filterSnoozedItems(
+      options.selfUpdateItems.value,
+      pendingSearchText.value,
+      pendingSearchContext,
+    ),
+  );
   const filteredSnoozedCandidates = computed(() =>
     filterSnoozedCandidates(
       options.snoozedCandidates.value,
@@ -104,6 +112,7 @@ export function usePendingSearchState(options: UsePendingSearchStateOptions) {
         ...filteredStackGroups.value.flatMap((group) => group.visibleLineNumbers),
         ...filteredSnoozedItems.value.map(({ item }) => item.line_no),
         ...filteredStoppedItems.value.map(({ item }) => item.line_no),
+        ...filteredSelfUpdateItems.value.map(({ item }) => item.line_no),
         ...filteredUnmatchedItems.value.map((item) => item.line_no),
       ];
     }
@@ -196,6 +205,7 @@ export function usePendingSearchState(options: UsePendingSearchStateOptions) {
   return {
     clearPendingSearch,
     filteredPendingItems,
+    filteredSelfUpdateItems,
     filteredSnoozedCandidates,
     filteredSnoozedItems,
     filteredStackGroups,

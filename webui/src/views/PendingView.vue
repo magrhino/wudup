@@ -91,6 +91,7 @@ const {
   selectableLineNumbers,
   selectableSelections,
   selectAllLabel,
+  selfUpdateItems,
   snoozedCandidates,
   snoozedItems,
   stackGroups,
@@ -101,6 +102,7 @@ const {
 const {
   clearPendingSearch,
   filteredPendingItems,
+  filteredSelfUpdateItems,
   filteredSnoozedCandidates,
   filteredSnoozedItems,
   filteredStackGroups,
@@ -120,6 +122,7 @@ const {
   snoozedCandidates,
   snoozedItems,
   stoppedItems,
+  selfUpdateItems,
   selectableLineNumbers,
   selectableSelections,
   selectAllLabel,
@@ -814,6 +817,7 @@ onBeforeUnmount(() => {
         :snoozed-candidates="filteredSnoozedCandidates"
         :snoozed-items="filteredSnoozedItems"
         :stopped-items="filteredStoppedItems"
+        :self-update-items="filteredSelfUpdateItems"
         :stack-groups="filteredStackGroups"
         :stack-has-selection="stackHasSelection"
         :stack-indeterminate="stackIndeterminate"

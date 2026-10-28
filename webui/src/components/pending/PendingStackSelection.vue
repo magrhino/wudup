@@ -46,6 +46,7 @@ defineProps<{
   snoozedItems: SnoozedPendingItem[];
   stackGroups: PendingStackGroup[];
   stoppedItems: RuntimeDeferredPendingItem[];
+  selfUpdateItems: SnoozedPendingItem[];
   stackHasSelection: (group: PendingStackGroup) => boolean;
   stackIndeterminate: (group: PendingStackGroup) => boolean;
   stackSelected: (group: PendingStackGroup) => boolean;
@@ -112,6 +113,7 @@ function verifiedLineNumbers(group: PendingStackGroup): number[] {
       :snoozed-candidates="snoozedCandidates"
       :snoozed-items="snoozedItems"
       :stopped-items="stoppedItems"
+      :self-update-items="selfUpdateItems"
       :tag-input-props="tagInputProps"
       :tag-override-value="tagOverrideValue"
       @toggle-item="(item, checked) => emit('toggleItem', item, checked)"
@@ -172,6 +174,7 @@ function verifiedLineNumbers(group: PendingStackGroup): number[] {
         !snoozedCandidates.length &&
         !snoozedItems.length &&
         !stoppedItems.length &&
+        !selfUpdateItems.length &&
         !unmatchedItems.length
       "
       :latest-run-id="latestRunId"

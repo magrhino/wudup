@@ -452,6 +452,7 @@ def _pending_grouped_item(
         services=list(item.services),
         action=item.action,
         selection_id=item.selection_id,
+        self_update_services=list(item.self_update_services),
         diagnostic=(
             None
             if item.diagnostic is None

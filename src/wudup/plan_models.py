@@ -276,6 +276,8 @@ class PendingGroupingItem:
     runtime_services: tuple[str, ...]
     action: str
     selection_id: str = ""
+    # Runtime services that run WUDup's own image; the WebUI cannot apply these.
+    self_update_services: tuple[str, ...] = ()
     platform: str = ""
     platform_os: str = ""
     platform_architecture: str = ""

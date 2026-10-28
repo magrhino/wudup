@@ -18,11 +18,14 @@ import {
 } from "./safetyCues";
 import {
   activeSnoozedServiceKeys as buildActiveSnoozedServiceKeys,
+  itemUpdatesWudup,
   matchingSnoozedServiceKeys,
   pendingServiceKeysForGroups,
   runtimeDeferredItemsForGroups,
   selectableLineNumbersForGroups,
+  selfUpdateItemsForGroups,
   snoozedItemsForGroups,
+  stackGroupsWithoutSelfUpdateItems,
   stackGroupsWithoutSnoozedItems,
   stackGroupsWithoutRuntimeDeferredItems,
 } from "./snoozeSelection";
@@ -72,15 +75,26 @@ export function usePendingQueueState() {
       pendingServiceKeys.value,
     ),
   );
+  // WUDup cannot recreate itself from an apply job, so these never join a
+  // selection, even from the snoozed or stopped panels.
+  const selfUpdateItems = computed(() =>
+    selfUpdateItemsForGroups(rawStackGroups.value),
+  );
+  const applyableStackGroups = computed(() =>
+    stackGroupsWithoutSelfUpdateItems(rawStackGroups.value),
+  );
   const snoozedItems = computed(() =>
-    snoozedItemsForGroups(rawStackGroups.value, bulkSnoozedServiceKeys.value),
+    snoozedItemsForGroups(
+      applyableStackGroups.value,
+      bulkSnoozedServiceKeys.value,
+    ),
   );
   const snoozedCandidates = computed(
     () => updates.pending?.snoozed_candidates ?? [],
   );
   const unsnoozedStackGroups = computed(() =>
     stackGroupsWithoutSnoozedItems(
-      rawStackGroups.value,
+      applyableStackGroups.value,
       bulkSnoozedServiceKeys.value,
     ),
   );
@@ -120,7 +134,9 @@ export function usePendingQueueState() {
   const availableSelections = computed(() => {
     if (groupingReady.value) {
       return selectionsForItems([
-        ...rawStackGroups.value.flatMap((group) => group.items),
+        ...rawStackGroups.value
+          .flatMap((group) => group.items)
+          .filter((item) => !itemUpdatesWudup(item)),
         ...unmatchedItems.value,
       ]);
     }
@@ -234,6 +250,7 @@ export function usePendingQueueState() {
     selectableSelections,
     availableSelections,
     selectAllLabel,
+    selfUpdateItems,
     snoozedCandidates,
     snoozedItems,
     stackGroups,

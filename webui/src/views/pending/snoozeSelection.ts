@@ -107,6 +107,33 @@ export function stackGroupsWithoutRuntimeDeferredItems(
     .filter((group) => group.items.length > 0);
 }
 
+export function itemUpdatesWudup(item: PendingGroupedItem): boolean {
+  return Boolean(item.self_update_services?.length);
+}
+
+export function selfUpdateItemsForGroups(
+  groups: PendingStackGroup[],
+): SnoozedPendingItem[] {
+  return groups.flatMap((group) =>
+    group.items
+      .filter(itemUpdatesWudup)
+      .map((item) => ({ group, item })),
+  );
+}
+
+export function stackGroupsWithoutSelfUpdateItems(
+  groups: PendingStackGroup[],
+): PendingStackGroup[] {
+  return groups
+    .map((group) =>
+      stackGroupWithItems(
+        group,
+        group.items.filter((item) => !itemUpdatesWudup(item)),
+      ),
+    )
+    .filter((group) => group.items.length > 0);
+}
+
 export function selectableLineNumbersForGroups(
   groups: PendingStackGroup[],
 ): number[] {

@@ -11,7 +11,7 @@ from .compose import ComposeCli, ComposeStack
 from .container_identity import DockerEndpoint, docker_endpoint, resolve_docker_endpoint
 from .docker_cli import DockerCli
 from .self_update import is_self_update_target
-from .updater_preflight import (
+from .updater_self_scope import (
     _DOCKER_ENDPOINT_LOOKUP_MESSAGE,
     _SELF_UPDATE_MESSAGE,
     _docker_endpoint_message,
