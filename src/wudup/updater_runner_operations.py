@@ -523,6 +523,41 @@ class _RunnerOperationsMixin:
                 stale_lines.add(line_no)
         return stale_lines
 
+    @staticmethod
+    def _service_keys_for_lines(
+        matches: Sequence[Match],
+        line_numbers: Iterable[int],
+    ) -> str:
+        lines = set(line_numbers)
+        return ", ".join(sorted({
+            f"{match.stack.name}/{match.service}"
+            for match in matches
+            if match.target.line_no in lines
+        }))
+
+    def _report_cleanup_failure(
+        self,
+        matches: Sequence[Match],
+        failed_lines: Iterable[int],
+        message: str,
+    ) -> None:
+        # Report reconciled lines separately so one failed stack does not mark every line failed.
+        failed = set(failed_lines)
+        reconciled = [match for match in matches if match.target.line_no not in failed]
+        if reconciled:
+            self._progress(
+                "cleanup",
+                "success",
+                "Pending entries were reconciled.",
+                matches=reconciled,
+            )
+        self._progress(
+            "cleanup",
+            "failure",
+            message,
+            matches=[match for match in matches if match.target.line_no in failed],
+        )
+
     def _preflight_expected_digest_outcome(self, match: Match) -> str:
         return self.lifecycle._preflight_expected_digest_outcome(match)
 

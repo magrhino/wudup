@@ -357,10 +357,17 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
             manifest_image("sha256:config"),
         )
 
-        status, stdout, stderr = self.run_direct()
+        progress = []
+        status, stdout, stderr = self.run_direct(progress_callback=progress.append)
 
         self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(self.wud_file.read_text(encoding="utf-8"), "")
+        cleanup = [
+            (event.status, event.line_numbers)
+            for event in progress
+            if event.phase == "cleanup" and event.status != "running"
+        ]
+        self.assertEqual(cleanup, [("failure", (1,))])
         calls = self.calls()
         self.assertIn("manifest inspect quay.io/acme/app:latest", calls)
         self.assertNotIn("manifest inspect quay.io/acme/app@sha256:stale", calls)
@@ -477,7 +484,8 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
         self.set_image_after_pull(
             "ghcr.io/acme/current:latest", "sha256:new-current", "sha256:current"
         )
-        status, stdout, stderr = self.run_direct()
+        progress = []
+        status, stdout, stderr = self.run_direct(progress_callback=progress.append)
 
         self.assertEqual(status, 1, stderr + stdout)
         self.assertEqual(
@@ -499,6 +507,18 @@ class UpdateFromWudCoreTests(UpdateFromWudRunnerTestCase):
                 ("failed", "stale-pending-digest"),
             ],
         )
+        self.assertIn(
+            "Removed stale digest WUD entries from "
+            f"{self.wud_file} for: z-stale/app. "
+            "Refresh pending updates for these services before retrying.",
+            self.latest_run_log().read_text(encoding="utf-8"),
+        )
+        cleanup = [
+            (event.status, event.line_numbers)
+            for event in progress
+            if event.phase == "cleanup" and event.status != "running"
+        ]
+        self.assertEqual(cleanup, [("success", (1,)), ("failure", (2,))])
     def test_mixed_identity_stale_digest_restores_shared_pending_line(self) -> None:
         pending_line = "acme/app:latest@sha256:shared\n"
         self.wud_file.write_text(pending_line, encoding="utf-8")

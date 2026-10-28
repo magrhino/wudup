@@ -701,11 +701,10 @@ class UpdateFromWudRunner(
             if restorable_failed_lines:
                 self.log.warning(f"Kept failed WUD entries pending in {wud_label}")
             if stale_failed_lines:
-                stale_lines = ", ".join(str(line) for line in sorted(stale_failed_lines))
                 self.log.warning(
-                    "Removed stale digest WUD entries from "
-                    f"{wud_label}: lines {stale_lines}. "
-                    "Refresh or replace them before retrying."
+                    f"Removed stale digest WUD entries from {wud_label} for: "
+                    f"{self._service_keys_for_lines(matches, stale_failed_lines)}. "
+                    "Refresh pending updates for these services before retrying."
                 )
             self._mark_failed_lines_restored(restorable_failed_lines)
             updater_audit.mark_failed_pending(
@@ -719,12 +718,7 @@ class UpdateFromWudRunner(
                 if stale_failed_lines
                 else "Restored failed entries to the pending file."
             )
-            self._progress(
-                "cleanup",
-                "failure",
-                cleanup_message,
-                matches=matches,
-            )
+            self._report_cleanup_failure(matches, failed_lines, cleanup_message)
         else:
             self._mark_failed_lines_restored(())
             if partial_lines:

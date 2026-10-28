@@ -469,8 +469,11 @@ describe("RunDetailView", () => {
     expect(wrapper.text()).toContain("Needs review");
     expect(wrapper.text()).toContain("New image running");
     expect(wrapper.text()).toContain("Health passed");
-    expect(wrapper.text()).toContain("WUD line removed");
+    expect(wrapper.text()).toContain("Removed from WUD");
     expect(wrapper.text()).toContain("Follow-up needed");
+    expect(
+      wrapper.findAll(".run-verification-row strong").map((row) => row.text()),
+    ).toEqual(["repo/fallback:1.0", "media/api"]);
     expect(wrapper.text()).toContain("api");
     expect(wrapper.text()).toContain("repo/api:1.0");
     expect(wrapper.text()).toContain("stack-only");
