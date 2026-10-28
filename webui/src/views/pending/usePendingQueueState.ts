@@ -75,30 +75,34 @@ export function usePendingQueueState() {
       pendingServiceKeys.value,
     ),
   );
+  // WUDup cannot recreate itself from an apply job, so these never join a
+  // selection, even from the snoozed or stopped panels.
+  const selfUpdateItems = computed(() =>
+    selfUpdateItemsForGroups(rawStackGroups.value),
+  );
+  const applyableStackGroups = computed(() =>
+    stackGroupsWithoutSelfUpdateItems(rawStackGroups.value),
+  );
   const snoozedItems = computed(() =>
-    snoozedItemsForGroups(rawStackGroups.value, bulkSnoozedServiceKeys.value),
+    snoozedItemsForGroups(
+      applyableStackGroups.value,
+      bulkSnoozedServiceKeys.value,
+    ),
   );
   const snoozedCandidates = computed(
     () => updates.pending?.snoozed_candidates ?? [],
   );
   const unsnoozedStackGroups = computed(() =>
     stackGroupsWithoutSnoozedItems(
-      rawStackGroups.value,
+      applyableStackGroups.value,
       bulkSnoozedServiceKeys.value,
     ),
   );
-  // WUDup cannot recreate itself from an apply job, so these never join a selection.
-  const selfUpdateItems = computed(() =>
-    selfUpdateItemsForGroups(unsnoozedStackGroups.value),
-  );
-  const applyableStackGroups = computed(() =>
-    stackGroupsWithoutSelfUpdateItems(unsnoozedStackGroups.value),
-  );
   const stoppedItems = computed(() =>
-    runtimeDeferredItemsForGroups(applyableStackGroups.value),
+    runtimeDeferredItemsForGroups(unsnoozedStackGroups.value),
   );
   const stackGroups = computed(() =>
-    stackGroupsWithoutRuntimeDeferredItems(applyableStackGroups.value),
+    stackGroupsWithoutRuntimeDeferredItems(unsnoozedStackGroups.value),
   );
   const unmatchedItems = computed(() =>
     groupingReady.value ? (updates.pending?.grouping.unmatched ?? []) : [],

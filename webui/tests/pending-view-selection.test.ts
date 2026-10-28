@@ -256,6 +256,40 @@ describe("pending view selection actions", () => {
     expect(wudupInput.element.disabled).toBe(true);
   });
 
+  it("keeps a snoozed update to WUDup itself out of the snoozed panel", async () => {
+    const wudup = pendingGroupedItem({
+      line_no: 1,
+      image: "ghcr.io/magrhino/wudup:edge",
+      repo: "ghcr.io/magrhino/wudup",
+      services: ["wudup"],
+      running_services: ["wudup"],
+      self_update_services: ["wudup"],
+    });
+    const { pinia, settings, updates } = setupStores(true);
+    settings.snoozes = [
+      snooze({
+        service_key: "media/wudup",
+        snoozed_until: "2026-06-20T18:36:13+00:00",
+        kind: "time",
+      }),
+    ];
+    updates.pending = {
+      ...pendingResponse([wudup]),
+      grouping: pendingGrouping([wudup]),
+    };
+    mockPendingLifecycle(settings, updates);
+    const wrapper = mountPendingView(pinia);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Updates to WUDup itself");
+    expect(wrapper.text()).not.toContain("Snoozed pending entries");
+    const wudupInputs = wrapper.findAll<HTMLInputElement>(
+      'input[aria-label="Select update ghcr.io/magrhino/wudup:edge"]',
+    );
+    expect(wudupInputs).toHaveLength(1);
+    expect(wudupInputs[0]!.element.disabled).toBe(true);
+  });
+
   it("offers only the verified subset of a mixed metadata selection", async () => {
     const fresh = pendingItem({
       line_no: 1,
