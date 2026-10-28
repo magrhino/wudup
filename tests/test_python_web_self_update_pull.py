@@ -261,6 +261,7 @@ def test_self_update_endpoint_marks_audit_failed_when_pull_fails(
     metadata = json.loads(row["metadata_json"])
     assert metadata["status"] == "failure"
     assert "requested access to the resource is denied" in metadata["error"]
+    assert "/root/.docker" not in metadata["error"]
     assert "Command failed with exit code" not in metadata["error"]
 
 
