@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from .command import CommandError
@@ -146,7 +146,9 @@ def _scoped_block(
     }
     container_ids, lookup_block = _scope_container_ids(identity, compose, stack, services)
     if lookup_block is not None:
-        return replace(lookup_block, services=frozenset(protected_services))
+        return SelfScopeBlock(
+            lookup_block.reason, lookup_block.message, frozenset(protected_services),
+        )
     if identity.protected_id and identity.protected_id in container_ids:
         protected_services.update(services)
     if protected_services:
