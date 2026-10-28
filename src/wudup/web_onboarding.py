@@ -55,7 +55,7 @@ CORE_UPDATE_TOUR_STEP_VALUES = (
 ONBOARDING_REQUIRED_KEYS = frozenset(
     {
         "admin-setup",
-        "wud-output",
+        "wud-api-access",
         "docker-access",
         "compose-discovery",
         "persistence",
@@ -152,21 +152,15 @@ def onboarding_checklist_response(
     items = [
         _onboarding_admin_item(settings),
         _onboarding_item_from_checks(
-            key="wud-output",
-            title="Shared WUD output file",
-            checks=_checks_by_code(
-                checks,
-                {"wud-out-file-directory", "wud-out-file"},
-            ),
-            pass_detail=(
-                "WUD_OUT_FILE points at a writable shared location that WUD can "
-                "create or update."
-            ),
-            missing_detail="WUD_OUT_FILE readiness was not reported by doctor.",
+            key="wud-api-access",
+            title="WUD API access",
+            checks=_checks_by_code(checks, {"wud-api"}),
+            pass_detail="WUDup can read containers and updates from the WUD API.",
+            missing_detail="WUD API access was not reported by doctor.",
             docs=[
                 _onboarding_doc(
-                    "WebUI container setup",
-                    f"{ONBOARDING_DOC_BASE}/wiki/webui-container.md#start-the-webui",
+                    "WUD API authentication",
+                    f"{ONBOARDING_DOC_BASE}/wiki/webui-container.md#wud-api-authentication",
                 )
             ],
         ),
@@ -211,9 +205,19 @@ def onboarding_checklist_response(
         _onboarding_item_from_checks(
             key="persistence",
             title="Logs and SQLite persistence",
-            checks=_checks_by_code(checks, {"wud-log-dir", "webui-database"}),
+            # The WUD_OUT_FILE directory holds self-update plan files.
+            checks=_checks_by_code(
+                checks,
+                {
+                    "wud-log-dir",
+                    "webui-database",
+                    "wud-out-file-directory",
+                    "wud-out-file",
+                },
+            ),
             pass_detail=(
-                "The log directory is writable and the WebUI database is ready."
+                "The log and WUD_OUT_FILE directories are writable and the WebUI "
+                "database is ready."
             ),
             missing_detail="Persistence readiness was not reported by doctor.",
             docs=[

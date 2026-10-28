@@ -264,6 +264,36 @@ def test_doctor_endpoint_suggests_wud_api_auth_configuration(
     assert "authentication support is added" not in suggestions[0]["description"]
 
 
+def test_doctor_endpoint_reports_env_setup_without_secret_values(
+    tmp_path: Path,
+) -> None:
+    secret = "doctor-direct-bearer-secret"
+    client = _doctor_client(
+        tmp_path,
+        {
+            "WUDUP_BUILD_VERSION": "",
+            "WUD_API_AUTH_BEARER_TOKEN": secret,
+            "WUD_API_BASE_URL": "https://wud.doctor-env-setup.test:3000",
+        },
+    )
+
+    response = client.post("/api/v1/doctor", headers=_csrf_headers(client))
+    body = response.json()
+    checks = {check["code"]: check for check in body["checks"]}
+
+    assert response.status_code == 200
+    assert checks["env-file"]["status"] == "WARN"
+    assert checks["env-file"]["category"] == "configuration"
+    assert checks["secret-file-inputs"]["status"] == "WARN"
+    assert "WUD_API_AUTH_BEARER_TOKEN is set directly" in (
+        checks["secret-file-inputs"]["detail"]
+    )
+    assert checks["secret-file-inputs"]["suggestions"][0]["snippet"].startswith(
+        "WUD_API_AUTH_BEARER_TOKEN_FILE="
+    )
+    assert secret not in json.dumps(body)
+
+
 def test_doctor_warns_when_wud_metadata_contains_degraded_observations(
     tmp_path: Path,
     monkeypatch,

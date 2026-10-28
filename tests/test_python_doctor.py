@@ -154,6 +154,81 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("[WARN] bind mount path safety", stdout)
         self.assertIn("app: /host/app/config", stdout)
 
+    def test_doctor_skips_env_file_check_outside_the_image(self) -> None:
+        result = self._run_doctor_result()
+
+        self.assertNotIn("env-file", [check.code for check in result.checks])
+
+    def test_doctor_warns_when_env_file_did_not_reach_the_container(self) -> None:
+        result = self._run_doctor_result({"WUDUP_BUILD_VERSION": ""})
+
+        self.assertTrue(result.ok)
+        check = next(check for check in result.checks if check.code == "env-file")
+        self.assertEqual(check.status, "WARN")
+        self.assertEqual(check.category, "configuration")
+        self.assertIn("did not receive your .env file", check.detail)
+        self.assertIn("env_file", check.suggestions[0].snippet)
+
+    def test_doctor_passes_env_file_check_when_host_docker_base_is_set(self) -> None:
+        result = self._run_doctor_result(
+            {
+                "WUDUP_BUILD_VERSION": "edge-abc1234",
+                "HOST_DOCKER_BASE": str(self.docker_base),
+            }
+        )
+
+        check = next(check for check in result.checks if check.code == "env-file")
+        self.assertEqual(check.status, "PASS")
+        self.assertEqual(check.suggestions, ())
+
+    def test_doctor_names_direct_secrets_without_printing_values(self) -> None:
+        bearer = "bearer-secret-value"
+        password = "basic-secret-value"
+        status, stdout = self._run_doctor(
+            {
+                "WUD_API_AUTH_BEARER_TOKEN": bearer,
+                "WUD_API_AUTH_BASIC_PASSWORD": password,
+            }
+        )
+        result = self._run_doctor_result(
+            {
+                "WUD_API_AUTH_BEARER_TOKEN": bearer,
+                "WUD_API_AUTH_BASIC_PASSWORD": password,
+            }
+        )
+
+        self.assertEqual(status, 0, stdout)
+        self.assertIn(
+            "[WARN] secret file inputs: WUD_API_AUTH_BEARER_TOKEN, "
+            "WUD_API_AUTH_BASIC_PASSWORD are set directly in the environment.",
+            stdout,
+        )
+        check = next(
+            check for check in result.checks if check.code == "secret-file-inputs"
+        )
+        self.assertEqual(check.category, "configuration")
+        self.assertEqual(
+            [suggestion.snippet.split("=", 1)[0] for suggestion in check.suggestions],
+            ["WUD_API_AUTH_BEARER_TOKEN_FILE", "WUD_API_AUTH_BASIC_PASSWORD_FILE"],
+        )
+        rendered = stdout + repr(check)
+        self.assertNotIn(bearer, rendered)
+        self.assertNotIn(password, rendered)
+
+    def test_doctor_accepts_secret_file_inputs_quietly(self) -> None:
+        result = self._run_doctor_result(
+            {
+                "WUD_API_AUTH_BASIC_USER": "admin",
+                "WUD_API_AUTH_BASIC_PASSWORD_FILE": "/run/secrets/wud_api_password",
+                "GITHUB_TOKEN": "not-covered-until-it-has-a-file-form",
+            }
+        )
+
+        self.assertNotIn(
+            "secret-file-inputs",
+            [check.code for check in result.checks],
+        )
+
     def test_readiness_result_passes_with_accessible_docker_and_wud_file(self) -> None:
         # Use a tcp DOCKER_HOST so no Unix socket check is needed.
         options = self._make_doctor_options(docker_host="tcp://docker:2375")

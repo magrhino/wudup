@@ -7,6 +7,7 @@ from tests.web_test_helpers import (
     _client,
     _csrf_headers,
     _doctor_client,
+    _install_wud_api,
     _setup_admin,
 )
 
@@ -92,7 +93,7 @@ def test_onboarding_checklist_returns_redacted_setup_items(
     assert body["all_passed"] is False
     assert {
         "admin-setup",
-        "wud-output",
+        "wud-api-access",
         "docker-access",
         "compose-discovery",
         "persistence",
@@ -103,8 +104,41 @@ def test_onboarding_checklist_returns_redacted_setup_items(
     assert items["docker-access"]["suggestions"]
     assert "docker-daemon-info" in items["docker-access"]["check_codes"]
     assert items["mutation-mode"]["status"] == "PASS"
+    assert "wud-output" not in items
+    assert "WUD can create or update" not in serialized
+    assert {"wud-out-file-directory", "wud-out-file"}.issubset(
+        items["persistence"]["check_codes"]
+    )
     assert secret not in serialized
     assert "<redacted>" in serialized
+
+
+def test_onboarding_wud_api_access_suggests_credentials(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_wud_api(monkeypatch, health=(401, {"error": "authentication required"}))
+    client = _doctor_client(
+        tmp_path,
+        {"WUD_API_BASE_URL": "https://wud.onboarding-auth-missing.test:3000"},
+    )
+
+    response = client.post(
+        "/api/v1/onboarding/checklist",
+        headers=_csrf_headers(client),
+    )
+    item = next(
+        item for item in response.json()["items"] if item["key"] == "wud-api-access"
+    )
+
+    assert response.status_code == 200
+    assert item["title"] == "WUD API access"
+    assert item["status"] == "WARN"
+    assert item["check_codes"] == ["wud-api"]
+    assert item["suggestions"][0]["label"] == "Configure WUD API credentials"
+    assert item["docs"][0]["url"].endswith(
+        "/wiki/webui-container.md#wud-api-authentication"
+    )
 
 def test_onboarding_checklist_searches_old_directory_by_default(
     tmp_path: Path,
@@ -187,12 +221,15 @@ def test_onboarding_checklist_skips_doctor_after_dismissal(
 
 def test_onboarding_checklist_hides_when_required_items_pass(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    _install_wud_api(monkeypatch, containers=[])
     client = _doctor_client(
         tmp_path,
         {
             "WUD_WEB_DEV_NO_AUTH": "false",
             "WUD_WEB_PUBLIC_ORIGIN": "http://testserver",
+            "WUD_API_BASE_URL": "https://wud.onboarding-ready.test:3000",
         },
     )
     _setup_admin(client)

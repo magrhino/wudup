@@ -205,6 +205,21 @@ describe("demo web API", () => {
     await expect(api.rollbackPlan(1)).resolves.toMatchObject({ run_id: 1 });
   });
 
+  it("lists WUD API access in the onboarding checklist", async () => {
+    const api = createDemoWebApi();
+
+    const checklist = await api.onboardingChecklist("demo-csrf");
+    const keys = checklist.items.map((item) => item.key);
+
+    expect(keys).toContain("wud-api-access");
+    expect(keys).not.toContain("wud-output");
+    expect(checklist.items.find((item) => item.key === "wud-api-access")).toMatchObject({
+      title: "WUD API access",
+      status: "PASS",
+      check_codes: ["wud-api"],
+    });
+  });
+
   it("previews pending plans and blocks apply in the static demo", async () => {
     const api = createDemoWebApi();
     const tagOverrides = [{ line_no: 3, tag: "2026.6.0" }];
