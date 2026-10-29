@@ -26,9 +26,7 @@ from tests.web_test_helpers import (
 )
 
 from wudup import (
-    web as web_module,
-)
-from wudup import (
+    credential_env,
     web_job_registry,
     web_release_notifications,
     web_retags,
@@ -39,6 +37,9 @@ from wudup import (
     web_wud_observation_store,
     web_wud_observations,
     web_wud_transport,
+)
+from wudup import (
+    web as web_module,
 )
 from wudup import (
     web_release_notes as release_notes_module,
@@ -1410,6 +1411,26 @@ def test_wud_api_static_json_headers_file_read_error(tmp_path: Path) -> None:
         _settings(tmp_path, "https://wud.static-headers.test:3000", env)
 
     assert str(excinfo.value) == "WUD_API_HEADERS_FILE could not be read"
+
+
+@pytest.mark.parametrize(
+    ("direct_name", "file_name"), credential_env.SECRET_FILE_ENV_PAIRS
+)
+def test_every_doctor_secret_file_pair_is_loaded_by_the_wud_api_client(
+    tmp_path: Path,
+    direct_name: str,
+    file_name: str,
+) -> None:
+    # Doctor suggests these _FILE forms, so the client must actually read them.
+    secret_file = tmp_path / "secret"
+    secret_file.write_text("file-only-secret\n", encoding="utf-8")
+    environ = {file_name: str(secret_file)}
+    if direct_name == web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_ENV:
+        environ[web_wud_api.WUD_API_AUTH_BASIC_USER_ENV] = "wud-user"
+
+    config = web_wud_transport.configured_client_config(environ)
+
+    assert "file-only-secret" in config.secret_values
 
 
 def test_wud_api_client_config_fingerprint_is_opaque_without_secret_text(

@@ -17,6 +17,7 @@ from pathlib import Path
 from .command import CommandError, CommandResult, CommandRunner
 from .compose import ComposeCli, compose_discovery_message, compose_files_under
 from .config import COMPOSE_IGNORE_PATHS_ENV, ConfigError, parse_compose_ignore_paths
+from .credential_env import SECRET_FILE_ENV_PAIRS
 
 DEFAULT_CONTAINER_APP_DIR = Path("/app")
 DEFAULT_CONTAINER_DOCKER_BASE = "/host/docker"
@@ -24,6 +25,8 @@ DEFAULT_CONTAINER_OUT_FILE = "/out/images.todo"
 DEFAULT_CONTAINER_LOG_DIR = "/logs"
 HELPER_ONLY_MOUNT_PREFIXES = (Path("/host"), Path("/docker-host"), Path("/container-host"))
 DOCTOR_PROBE_NAME = ".wudup-doctor-probe"
+# The WUDup image always defines this, even when it is empty.
+IMAGE_MARKER_ENV = "WUDUP_BUILD_VERSION"
 @dataclass(frozen=True)
 class DoctorOptions:
     docker_base: Path
@@ -99,6 +102,8 @@ class Doctor:
         self._check_docker_access()
         self._check_paths()
         self._check_compose()
+        self._check_env_file()
+        self._check_secret_file_inputs()
         return DoctorResult(checks=tuple(self.checks))
 
     def run_readiness_result(self) -> DoctorResult:
@@ -216,6 +221,78 @@ class Doctor:
                 "compose discovery",
                 "no discovered compose stacks rendered successfully",
             )
+
+    def _check_env_file(self) -> None:
+        # Outside the WUDup image there is no Compose .env to check.
+        if IMAGE_MARKER_ENV not in self.environ:
+            return
+        # No Compose example passes HOST_DOCKER_BASE through environment:, so
+        # it reaches the container only when the wudup service loads .env.
+        if self.environ.get("HOST_DOCKER_BASE"):
+            self._record(
+                "PASS",
+                "Compose .env file",
+                "settings from .env reached the container (HOST_DOCKER_BASE is set)",
+                code="env-file",
+                category="configuration",
+            )
+            return
+        self._record(
+            "WARN",
+            "Compose .env file",
+            "HOST_DOCKER_BASE is not set inside the container, so WUDup "
+            "probably did not receive your .env file. Settings that are only "
+            "in .env have no effect.",
+            code="env-file",
+            category="configuration",
+            suggestions=(
+                DoctorSuggestion(
+                    label="Load .env into WUDup",
+                    description=(
+                        "Keep .env next to docker-compose.yml and load it in the "
+                        "wudup service with env_file (Compose 2.24 or newer). A "
+                        "file passed with --env-file only fills in ${VAR} "
+                        "references in the Compose file. If you set every value "
+                        "in the Compose file instead, set HOST_DOCKER_BASE there "
+                        "too."
+                    ),
+                    snippet="env_file: [{path: .env, required: false}]",
+                ),
+            ),
+        )
+
+    def _check_secret_file_inputs(self) -> None:
+        # Report variable names only; never read or print the values.
+        direct = [
+            (direct_name, file_name)
+            for direct_name, file_name in SECRET_FILE_ENV_PAIRS
+            if self.environ.get(direct_name, "").strip()
+        ]
+        if not direct:
+            return
+        names = ", ".join(direct_name for direct_name, _ in direct)
+        verb = "is" if len(direct) == 1 else "are"
+        self._record(
+            "WARN",
+            "secret file inputs",
+            f"{names} {verb} set directly in the environment. Reading secrets "
+            "from a file keeps them out of docker inspect and the Compose "
+            ".env file.",
+            code="secret-file-inputs",
+            category="configuration",
+            suggestions=tuple(
+                DoctorSuggestion(
+                    label=f"Read {direct_name} from a file",
+                    description=(
+                        "Put only the secret in a host file, mount it read-only "
+                        f"into the wudup container, set {file_name} to its path, "
+                        f"and remove {direct_name}."
+                    ),
+                    snippet=f"{file_name}=/run/secrets/{direct_name.lower()}",
+                )
+                for direct_name, file_name in direct
+            ),
+        )
 
     def _check_command(self, name: str, command: Sequence[str]) -> CommandResult:
         result = self.runner.capture(command, check=False)

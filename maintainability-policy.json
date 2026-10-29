@@ -43,6 +43,13 @@
       "follow_up": null,
       "re_review": "When a change adds registry transport, a new verification source, or behavior unrelated to deciding whether a digest is trusted."
     },
+    "src/wudup/doctor.py": {
+      "ceiling": 900,
+      "reason": "The read-only Doctor shared by the CLI and the WebUI; every check family (runtime, Docker access, paths, Compose, env setup) records into one result and shares its default suggestions. The env setup checks for .env loading and direct secrets (#461) brought it to 821 lines; the ceiling adds 10% review headroom.",
+      "deferred": false,
+      "follow_up": null,
+      "re_review": "When Doctor needs to grow again: move the check dataclasses into a framework-free models module, then move the environment-only checks and the default suggestion copy out, rather than raising the ceiling again."
+    },
     "src/wudup/plans.py": {
       "ceiling": 1570,
       "reason": "Builds the structured dry-run plan for WebUI previews; matching and issue collection already live in plan_matching.py and plan_issues.py. Baseline size 1419 lines; the ceiling adds 10% review headroom.",
