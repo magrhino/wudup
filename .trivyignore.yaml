@@ -20,3 +20,12 @@ vulnerabilities:
       docker:29.9.2-cli, is built with Go 1.26.10 but still x/net 0.58.0.
       Remove once the docker CLI image ships a compose build with the fix.
     expired_at: 2026-11-08
+  - id: CVE-2026-116587
+    paths:
+      - usr/local/bin/trivy
+    statement: >-
+      Denial of service only, when Trivy parses JWKs that contain RSA keys.
+      Fixed in go-jose 4.1.6 on Trivy main, but the latest release,
+      aquasec/trivy:0.76.1, still bundles go-jose 4.1.5. Remove once a Trivy
+      release ships the fix and the Dockerfile bumps to it.
+    expired_at: 2026-11-28
