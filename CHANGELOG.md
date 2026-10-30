@@ -4,6 +4,30 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.68.0](https://github.com/magrhino/wudup/compare/v0.67.0...v0.68.0) (2026-10-30)
+
+
+### Features
+
+* **compose:** load wudup settings from .env via env_file ([#948](https://github.com/magrhino/wudup/issues/948)) ([bc43332](https://github.com/magrhino/wudup/commit/bc43332484375486e21095b25c123cd95eaccc56)), closes [#461](https://github.com/magrhino/wudup/issues/461)
+* **compose:** share one WUD password secret between WUD and WUDup ([#951](https://github.com/magrhino/wudup/issues/951)) ([3fb626a](https://github.com/magrhino/wudup/commit/3fb626a4c6ce5ea7b73c28c8e0ac2e8bf3d6906e))
+* **onboarding:** check WUD API access and flag env setup in Doctor ([#950](https://github.com/magrhino/wudup/issues/950)) ([ac3fd89](https://github.com/magrhino/wudup/commit/ac3fd89c0f40e68d5a9ad83c36226e13ed21e82b))
+* **webui:** block WUDup self-updates at plan review and selection ([#942](https://github.com/magrhino/wudup/issues/942)) ([5901c1d](https://github.com/magrhino/wudup/commit/5901c1de0efb55e88ef12b42174353bf20a44d2a))
+* **webui:** skip a release until WUD offers a different one ([#938](https://github.com/magrhino/wudup/issues/938)) ([c25fb79](https://github.com/magrhino/wudup/commit/c25fb79ad25debaa3b995424cfb001cf90d49887))
+* **webui:** snooze or skip a pending update from one row menu ([#940](https://github.com/magrhino/wudup/issues/940)) ([e0918d6](https://github.com/magrhino/wudup/commit/e0918d60059992efd8cea8a9a742aa9186463e8d))
+
+
+### Bug Fixes
+
+* **apply:** keep apply progress and verification accurate on partial failure ([#943](https://github.com/magrhino/wudup/issues/943)) ([0187b0f](https://github.com/magrhino/wudup/commit/0187b0f865aac26ee2286f6e6715d199462fd2d3))
+* **security:** unblock edge image scans for CVE-2026-116587 ([#953](https://github.com/magrhino/wudup/issues/953)) ([9ed457c](https://github.com/magrhino/wudup/commit/9ed457ce7eff055162e69e36bc60c98955010a87))
+* **self-update:** record Docker error detail when the image pull fails ([#945](https://github.com/magrhino/wudup/issues/945)) ([66639b5](https://github.com/magrhino/wudup/commit/66639b52ed3aaee743098af895ed6593eef81f78))
+
+
+### Dependencies
+
+* **make:** add test and lint wrappers for venv and PYTHONPATH ([#941](https://github.com/magrhino/wudup/issues/941)) ([ac46a02](https://github.com/magrhino/wudup/commit/ac46a027375d901734170f02f5d96a12cfb174df))
+
 ## [0.67.0](https://github.com/magrhino/wudup/compare/v0.66.0...v0.67.0) (2026-10-27)
 
 
