@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from tests.web_test_helpers import (
@@ -107,8 +108,10 @@ def test_invalid_env_token_stops_startup(
     env: dict[str, str],
     message: str,
 ) -> None:
+    environ = _web_env(tmp_path, env)
+
     with pytest.raises(WebConfigError, match=message):
-        create_app(environ=_web_env(tmp_path, env))
+        create_app(environ=environ)
 
 
 def test_env_token_locks_webui_rotation(tmp_path: Path) -> None:
@@ -424,9 +427,9 @@ def test_integration_routes_are_read_only(tmp_path: Path) -> None:
 
 def test_readonly_token_dependency_rejects_non_read_methods() -> None:
     request = SimpleNamespace(method="POST")
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(HTTPException) as raised:
         token_module.require_readonly_token(request, authorization="Bearer x")  # type: ignore[arg-type]
-    assert getattr(raised.value, "status_code", None) == 405
+    assert raised.value.status_code == 405
 
 
 def test_integration_routes_need_setup(tmp_path: Path) -> None:

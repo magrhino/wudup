@@ -642,7 +642,8 @@ def test_service_detail_caps_and_cleans_untrusted_text(monkeypatch) -> None:
 
     release = detail["release"]
     assert len(release["title"]) == summary_module.TITLE_LIMIT
-    assert "\x1b" not in release["title"] and "\n" not in release["title"]
+    assert "\x1b" not in release["title"]
+    assert "\n" not in release["title"]
     assert release["title"].endswith("…")
     assert release["breaking_reasons"] == ["reason 0", "reason 1", "reason 2"]
     assert release["advisories"] == [f"GHSA-{index}" for index in range(5)]

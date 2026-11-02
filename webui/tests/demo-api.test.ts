@@ -550,6 +550,8 @@ describe("demo web API", () => {
     );
     const mutationExpectations = [
       api.updateManagedSettings({ theme_preference: "dark" }, "csrf"),
+      api.readonlyToken("rotate", "csrf"),
+      api.readonlyToken("revoke", "csrf"),
       api.dismissOnboarding("csrf"),
       api.updateCoreUpdateTour("completed", "runs_history", "csrf"),
       api.refreshRetagGithubLatest("csrf"),

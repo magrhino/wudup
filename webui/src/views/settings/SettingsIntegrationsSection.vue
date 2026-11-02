@@ -48,22 +48,28 @@ const confirmVisible = computed({
     }
   },
 });
-const confirmTitle = computed(() =>
-  confirmAction.value === "revoke"
-    ? "Revoke read-only API token"
-    : hasToken.value
-      ? "Replace read-only API token"
-      : "Generate read-only API token",
-);
-const confirmCopy = computed(() =>
-  confirmAction.value === "revoke"
-    ? status.value?.source === "env"
-      ? "This removes the stored WebUI token. The container-config token keeps working."
-      : "Integrations using this token get 401 responses until you generate a new one."
-    : hasToken.value
-      ? "The current token stops working immediately. Update every integration with the new one."
-      : "The token is shown once. Store it in the integration's secret file right away.",
-);
+const confirmTitle = computed(() => {
+  if (confirmAction.value === "revoke") {
+    return "Revoke read-only API token";
+  }
+  return hasToken.value ? "Replace read-only API token" : "Generate read-only API token";
+});
+const confirmCopy = computed(() => {
+  if (confirmAction.value === "revoke") {
+    return revokeCopy();
+  }
+  if (hasToken.value) {
+    return "The current token stops working immediately. Update every integration with the new one.";
+  }
+  return "The token is shown once. Store it in the integration's secret file right away.";
+});
+
+function revokeCopy(): string {
+  if (status.value?.source === "env") {
+    return "This removes the stored WebUI token. The container-config token keeps working.";
+  }
+  return "Integrations using this token get 401 responses until you generate a new one.";
+}
 
 function openConfirm(action: ReadonlyTokenAction): void {
   actionError.value = "";
