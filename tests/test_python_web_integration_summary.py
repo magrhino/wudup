@@ -240,14 +240,19 @@ def _install(
         "cached_release_notes_response",
         lambda settings: ReleaseNotesResponse(source_file="", count=len(notes), items=list(notes)),
     )
-    monkeypatch.setattr(
-        summary_module.web_security,
-        "security_scans_response",
-        lambda settings: SecurityScansResponse(
+    def security_scans_response(settings, *, resolve_missing_digests=True):
+        # Integrations are polled; they must never ask a registry for digests.
+        assert resolve_missing_digests is False
+        return SecurityScansResponse(
             source_file="",
             scanning_enabled=scanning_enabled,
             items=list(scans),
-        ),
+        )
+
+    monkeypatch.setattr(
+        summary_module.web_security,
+        "security_scans_response",
+        security_scans_response,
     )
     monkeypatch.setattr(
         summary_module.web_state,
@@ -504,6 +509,85 @@ def test_failed_run_is_urgent_when_recent_and_digest_when_old(monkeypatch) -> No
     assert summary_module.integration_summary(SETTINGS).issues[0].severity == "digest"
 
 
+def test_in_flight_run_does_not_clear_an_earlier_failure(monkeypatch) -> None:
+    failed = _run(7, status="failure", events=[("media", "app", "failure")])
+    scheduled = _run(8, status="scheduled", mode="web-self-update")
+    _install(monkeypatch, pending=_pending({}), update_runs=[scheduled, failed])
+
+    summary = summary_module.integration_summary(SETTINGS)
+
+    assert summary.last_run.id == 8
+    assert summary.last_run.status == "running"
+    assert [issue.id for issue in summary.issues] == ["wudup:run-failed:7"]
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["running_image_verified", "image_prepared", "tag_prepared", "success"],
+)
+def test_successful_self_update_clears_an_earlier_failure(monkeypatch, status: str) -> None:
+    failed = _run(7, status="failure", events=[("media", "app", "failure")])
+    self_update = _run(8, status=status, mode="web-self-update")
+    _install(monkeypatch, pending=_pending({}), update_runs=[self_update, failed])
+
+    summary = summary_module.integration_summary(SETTINGS)
+
+    assert summary.last_run.status == "success"
+    assert summary.issues == []
+
+
+def test_update_run_modes_follow_the_shared_constants() -> None:
+    from wudup import db, web_scheduler
+
+    assert set(db.SERVICE_UPDATE_RUN_MODES) <= set(summary_module.UPDATE_RUN_MODES)
+    assert "web-self-update" in summary_module.UPDATE_RUN_MODES
+    assert summary_module.AUTO_UPDATE_MISSED_MODE == web_scheduler.AUTO_UPDATE_MISSED_MODE
+
+
+def test_stack_level_match_is_counted_and_raises_issues(monkeypatch) -> None:
+    _install(
+        monkeypatch,
+        pending=_pending({"media": [_item(1, "repo/app", services=[])]}),
+        notes=[_note(1, "repo/app", outcome="verified_critical_high")],
+    )
+
+    summary = summary_module.integration_summary(SETTINGS)
+
+    assert summary.updates.total == 1
+    assert summary.updates.items[0].service == "media"
+    assert summary.updates.unplaced == 0
+    assert [issue.id for issue in summary.issues] == [
+        "wudup:security-release:media:1.1"
+    ]
+
+
+def test_system_issues_survive_many_update_issues(monkeypatch) -> None:
+    items = [_item(index, f"repo/app{index:02}", services=["app"]) for index in range(1, 9)]
+    unmatched = _item(20, "repo/orphan", services=[])
+    _install(
+        monkeypatch,
+        pending=_pending(
+            {f"s{index:02}": [item] for index, item in enumerate(items, 1)},
+            unmatched=[unmatched],
+        ),
+        notes=[
+            _note(index, f"repo/app{index:02}", outcome="verified_critical_high", breaking=True)
+            for index in range(1, 9)
+        ],
+        scans=[_scan(20, state="error", error_message="registry down")],
+    )
+
+    summary = summary_module.integration_summary(SETTINGS)
+    codes = [issue.code for issue in summary.issues]
+
+    assert len(summary.issues) == summary_module.MAX_ISSUES
+    assert summary.issues_more == 16 + 2 - summary_module.MAX_ISSUES
+    assert codes[:2] == ["scan-broken", "update-unplaced"]
+    update_ids = [issue.id for issue in summary.issues[2:]]
+    assert update_ids == sorted(update_ids)
+    assert all(code == "security-release" for code in codes[2:])
+
+
 def test_successful_run_with_unhealthy_service_counts_as_failure(monkeypatch) -> None:
     run = _run(
         9,
@@ -722,3 +806,38 @@ def test_summary_route_reads_real_state_without_mutating(tmp_path: Path) -> None
     calls = _fake_docker_calls(fake_root)
     for verb in (" pull", " up ", " restart", " rm ", " stop ", " tag "):
         assert verb not in calls
+
+
+def test_summary_never_asks_a_registry_for_missing_digests(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from wudup import security_subjects
+
+    def fail_registry_lookup(*_args, **_kwargs):
+        raise AssertionError("integrations must not resolve digests from a registry")
+
+    monkeypatch.setattr(
+        security_subjects,
+        "_resolve_missing_reported_digests",
+        fail_registry_lookup,
+    )
+    env = _web_env(
+        tmp_path,
+        {
+            "WUD_PENDING_SOURCE": TEST_FILE_PENDING_SOURCE_VALUE,
+            "WUD_WEB_READONLY_TOKEN": TOKEN,
+            "WUD_SECURITY_SCANNING_ENABLED": "true",
+        },
+    )
+    (tmp_path / "state" / "images.todo").write_text("repo/app:1.0 tag=1.1\n", encoding="utf-8")
+    app = create_app(environ=env)
+    _setup_admin(TestClient(app))
+
+    response = TestClient(app).get(
+        "/api/integrations/v1/summary",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updates"]["total"] == 1

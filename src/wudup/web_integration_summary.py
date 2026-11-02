@@ -21,7 +21,7 @@ from . import (
     web_state,
     web_tracking,
 )
-from .db import utc_timestamp
+from .db import SERVICE_UPDATE_RUN_MODES, utc_timestamp
 from .web_integration_models import (
     IntegrationIssue,
     IntegrationPolicy,
@@ -50,6 +50,7 @@ from .web_models import (
     WebSettings,
 )
 from .web_redaction import sanitize_support_bundle_text
+from .web_scheduler import AUTO_UPDATE_MISSED_MODE
 
 MAX_UPDATES = 20
 MAX_ISSUES = 10
@@ -60,9 +61,19 @@ TITLE_LIMIT = 80
 REASON_LIMIT = 120
 RECENT_RUN_WINDOW = timedelta(hours=24)
 SERVICE_RUN_LOOKBACK = 20
-# Runs that changed (or tried to change) running services.
-UPDATE_RUN_MODES = ("pause", "stop", "live", "web-retag", "web-self-update")
-AUTO_UPDATE_MISSED_MODE = "auto-update-missed"
+UPDATE_RUN_LOOKBACK = 20
+# Runs that changed (or tried to change) running services. Self-update runs
+# are written only by web_self_update.py, which has no shared constant.
+UPDATE_RUN_MODES = (*SERVICE_UPDATE_RUN_MODES, "web-self-update")
+# Self-update runs finish with their own success statuses (SelfUpdateAuditStatus).
+SUCCESS_RUN_STATUSES = frozenset(
+    {"success", "running_image_verified", "image_prepared", "tag_prepared"}
+)
+RUNNING_RUN_STATUSES = frozenset({"started", "running", "scheduled", "in_progress"})
+FAILED_RUN_STATUSES = frozenset({"failure", "failed"})
+# Only these decide whether a failed run is still the latest outcome; an
+# in-flight or unrecognized run must not clear run-failed.
+CONCLUSIVE_RUN_STATUSES = frozenset({"success", "needs_review", "failure"})
 UNHEALTHY_HEALTH_STATUSES = frozenset({"failed", "timed_out", "service_disappeared"})
 BROKEN_SCAN_STATES = frozenset({"error", "auth_required", "unavailable_offline"})
 STALE_METADATA_STATUSES = frozenset({"retained", "recovered"})
@@ -106,17 +117,27 @@ def integration_summary(settings: WebSettings) -> IntegrationSummaryResponse:
             update.service,
         )
     )
-    last_run = _last_update_run(settings)
+    runs = _recent_update_runs(settings)
+    last_run = runs[0] if runs else None
+    concluded = next(
+        (run for run in runs if _run_status(run) in CONCLUSIVE_RUN_STATUSES),
+        None,
+    )
     missed = web_runs.run_history(settings, limit=1, modes=(AUTO_UPDATE_MISSED_MODE,))
-    issues = [
+    system_issues = [
         *_wud_issues(inputs.pending),
-        *_run_issues(last_run, now),
-        *_update_issues(updates),
+        *_run_issues(concluded, now),
         *_missed_run_issues(settings, missed, now),
         *_unplaced_issues(settings, inputs.pending),
         *_scan_issues(settings, inputs),
     ]
-    issues.sort(key=lambda issue: issue.severity != "urgent")
+    # System and run issues come first so per-update issues can never push
+    # them past the cap; each group is ordered urgent-first, then by id, so
+    # the visible window only moves when the set of issues changes.
+    issues = [
+        *sorted(system_issues, key=_issue_order),
+        *sorted(_update_issues(updates), key=_issue_order),
+    ]
     return IntegrationSummaryResponse(
         checked_at=utc_timestamp(),
         wud=_wud_status(settings, inputs.pending),
@@ -183,7 +204,9 @@ def integration_service(
 def _summary_inputs(settings: WebSettings) -> _SummaryInputs:
     pending = web_pending.pending_response(settings, force_api=False)
     notes = web_release_notes.cached_release_notes_response(settings)
-    scans = web_security.security_scans_response(settings)
+    # Integrations are polled on a timer, so never ask a registry for a
+    # missing digest here; the WebUI Security page still resolves them.
+    scans = web_security.security_scans_response(settings, resolve_missing_digests=False)
     return _SummaryInputs(
         pending=pending,
         notes={item.line_no: item for item in notes.items},
@@ -202,10 +225,14 @@ def _pending_entries(pending: PendingResponse) -> list[_PendingEntry]:
         # Without Compose matches, name each update by its image repository.
         return [_PendingEntry(item.repo, item, None) for item in pending.items]
     entries = [
-        _PendingEntry(f"{group.name}/{service}", item, item)
+        _PendingEntry(service_key, item, item)
         for group in grouping.groups
         for item in group.items
-        for service in item.services
+        # A stack-level match has no service names; key it by stack so the
+        # update is still counted and can still raise issues.
+        for service_key in (
+            [f"{group.name}/{service}" for service in item.services] or [group.name]
+        )
     ]
     entries.extend(_PendingEntry(item.repo, item, item) for item in grouping.unmatched)
     return entries
@@ -408,14 +435,13 @@ def _unplaced_count(pending: PendingResponse) -> int:
     return len(pending.grouping.unmatched)
 
 
-def _last_update_run(settings: WebSettings) -> RunHistorySummary | None:
-    runs = web_runs.run_history(
+def _recent_update_runs(settings: WebSettings) -> list[RunHistorySummary]:
+    return web_runs.run_history(
         settings,
-        limit=1,
+        limit=UPDATE_RUN_LOOKBACK,
         modes=UPDATE_RUN_MODES,
         include_dry_runs=False,
     )
-    return runs[0] if runs else None
 
 
 def _last_service_run(
@@ -452,11 +478,11 @@ def _run(settings: WebSettings, run: RunHistorySummary) -> IntegrationRun:
 
 
 def _run_status(run: RunHistorySummary) -> str:
-    if run.status == "failure" or _unhealthy_items(run):
+    if run.status in FAILED_RUN_STATUSES or _unhealthy_items(run):
         return "failure"
-    if run.status == "success":
+    if run.status in SUCCESS_RUN_STATUSES:
         return "needs_review" if run.verification.status == "needs_review" else "success"
-    if run.status in {"started", "running"}:
+    if run.status in RUNNING_RUN_STATUSES:
         return "running"
     if run.status == "missed":
         return "missed"
@@ -653,6 +679,10 @@ def _scan_issues(settings: WebSettings, inputs: _SummaryInputs) -> list[Integrat
             summary=_text(summary, REASON_LIMIT),
         )
     ]
+
+
+def _issue_order(issue: IntegrationIssue) -> tuple[bool, str]:
+    return issue.severity != "urgent", issue.id
 
 
 def _is_recent(timestamp: str, now: datetime) -> bool:

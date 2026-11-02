@@ -84,8 +84,10 @@ Other things to know:
   is set only when the state is not `ready`.
 - `updates.items` lists at most 20 updates: security fixes first, then breaking
   updates, then by name. `more` counts the rest.
-  - `service` is `stack/service`. It is the image repository instead when WUDup
-    could not match the update to a Compose service; `unplaced` counts those.
+  - `service` is `stack/service`. It is just the stack name when WUDup matched
+    the update to a whole stack but not to a named service, and the image
+    repository when it could not match the update to a Compose stack at all;
+    `unplaced` counts the last kind.
   - `security` comes from release notes: `critical_high` (a verified
     critical or high advisory), `review`, `none`, or `unknown`.
   - `fixes` counts critical and high findings the target image fixes compared
@@ -96,8 +98,13 @@ Other things to know:
     skipped.
   - `snoozed` counts updates hidden by a snooze.
 - `last_run` is the newest real (non-dry-run) update run, or `null`. `status` is
-  `success`, `failure`, `needs_review`, `running`, `missed`, or `unknown`.
-- `issues` lists at most 10 issues, urgent first; `issues_more` counts the rest.
+  `success`, `failure`, `needs_review`, `running`, `missed`, or `unknown`. A
+  completed self-update counts as `success`; a scheduled or started run is
+  `running`.
+- `issues` lists at most 10 issues; `issues_more` counts the rest. WUD, run,
+  scan, and placement issues come first, then per-update issues. Each group is
+  ordered urgent first, then by `id`, so many pending updates can never hide a
+  system issue.
 
 ### `GET /api/integrations/v1/services/{stack}/{service}`
 
@@ -134,7 +141,7 @@ confirm, remind, and resolve by id. `severity` is `urgent` or `digest`.
 | `code` | Severity | When |
 |---|---|---|
 | `wud-unreachable` | urgent | WUDup cannot read update checks from WUD. |
-| `run-failed` | urgent for 24 hours, then digest | The latest real update run failed or left a service unhealthy. Only update runs count (`pause`, `stop`, `live`, `web-retag`, `web-self-update`); dry runs and other history rows such as logins or settings changes neither raise nor clear it. Clears when a newer update run succeeds. |
+| `run-failed` | urgent for 24 hours, then digest | The latest real update run failed or left a service unhealthy. Only update runs count (`pause`, `stop`, `live`, `web-retag`, `web-self-update`); dry runs and other history rows such as logins or settings changes neither raise nor clear it. Clears when a newer update run succeeds; a run that is still in progress does not clear it. |
 | `security-release` | urgent | A pending update's release notes name a verified critical or high advisory. Not raised for a skipped release. |
 | `breaking-update` | digest | A pending update's release notes flag breaking changes. Not raised for a skipped release. |
 | `auto-update-missed` | digest | A scheduled auto-update was skipped in the last 24 hours. |
@@ -160,7 +167,10 @@ GitHub) and Docker readiness checks. Use the WebUI or `/readyz` for those.
 
 Each summary request reads the same state as the WebUI Pending page: the cached
 WUD snapshot (at most 30 seconds old), Compose discovery, and the SQLite caches
-for release notes and scans. It never refreshes release notes or runs scans.
+for release notes and scans. It never refreshes release notes, runs scans, or
+asks a registry for an image digest. An image whose digest WUD did not report
+may therefore show `scan: not_scanned` here even after the WebUI Security page
+has looked it up.
 Poll no more than once a minute, and cache on the client side if several tools
 share the data.
 
