@@ -435,6 +435,8 @@ export function settingsResponse(
       fingerprint: "",
       created_at: "",
       editable: false,
+      revocable: false,
+      stored_fingerprint: "",
       disabled_reason:
         "WebUI changes are turned off. Set WUD_WEB_MUTATIONS_ENABLED=true to generate a token here.",
     },

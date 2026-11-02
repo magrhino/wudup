@@ -589,7 +589,7 @@ def run_web_from_namespace(args: object) -> int:
     if getattr(args, "web_command", None) == "reset-admin":
         return run_web_reset_admin_from_namespace(args)
     if getattr(args, "web_command", None) == "readonly-token":
-        return run_web_integration_auth_from_namespace(args)
+        return run_web_readonly_token_from_namespace(args)
     if getattr(args, "user", None):
         print("--user is only valid with web reset-admin", file=sys.stderr)
         return 1
@@ -670,7 +670,7 @@ def run_web_reset_admin_from_namespace(args: object) -> int:
     return 0
 
 
-def run_web_integration_auth_from_namespace(args: object) -> int:
+def run_web_readonly_token_from_namespace(args: object) -> int:
     if getattr(args, "token_action", None) != "revoke":
         print("usage: wudup web readonly-token revoke", file=sys.stderr)
         return 1

@@ -58,6 +58,15 @@ ENV_MANAGED_REASON = (
     f"Set by {WUD_WEB_READONLY_TOKEN_ENV} or {WUD_WEB_READONLY_TOKEN_FILE_ENV} "
     "in container config. Change it there and restart WUDup."
 )
+DORMANT_STORED_REASON = (
+    "A token generated earlier in the WebUI is still stored and works again if "
+    "you remove the container setting. Revoke it here."
+)
+DORMANT_STORED_CLI_REASON = (
+    "A token generated earlier in the WebUI is still stored and works again if "
+    "you remove the container setting. Revoke it with "
+    "`wudup web readonly-token revoke`."
+)
 MUTATIONS_DISABLED_REASON = (
     "WebUI changes are turned off. Set WUD_WEB_MUTATIONS_ENABLED=true to "
     f"generate a token here, or set {WUD_WEB_READONLY_TOKEN_FILE_ENV} in "
@@ -67,6 +76,10 @@ MUTATIONS_DISABLED_REASON = (
 
 class ReadonlyTokenError(RuntimeError):
     """Raised when the stored read-only API token cannot be changed."""
+
+
+class ReadonlyTokenNotStored(ReadonlyTokenError):
+    """Raised when a revoke finds no WebUI-generated token to remove."""
 
 
 def configured_readonly_token(environ: Mapping[str, str], *, auth_token: str) -> str:
@@ -96,13 +109,9 @@ def token_hash(token: str) -> str:
 
 
 def readonly_token_status(settings: WebSettings) -> ReadonlyTokenStatus:
-    if settings.readonly_token:
-        return ReadonlyTokenStatus(
-            source="env",
-            fingerprint=_fingerprint(token_hash(settings.readonly_token)),
-            editable=False,
-            disabled_reason=ENV_MANAGED_REASON,
-        )
+    # Read the stored token even when container config wins, so a dormant
+    # WebUI token stays visible and revocable instead of silently returning
+    # when the container setting is removed.
     try:
         with closing(connect_readonly_db(settings)) as conn:
             stored = _stored_token(conn)
@@ -147,7 +156,7 @@ def api_readonly_token(
     response: Response,
 ) -> ReadonlyTokenActionResponse:
     settings = request_settings(request)
-    if settings.readonly_token:
+    if settings.readonly_token and payload.action == "rotate":
         raise HTTPException(status_code=409, detail=ENV_MANAGED_REASON)
     if not settings.mutations_enabled:
         raise HTTPException(status_code=403, detail="mutations are disabled")
@@ -166,6 +175,8 @@ def api_readonly_token(
                 source="webui",
                 actor_type=request_actor_type(settings, request),
             )
+    except ReadonlyTokenNotStored as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (OSError, sqlite3.Error, DatabaseError) as exc:
         raise HTTPException(
             status_code=500,
@@ -186,12 +197,15 @@ def revoke_stored_token(
     source: str,
     actor_type: str,
 ) -> tuple[ReadonlyTokenStatus, int]:
-    if settings.readonly_token:
-        raise ReadonlyTokenError(ENV_MANAGED_REASON)
     with open_db(settings.config.db_path, owner_uid=settings.config.out_uid) as conn:
         init_db(conn)
         with immediate_transaction(conn):
             before = _stored_token(conn)
+            if before is None:
+                raise ReadonlyTokenNotStored(
+                    "No WebUI read-only API token is stored, so there is "
+                    "nothing to revoke."
+                )
             delete_web_setting(conn, READONLY_TOKEN_HASH_KEY)
             delete_web_setting(conn, READONLY_TOKEN_CREATED_AT_KEY)
             delete_web_setting(conn, READONLY_TOKEN_FINGERPRINT_KEY)
@@ -214,6 +228,8 @@ def run_readonly_token_revoke_cli(settings: WebSettings) -> str:
             source="cli",
             actor_type="cli",
         )
+    except ReadonlyTokenNotStored as exc:
+        return str(exc)
     except (OSError, sqlite3.Error, DatabaseError) as exc:
         raise ReadonlyTokenError(
             f"could not revoke the read-only API token: {exc}"
@@ -270,15 +286,27 @@ def _readonly_token_accepted(
     now = time.monotonic()
     with lock:
         _prune_login_throttle(throttle, now)
-        entry = throttle.get(client_address)
-        if entry is not None and entry.locked_until > now:
+        if _locked_out(throttle, client_address, now):
             return False
+    # Read the hash outside the lock so a slow database never holds it, then
+    # recheck, compare, and record under one lock so concurrent guesses
+    # cannot exceed the limit.
     expected = _active_token_hash(settings)
-    if expected and secrets.compare_digest(token_hash(token), expected):
-        return True
+    presented = token_hash(token)
+    # Take a fresh time: the database read may have waited on its busy timeout.
+    now = time.monotonic()
     with lock:
+        if _locked_out(throttle, client_address, now):
+            return False
+        if expected and secrets.compare_digest(presented, expected):
+            return True
         _record_login_client_failure(throttle, client_address, now)
-    return False
+        return False
+
+
+def _locked_out(throttle: dict[str, Any], client_address: str, now: float) -> bool:
+    entry = throttle.get(client_address)
+    return entry is not None and entry.locked_until > now
 
 
 def _active_token_hash(settings: WebSettings) -> str:
@@ -315,19 +343,34 @@ def _status_from_stored(
     settings: WebSettings,
     stored: Mapping[str, str] | None,
 ) -> ReadonlyTokenStatus:
-    editable = settings.mutations_enabled
-    disabled_reason = "" if editable else MUTATIONS_DISABLED_REASON
+    mutations_enabled = settings.mutations_enabled
+    revocable = mutations_enabled and stored is not None
+    if settings.readonly_token:
+        reason = ENV_MANAGED_REASON
+        if stored is not None:
+            dormant = DORMANT_STORED_REASON if mutations_enabled else DORMANT_STORED_CLI_REASON
+            reason = f"{reason} {dormant}"
+        return ReadonlyTokenStatus(
+            source="env",
+            fingerprint=_fingerprint(token_hash(settings.readonly_token)),
+            editable=False,
+            revocable=revocable,
+            stored_fingerprint="" if stored is None else stored["fingerprint"],
+            disabled_reason=reason,
+        )
+    disabled_reason = "" if mutations_enabled else MUTATIONS_DISABLED_REASON
     if stored is None:
         return ReadonlyTokenStatus(
             source="none",
-            editable=editable,
+            editable=mutations_enabled,
             disabled_reason=disabled_reason,
         )
     return ReadonlyTokenStatus(
         source="webui",
         fingerprint=stored["fingerprint"],
         created_at=stored["created_at"],
-        editable=editable,
+        editable=mutations_enabled,
+        revocable=revocable,
         disabled_reason=disabled_reason,
     )
 

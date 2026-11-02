@@ -57,7 +57,9 @@ const confirmTitle = computed(() =>
 );
 const confirmCopy = computed(() =>
   confirmAction.value === "revoke"
-    ? "Integrations using this token get 401 responses until you generate a new one."
+    ? status.value?.source === "env"
+      ? "This removes the stored WebUI token. The container-config token keeps working."
+      : "Integrations using this token get 401 responses until you generate a new one."
     : hasToken.value
       ? "The current token stops working immediately. Update every integration with the new one."
       : "The token is shown once. Store it in the integration's secret file right away.",
@@ -86,6 +88,9 @@ async function runConfirmedAction(): Promise<void> {
   } catch (error_) {
     actionError.value =
       error_ instanceof Error ? error_.message : "Could not change the token";
+    // The token may have changed elsewhere, such as a CLI revoke; show the
+    // current status instead of a stale one.
+    await settings.loadSettings().catch(() => undefined);
   } finally {
     working.value = false;
     confirmAction.value = null;
@@ -133,6 +138,10 @@ onBeforeUnmount(clearToken);
         <dt>Created</dt>
         <dd>{{ createdLabel }}</dd>
       </div>
+      <div v-if="status.stored_fingerprint">
+        <dt>Stored WebUI token</dt>
+        <dd data-test="readonly-token-stored"><code>{{ status.stored_fingerprint }}</code></dd>
+      </div>
     </dl>
 
     <n-alert
@@ -178,10 +187,10 @@ onBeforeUnmount(clearToken);
         {{ hasToken && status.source === "webui" ? "Replace token" : "Generate token" }}
       </n-button>
       <n-button
-        v-if="status.source === 'webui'"
+        v-if="status.source === 'webui' || status.stored_fingerprint"
         type="error"
         secondary
-        :disabled="!status.editable"
+        :disabled="!status.revocable"
         data-test="readonly-token-revoke"
         @click="openConfirm('revoke')"
       >

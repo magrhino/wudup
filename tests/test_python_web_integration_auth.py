@@ -136,6 +136,8 @@ def test_webui_rotation_requires_mutations(tmp_path: Path) -> None:
         "fingerprint": "",
         "created_at": "",
         "editable": False,
+        "revocable": False,
+        "stored_fingerprint": "",
         "disabled_reason": token_module.MUTATIONS_DISABLED_REASON,
     }
     assert response.status_code == 403
@@ -230,16 +232,143 @@ def test_cli_revoke_works_with_mutations_off(tmp_path: Path, monkeypatch) -> Non
     assert source == "cli"
 
 
-def test_cli_revoke_refuses_env_token(tmp_path: Path, monkeypatch, capsys) -> None:
-    for key, value in _web_env(tmp_path, {"WUD_WEB_READONLY_TOKEN": ENV_TOKEN}).items():
+def test_cli_revoke_with_nothing_stored_changes_nothing(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _app(tmp_path)
+    for key, value in _web_env(tmp_path).items():
         monkeypatch.setenv(key, value)
 
-    exit_code = web_module.run_web_integration_auth_from_namespace(
+    exit_code = web_module.run_web_readonly_token_from_namespace(
         SimpleNamespace(token_action="revoke")
     )
 
-    assert exit_code == 1
-    assert "container config" in capsys.readouterr().err
+    assert exit_code == 0
+    assert "nothing to revoke" in capsys.readouterr().out
+    with sqlite3.connect(_db_path(tmp_path)) as conn:
+        audits = conn.execute(
+            "SELECT COUNT(*) FROM update_events WHERE image = 'readonly-token'"
+        ).fetchone()[0]
+    assert audits == 0
+
+
+def test_webui_revoke_with_nothing_stored_is_not_found(tmp_path: Path) -> None:
+    _app_instance, admin = _mutations_app(tmp_path)
+
+    response = admin.post(ROTATE, json={"action": "revoke"}, headers=_csrf_headers(admin))
+
+    assert response.status_code == 404
+    assert "nothing to revoke" in response.json()["detail"]
+
+
+def test_stored_token_stays_visible_and_revocable_under_env_token(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _first_app, first_admin = _mutations_app(tmp_path)
+    stored = _rotate(first_admin).json()["token"]
+    stored_fingerprint = hashlib.sha256(stored.encode()).hexdigest()[:8]
+    env = {"WUD_WEB_MUTATIONS_ENABLED": "true", "WUD_WEB_READONLY_TOKEN": ENV_TOKEN}
+    app = create_app(
+        environ=_web_env(tmp_path, {"WUD_PENDING_SOURCE": TEST_FILE_PENDING_SOURCE_VALUE, **env})
+    )
+    admin = TestClient(app)
+    admin.cookies.update(first_admin.cookies)
+    reader = TestClient(app)
+
+    status = admin.get("/api/v1/settings").json()["readonly_token"]
+    rotate = _rotate(admin)
+    revoke = admin.post(ROTATE, json={"action": "revoke"}, headers=_csrf_headers(admin))
+
+    # Container config wins while set; the dormant WebUI token is not accepted.
+    assert reader.get(SUMMARY, headers=_bearer(stored)).status_code == 401
+    assert reader.get(SUMMARY, headers=_bearer(ENV_TOKEN)).status_code == 200
+    assert status["source"] == "env"
+    assert status["stored_fingerprint"] == stored_fingerprint
+    assert status["revocable"] is True
+    assert token_module.DORMANT_STORED_REASON in status["disabled_reason"]
+    assert rotate.status_code == 409
+    assert revoke.status_code == 200
+    assert revoke.json()["status"]["stored_fingerprint"] == ""
+    assert revoke.json()["status"]["revocable"] is False
+
+    # Without the container setting, the revoked WebUI token stays dead.
+    plain_app, _plain_admin = _app(tmp_path, setup=False)
+    assert TestClient(plain_app).get(SUMMARY, headers=_bearer(stored)).status_code == 401
+
+
+def test_cli_revoke_clears_a_dormant_token_under_env(tmp_path: Path, monkeypatch) -> None:
+    _app_instance, admin = _mutations_app(tmp_path)
+    _rotate(admin)
+    for key, value in _web_env(tmp_path, {"WUD_WEB_READONLY_TOKEN": ENV_TOKEN}).items():
+        monkeypatch.setenv(key, value)
+
+    exit_code = web_module.run_web_readonly_token_from_namespace(
+        SimpleNamespace(token_action="revoke")
+    )
+
+    assert exit_code == 0
+    with sqlite3.connect(_db_path(tmp_path)) as conn:
+        stored = conn.execute(
+            "SELECT COUNT(*) FROM web_settings WHERE key = 'readonly_token.hash'"
+        ).fetchone()[0]
+    assert stored == 0
+
+
+def test_locked_out_client_skips_the_token_lookup(tmp_path: Path, monkeypatch) -> None:
+    app, _admin = _app(tmp_path, {"WUD_WEB_READONLY_TOKEN": ENV_TOKEN})
+    client = TestClient(app, client=("198.51.100.40", 50000))
+    for index in range(LOGIN_THROTTLE_MAX_FAILURES):
+        client.get(SUMMARY, headers=_bearer(f"guess-{index}"))
+
+    def fail_lookup(_settings):
+        raise AssertionError("locked-out requests must not read the token")
+
+    monkeypatch.setattr(token_module, "_active_token_hash", fail_lookup)
+
+    assert client.get(SUMMARY, headers=_bearer(ENV_TOKEN)).status_code == 401
+
+
+def test_dormant_reason_points_to_cli_when_webui_changes_are_off(tmp_path: Path) -> None:
+    _first_app, first_admin = _mutations_app(tmp_path)
+    _rotate(first_admin)
+    app = create_app(
+        environ=_web_env(
+            tmp_path,
+            {
+                "WUD_PENDING_SOURCE": TEST_FILE_PENDING_SOURCE_VALUE,
+                "WUD_WEB_READONLY_TOKEN": ENV_TOKEN,
+            },
+        )
+    )
+    admin = TestClient(app)
+    admin.cookies.update(first_admin.cookies)
+
+    status = admin.get("/api/v1/settings").json()["readonly_token"]
+    revoke = admin.post(ROTATE, json={"action": "revoke"}, headers=_csrf_headers(admin))
+
+    assert status["revocable"] is False
+    assert token_module.DORMANT_STORED_CLI_REASON in status["disabled_reason"]
+    assert revoke.status_code == 403
+
+
+def test_throttle_compares_and_records_under_one_lock(tmp_path: Path, monkeypatch) -> None:
+    app, _admin = _app(tmp_path, {"WUD_WEB_READONLY_TOKEN": ENV_TOKEN})
+    lock = app.state.web_login_throttle_lock
+    original = token_module.secrets.compare_digest
+    held: list[bool] = []
+
+    def compare_digest(left, right):
+        held.append(lock.locked())
+        return original(left, right)
+
+    monkeypatch.setattr(token_module.secrets, "compare_digest", compare_digest)
+
+    TestClient(app).get(SUMMARY, headers=_bearer("wrong"))
+
+    assert held == [True]
 
 
 def test_readonly_token_cannot_use_any_admin_route(tmp_path: Path) -> None:

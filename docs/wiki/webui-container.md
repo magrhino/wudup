@@ -356,8 +356,9 @@ docker compose run --rm wudup web readonly-token revoke
 ```
 
 Integrations using that token get 401 responses until a new token is
-generated. A token set by `WUD_WEB_READONLY_TOKEN` or its `_FILE` form is
-changed in container config instead.
+generated. The command also removes a generated token left over after you
+switched to `WUD_WEB_READONLY_TOKEN` or its `_FILE` form; the container-config
+token itself is changed in container config.
 
 ## Maintenance
 

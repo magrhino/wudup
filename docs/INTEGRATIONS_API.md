@@ -30,6 +30,10 @@ Set the token one of two ways. Container config wins when both exist.
   effect on the next request. This needs `WUD_WEB_MUTATIONS_ENABLED=true`; with
   WebUI changes off, revoke a generated token with
   `wudup web readonly-token revoke`.
+- If you set the container-config token after generating one in the WebUI, the
+  generated token stops working but stays stored, and it would work again if
+  the container setting were removed. Settings shows it as **Stored WebUI
+  token**; revoke it there or with the CLI command above.
 
 Other things to know:
 
@@ -130,15 +134,16 @@ confirm, remind, and resolve by id. `severity` is `urgent` or `digest`.
 | `code` | Severity | When |
 |---|---|---|
 | `wud-unreachable` | urgent | WUDup cannot read update checks from WUD. |
-| `run-failed` | urgent for 24 hours, then digest | The latest update run failed or left a service unhealthy. Clears when a newer run succeeds. |
-| `security-release` | urgent | A pending update's release notes name a verified critical or high advisory. |
-| `breaking-update` | digest | A pending update's release notes flag breaking changes. |
+| `run-failed` | urgent for 24 hours, then digest | The latest real update run failed or left a service unhealthy. Only update runs count (`pause`, `stop`, `live`, `web-retag`, `web-self-update`); dry runs and other history rows such as logins or settings changes neither raise nor clear it. Clears when a newer update run succeeds. |
+| `security-release` | urgent | A pending update's release notes name a verified critical or high advisory. Not raised for a skipped release. |
+| `breaking-update` | digest | A pending update's release notes flag breaking changes. Not raised for a skipped release. |
 | `auto-update-missed` | digest | A scheduled auto-update was skipped in the last 24 hours. |
 | `update-unplaced` | digest | WUD reported updates WUDup could not match to a Compose service. |
 | `scan-broken` | digest | Security scanning is on, but scans are failing. |
 | `wud-stale` | digest | WUD could not recheck some containers, so their data may be old. |
 
-Skipped releases raise no issues. Raw scanner counts are reported in `fixes`
+Skipped releases (`skipped: true`) raise no issues, including security ones:
+skipping a release is an explicit operator decision. Raw scanner counts are reported in `fixes`
 and `scan` but never raise issues on their own, because base-image findings
 would make them constant noise.
 

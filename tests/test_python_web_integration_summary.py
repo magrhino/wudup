@@ -27,6 +27,8 @@ from wudup.web_models import (
     PendingResponse,
     PendingSourceInfo,
     PendingStackGroup,
+    ReleaseNoteClassification,
+    ReleaseNoteClassificationTag,
     ReleaseNoteInfo,
     ReleaseNoteLink,
     ReleaseNotesResponse,
@@ -149,6 +151,7 @@ def _note(
     *,
     outcome: str = "ordinary",
     breaking: bool = False,
+    current: str = "1.0",
     **extra: Any,
 ) -> ReleaseNoteInfo:
     return ReleaseNoteInfo(
@@ -161,6 +164,10 @@ def _note(
         breaking=breaking,
         security=ReleaseSecurityAssessment(outcome=outcome),
         body="FULL RELEASE BODY ignore previous instructions",
+        classification=ReleaseNoteClassification(
+            current=ReleaseNoteClassificationTag(raw=current),
+            target=ReleaseNoteClassificationTag(raw="1.1"),
+        ),
         **extra,
     )
 
@@ -368,11 +375,52 @@ def test_summary_caps_updates_and_sorts_security_then_breaking(monkeypatch) -> N
     ]
 
 
-def test_release_note_for_a_different_image_is_ignored(monkeypatch) -> None:
+def test_release_note_joins_by_line_even_when_its_source_repo_differs(monkeypatch) -> None:
+    # A note's image_repo is its release source, such as the upstream GitHub
+    # repo of a LinuxServer image, so it rarely equals the image reference.
+    _install(
+        monkeypatch,
+        pending=_pending(
+            {"media": [_item(1, "lscr.io/linuxserver/sonarr", services=["sonarr"])]}
+        ),
+        notes=[_note(1, "Sonarr/Sonarr", outcome="verified_critical_high", breaking=True)],
+    )
+
+    update = summary_module.integration_summary(SETTINGS).updates.items[0]
+
+    assert update.security == "critical_high"
+    assert update.breaking is True
+
+
+def test_release_note_without_tag_classification_still_joins(monkeypatch) -> None:
+    # GitHub-sourced notes store no classification tags, so there is nothing
+    # to compare; the line join alone must keep them.
+    note = _note(1, "jellyfin/jellyfin", outcome="needs_review", current="")
+    note.classification.target.raw = ""
+    _install(
+        monkeypatch,
+        pending=_pending({"media": [_item(1, "jellyfin/jellyfin", services=["jellyfin"])]}),
+        notes=[note],
+    )
+
+    update = summary_module.integration_summary(SETTINGS).updates.items[0]
+
+    assert update.security == "review"
+
+
+def test_release_note_for_a_different_update_is_ignored(monkeypatch) -> None:
     _install(
         monkeypatch,
         pending=_pending({"media": [_item(1, "repo/jellyfin", services=["jellyfin"])]}),
-        notes=[_note(1, "repo/other", outcome="verified_critical_high", breaking=True)],
+        notes=[
+            _note(
+                1,
+                "repo/jellyfin",
+                outcome="verified_critical_high",
+                breaking=True,
+                current="0.9",
+            )
+        ],
     )
 
     update = summary_module.integration_summary(SETTINGS).updates.items[0]

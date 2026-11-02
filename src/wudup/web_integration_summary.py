@@ -297,10 +297,13 @@ def _matching_note(
     item: PendingItem,
 ) -> ReleaseNoteInfo | None:
     # Release notes and pending items are both keyed by line; skip a note that
-    # was resolved for a different image if WUD changed between the reads.
+    # was resolved for a different update if WUD changed between the reads.
+    # Compare tags, not repos: a note's image_repo is its release source (a
+    # GitHub or LinuxServer repo), not the image reference.
     if note is None or note.status != "ready":
         return None
-    if note.image_repo and item.repo and note.image_repo != item.repo:
+    current = note.classification.current.raw
+    if current and current != item.current_tag:
         return None
     return note
 

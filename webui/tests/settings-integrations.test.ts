@@ -18,6 +18,8 @@ function tokenStatus(overrides: Partial<ReadonlyTokenStatus> = {}): ReadonlyToke
     fingerprint: "",
     created_at: "",
     editable: true,
+    revocable: false,
+    stored_fingerprint: "",
     disabled_reason: "",
     ...overrides,
   };
@@ -86,7 +88,7 @@ describe("settings integrations section", () => {
       audit_run_id: 4,
     });
     const { wrapper } = mountSection(
-      tokenStatus({ source: "webui", fingerprint: "abcd1234" }),
+      tokenStatus({ source: "webui", fingerprint: "abcd1234", revocable: true }),
     );
 
     await wrapper.find('[data-test="readonly-token-revoke"]').trigger("click");
@@ -120,6 +122,52 @@ describe("settings integrations section", () => {
       "container config",
     );
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("lets a dormant WebUI token be revoked while container config wins", async () => {
+    const request = vi.spyOn(webApi, "readonlyToken").mockResolvedValue({
+      status: tokenStatus({ source: "env", fingerprint: "11112222", editable: false }),
+      token: "",
+      audit_run_id: 5,
+    });
+    const { wrapper } = mountSection(
+      tokenStatus({
+        source: "env",
+        fingerprint: "11112222",
+        editable: false,
+        revocable: true,
+        stored_fingerprint: "abcd1234",
+        disabled_reason: "Set by container config. A token generated earlier is still stored.",
+      }),
+    );
+
+    expect(wrapper.find('[data-test="readonly-token-stored"]').text()).toBe("abcd1234");
+    expect(
+      wrapper.find('[data-test="readonly-token-rotate"]').attributes("disabled"),
+    ).toBeDefined();
+    await wrapper.find('[data-test="readonly-token-revoke"]').trigger("click");
+    expect(wrapper.text()).toContain("The container-config token keeps working.");
+    await clickButton(wrapper, "Revoke token", '[role="dialog"]');
+    await flushPromises();
+
+    expect(request).toHaveBeenCalledWith("revoke", "csrf");
+    expect(wrapper.find('[data-test="readonly-token-stored"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="readonly-token-revoke"]').exists()).toBe(false);
+  });
+
+  it("reloads the status when a change fails", async () => {
+    vi.spyOn(webApi, "readonlyToken").mockRejectedValue(new Error("nothing to revoke"));
+    const { wrapper, settings } = mountSection(
+      tokenStatus({ source: "webui", fingerprint: "abcd1234", revocable: true }),
+    );
+    const reload = vi.spyOn(settings, "loadSettings").mockResolvedValue();
+
+    await wrapper.find('[data-test="readonly-token-revoke"]').trigger("click");
+    await clickButton(wrapper, "Revoke token", '[role="dialog"]');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("nothing to revoke");
+    expect(reload).toHaveBeenCalled();
   });
 
   it("shows why generation is unavailable when WebUI changes are off", () => {

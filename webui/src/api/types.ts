@@ -1125,6 +1125,9 @@ export interface ReadonlyTokenStatus {
   fingerprint: string;
   created_at: string;
   editable: boolean;
+  revocable: boolean;
+  /** A WebUI token kept while container config wins; revoke it to retire it. */
+  stored_fingerprint: string;
   disabled_reason: string;
 }
 

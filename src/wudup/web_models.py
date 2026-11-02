@@ -1193,6 +1193,10 @@ class ReadonlyTokenStatus(BaseModel):
     fingerprint: str = ""
     created_at: str = ""
     editable: bool = False
+    revocable: bool = False
+    # A WebUI token kept while container config wins; it works again if the
+    # container setting is removed, so it stays visible and revocable.
+    stored_fingerprint: str = ""
     disabled_reason: str = ""
 
 
