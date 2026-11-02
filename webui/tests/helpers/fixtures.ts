@@ -430,6 +430,14 @@ export function settingsResponse(
         "full",
       ]),
     ],
+    readonly_token: {
+      source: "none",
+      fingerprint: "",
+      created_at: "",
+      editable: false,
+      disabled_reason:
+        "WebUI changes are turned off. Set WUD_WEB_MUTATIONS_ENABLED=true to generate a token here.",
+    },
     ...overrides,
   };
 }

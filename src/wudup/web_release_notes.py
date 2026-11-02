@@ -81,7 +81,11 @@ class ReleaseNotesDisabledState:
 
 
 def api_release_notes(request: Request) -> ReleaseNotesResponse:
-    settings = _settings(request)
+    return cached_release_notes_response(_settings(request))
+
+
+def cached_release_notes_response(settings: WebSettings) -> ReleaseNotesResponse:
+    """Release notes from the SQLite cache only; never calls GitHub."""
     context = _release_notes_request_context(settings)
     if isinstance(context, ReleaseNotesResponse):
         return context

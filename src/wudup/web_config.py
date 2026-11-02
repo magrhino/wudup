@@ -9,6 +9,7 @@ from pathlib import Path
 from . import (
     web_auth,
     web_effective_settings,
+    web_integration_auth,
     web_models,
     web_security,
     web_self_update,
@@ -35,9 +36,14 @@ def load_web_settings(
         env.get("WUD_WEB_PUBLIC_ORIGIN", "")
     )
     host_docker_base = _parse_host_docker_base(env, config)
+    auth_token = env.get("WUD_WEB_TOKEN", "")
     return web_models.WebSettings(
         config=config,
-        auth_token=env.get("WUD_WEB_TOKEN", ""),
+        auth_token=auth_token,
+        readonly_token=web_integration_auth.configured_readonly_token(
+            env,
+            auth_token=auth_token,
+        ),
         dev_no_auth=web_auth._parse_bool(
             env.get("WUD_WEB_DEV_NO_AUTH"),
             default=False,

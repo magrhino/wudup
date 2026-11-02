@@ -134,6 +134,9 @@ and mutation-gate checks.
 - Secrets such as GitHub tokens, Discord webhooks, and WUD API credentials should
   come from environment variables, `_FILE` variables, WebUI-managed settings, or
   host-local secret stores.
+- Give dashboards, bots, and scripts the [read-only API token](INTEGRATIONS_API.md),
+  never `WUD_WEB_TOKEN`. The read-only token only reaches `/api/integrations/v1`
+  and cannot apply updates, even when WebUI mutations are on.
 
 ## Image Tags
 

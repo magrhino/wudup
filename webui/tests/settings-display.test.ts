@@ -90,6 +90,7 @@ describe("settings display helpers", () => {
         "settings-actions",
         "settings-preferences",
         "settings-notifications",
+        "settings-integrations",
       ],
       configuration: [
         "settings-runtime",

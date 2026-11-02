@@ -9,6 +9,8 @@ import type {
   StatusResponse,
   SettingsResponse,
   ManagedSettingsUpdateResponse,
+  ReadonlyTokenAction,
+  ReadonlyTokenActionResponse,
   DoctorResponse,
   OnboardingChecklistResponse,
   OnboardingDismissResponse,
@@ -236,6 +238,12 @@ const systemApi = {
       method: "POST",
       headers: { "x-wud-csrf-token": csrfToken },
       body: JSON.stringify({ values }),
+    }),
+  readonlyToken: (action: ReadonlyTokenAction, csrfToken: string) =>
+    apiRequest<ReadonlyTokenActionResponse>("/settings/readonly-token", {
+      method: "POST",
+      headers: { "x-wud-csrf-token": csrfToken },
+      body: JSON.stringify({ action }),
     }),
   doctor: (csrfToken: string) =>
     apiRequest<DoctorResponse>("/doctor", {

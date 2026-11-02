@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
@@ -47,17 +48,36 @@ MAX_LOG_TAIL_BYTES = 1_048_576
 
 
 def api_runs(request: Request) -> list[RunHistorySummary]:
-    settings = _settings(request)
+    return run_history(_settings(request))
+
+
+def run_history(
+    settings: WebSettings,
+    *,
+    limit: int = DEFAULT_RUN_LIMIT,
+    modes: Sequence[str] = (),
+    include_dry_runs: bool = True,
+) -> list[RunHistorySummary]:
+    """Return the newest runs, optionally only these modes or only real runs."""
+    conditions: list[str] = []
+    params: list[object] = []
+    if modes:
+        conditions.append(f"mode IN ({','.join('?' for _ in modes)})")
+        params.extend(modes)
+    if not include_dry_runs:
+        conditions.append("dry_run = 0")
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     try:
         with closing(_connect_readonly_db(settings)) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM update_runs
+                {where}
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (DEFAULT_RUN_LIMIT,),
+                (*params, limit),
             ).fetchall()
 
             run_ids = [row["id"] for row in rows]

@@ -59,7 +59,12 @@ def _add_doctor_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_web_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("web_command", nargs="?", choices=("reset-admin",))
+    parser.add_argument(
+        "web_command",
+        nargs="?",
+        choices=("reset-admin", "readonly-token"),
+    )
+    parser.add_argument("token_action", nargs="?", choices=("revoke",))
     parser.add_argument("--base", metavar="PATH")
     parser.add_argument("--file", metavar="PATH")
     parser.add_argument("--log-dir", metavar="PATH")

@@ -99,6 +99,7 @@ from .web_effective_settings import (
     _settings_env,
     _validated_discord_webhook,
 )
+from .web_integration_auth import readonly_token_status
 from .web_models import (
     ManagedSettingEntry,
     ManagedSettingsUpdateRequest,
@@ -178,6 +179,7 @@ def settings_response(settings: WebSettings, request: Request) -> SettingsRespon
         webui=_webui_settings_entries(settings, request),
         secrets=_secret_settings(settings),
         managed=_managed_settings_entries(settings),
+        readonly_token=readonly_token_status(settings),
     )
 
 

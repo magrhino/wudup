@@ -11,6 +11,8 @@ from .web_models import WebSettings
 
 SENSITIVE_ENV_KEYS = (
     "WUD_WEB_TOKEN",
+    "WUD_WEB_READONLY_TOKEN",
+    "WUD_WEB_READONLY_TOKEN_FILE",
     "WUD_API_AUTH_BEARER_TOKEN",
     "WUD_API_AUTH_BEARER_TOKEN_FILE",
     "WUD_API_AUTH_BASIC_PASSWORD",
@@ -24,6 +26,10 @@ SENSITIVE_ENV_KEYS = (
 # bootstrap password loaded from the Compose .env. They are redacted but are
 # not WUDup settings, so Settings does not list them.
 REDACTED_ONLY_ENV_KEYS = ("WUD_AUTH_ADMIN_PASSWORD",)
+GENERATED_READONLY_TOKEN_PREFIX = "wudup_ro_"
+_GENERATED_READONLY_TOKEN_PATTERN = re.compile(
+    rf"{GENERATED_READONLY_TOKEN_PREFIX}[A-Za-z0-9_-]+"
+)
 
 
 SENSITIVE_FIELD_KEY_PARTS = frozenset(
@@ -62,7 +68,9 @@ def redact_sensitive_text(
     redacted = value
     for secret in _sensitive_redaction_values(settings, extra_secrets):
         redacted = redacted.replace(secret, "<redacted>")
-    return redacted
+    # Generated read-only API tokens are only stored as hashes, so match their
+    # prefix instead of a known value.
+    return _GENERATED_READONLY_TOKEN_PATTERN.sub("<redacted>", redacted)
 
 
 def sensitive_mapping_key(key: str) -> bool:
@@ -160,6 +168,7 @@ def _sensitive_redaction_values(
     env = settings.command_env or {}
     values.extend(extra_secrets)
     values.append(settings.auth_token)
+    values.append(settings.readonly_token)
     values.extend(settings.wud_api_client.secret_values)
     values.extend(env.get(key, "") for key in SENSITIVE_ENV_KEYS)
     values.extend(env.get(key, "") for key in REDACTED_ONLY_ENV_KEYS)

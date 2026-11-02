@@ -27,6 +27,7 @@ from tests.web_test_helpers import (
 
 from wudup import (
     credential_env,
+    web_integration_auth,
     web_job_registry,
     web_release_notifications,
     web_retags,
@@ -1427,6 +1428,11 @@ def test_every_doctor_secret_file_pair_is_loaded_by_the_wud_api_client(
     environ = {file_name: str(secret_file)}
     if direct_name == web_wud_api.WUD_API_AUTH_BASIC_PASSWORD_ENV:
         environ[web_wud_api.WUD_API_AUTH_BASIC_USER_ENV] = "wud-user"
+    if direct_name == credential_env.WUD_WEB_READONLY_TOKEN_ENV:
+        # The read-only API token is a WebUI credential, not a WUD API one.
+        secret_file.write_text("f" * 40, encoding="utf-8")
+        assert web_integration_auth.configured_readonly_token(environ, auth_token="") == "f" * 40
+        return
 
     config = web_wud_transport.configured_client_config(environ)
 

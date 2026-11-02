@@ -60,7 +60,10 @@ _state_actor_type = _request_actor_type
 
 
 def api_service_policies(request: Request) -> list[ServicePolicyRecord]:
-    settings = _settings(request)
+    return service_policy_records(_settings(request))
+
+
+def service_policy_records(settings: WebSettings) -> list[ServicePolicyRecord]:
     try:
         with closing(_connect_readonly_db(settings)) as conn:
             rows = conn.execute(

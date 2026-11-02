@@ -141,7 +141,7 @@ def test_settings_reports_effective_non_secret_configuration(
     assert response.status_code == 200
     managed = {entry["key"]: entry for entry in body["managed"]}
 
-    assert set(body) == {"updater", "webui", "secrets", "managed"}
+    assert set(body) == {"updater", "webui", "secrets", "managed", "readonly_token"}
     assert updater["DOCKER_BASE"]["value"] == str(tmp_path / "docker-root")
     assert updater["DOCKER_BASE"]["configured"] is True
     assert updater["DOCKER_BASE"]["source"] == "configured"
