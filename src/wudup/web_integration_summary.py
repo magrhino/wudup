@@ -115,6 +115,7 @@ def integration_summary(settings: WebSettings) -> IntegrationSummaryResponse:
             update.security != "critical_high",
             not update.breaking,
             update.service,
+            update.image,
         )
     )
     runs = _recent_update_runs(settings)
@@ -164,7 +165,11 @@ def integration_service(
     policy = _policy(inputs.policies.get(service_key))
     last_run = _last_service_run(settings, stack, service)
     entry = next(
-        (entry for entry in _pending_entries(inputs.pending) if entry.service == service_key),
+        (
+            entry
+            for entry in _pending_entries(inputs.pending)
+            if entry.service and entry.service == service_key
+        ),
         None,
     )
     if entry is not None:
@@ -222,8 +227,8 @@ def _summary_inputs(settings: WebSettings) -> _SummaryInputs:
 def _pending_entries(pending: PendingResponse) -> list[_PendingEntry]:
     grouping = pending.grouping
     if grouping.status != "ready":
-        # Without Compose matches, name each update by its image repository.
-        return [_PendingEntry(item.repo, item, None) for item in pending.items]
+        # Without Compose matches no update has a service; `image` names it.
+        return [_PendingEntry("", item, None) for item in pending.items]
     entries = [
         _PendingEntry(service_key, item, item)
         for group in grouping.groups
@@ -234,7 +239,7 @@ def _pending_entries(pending: PendingResponse) -> list[_PendingEntry]:
             [f"{group.name}/{service}" for service in item.services] or [group.name]
         )
     ]
-    entries.extend(_PendingEntry(item.repo, item, item) for item in grouping.unmatched)
+    entries.extend(_PendingEntry("", item, item) for item in grouping.unmatched)
     return entries
 
 
@@ -245,6 +250,7 @@ def _update(entry: _PendingEntry, inputs: _SummaryInputs) -> IntegrationUpdate:
     policy = inputs.policies.get(entry.service)
     return IntegrationUpdate(
         service=entry.service,
+        image=item.repo,
         current=item.current_tag,
         target=_target(item),
         kind=_kind(item),
@@ -573,12 +579,12 @@ def _update_issues(updates: Sequence[IntegrationUpdate]) -> list[IntegrationIssu
         if update.security == "critical_high":
             issues.append(
                 IntegrationIssue(
-                    id=f"wudup:security-release:{update.service}:{update.target}",
+                    id=f"wudup:security-release:{_update_subject(update)}:{update.target}",
                     severity="urgent",
                     code="security-release",
                     name="Security update available",
                     summary=_text(
-                        f"{update.service} {update.current} -> {update.target} fixes a "
+                        f"{_update_subject(update)} {update.current} -> {update.target} fixes a "
                         "critical or high security advisory.",
                         REASON_LIMIT,
                     ),
@@ -587,12 +593,12 @@ def _update_issues(updates: Sequence[IntegrationUpdate]) -> list[IntegrationIssu
         if update.breaking:
             issues.append(
                 IntegrationIssue(
-                    id=f"wudup:breaking-update:{update.service}:{update.target}",
+                    id=f"wudup:breaking-update:{_update_subject(update)}:{update.target}",
                     severity="digest",
                     code="breaking-update",
                     name="Breaking update pending",
                     summary=_text(
-                        f"{update.service} {update.current} -> {update.target} has "
+                        f"{_update_subject(update)} {update.current} -> {update.target} has "
                         "breaking changes; review before updating.",
                         REASON_LIMIT,
                     ),
@@ -679,6 +685,12 @@ def _scan_issues(settings: WebSettings, inputs: _SummaryInputs) -> list[Integrat
             summary=_text(summary, REASON_LIMIT),
         )
     ]
+
+
+def _update_subject(update: IntegrationUpdate) -> str:
+    # Unplaced updates have no service; name them by image so their issue ids
+    # stay distinct from any service's.
+    return update.service or f"image:{update.image}"
 
 
 def _issue_order(issue: IntegrationIssue) -> tuple[bool, str]:

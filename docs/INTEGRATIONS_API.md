@@ -59,7 +59,8 @@ Other things to know:
   "updates": {
     "total": 7,
     "items": [
-      {"service": "media/jellyfin", "current": "10.10.3", "target": "10.10.4",
+      {"service": "media/jellyfin", "image": "jellyfin/jellyfin",
+       "current": "10.10.3", "target": "10.10.4",
        "kind": "patch", "breaking": false, "security": "critical_high",
        "fixes": {"critical": 1, "high": 3}, "scan": "complete",
        "auto": true, "skipped": false}
@@ -85,9 +86,11 @@ Other things to know:
 - `updates.items` lists at most 20 updates: security fixes first, then breaking
   updates, then by name. `more` counts the rest.
   - `service` is `stack/service`. It is just the stack name when WUDup matched
-    the update to a whole stack but not to a named service, and the image
-    repository when it could not match the update to a Compose stack at all;
-    `unplaced` counts the last kind.
+    the update to a whole stack but not to a named service, and empty (`""`)
+    when it could not match the update to a Compose stack at all; `unplaced`
+    counts the last kind.
+  - `image` is the image repository, such as `jellyfin/jellyfin`. Use it to name
+    an update whose `service` is empty; never treat it as a service key.
   - `security` comes from release notes: `critical_high` (a verified
     critical or high advisory), `review`, `none`, or `unknown`.
   - `fixes` counts critical and high findings the target image fixes compared

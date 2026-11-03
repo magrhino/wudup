@@ -42,6 +42,7 @@ from wudup.web_models import (
     SecurityScanInfo,
     SecurityScansResponse,
     ServicePolicyRecord,
+    TrackedContainerItem,
     TrackedContainersResponse,
     WudApiStatus,
     WudContainerMetadata,
@@ -338,6 +339,7 @@ def test_summary_joins_release_notes_scans_and_policies(monkeypatch) -> None:
     assert body["v"] == 1
     assert body["updates"]["items"][0] == {
         "service": "media/jellyfin",
+        "image": "repo/jellyfin",
         "current": "1.0",
         "target": "1.1",
         "kind": "minor",
@@ -561,6 +563,60 @@ def test_stack_level_match_is_counted_and_raises_issues(monkeypatch) -> None:
     ]
 
 
+def test_unplaced_update_never_shadows_a_tracked_service(monkeypatch) -> None:
+    # The image repo jellyfin/jellyfin looks exactly like the service key of
+    # stack "jellyfin", service "jellyfin".
+    unmatched = _item(1, "jellyfin/jellyfin", services=[])
+    tracked = TrackedContainersResponse(
+        status="ready",
+        count=1,
+        items=[
+            TrackedContainerItem(
+                target_id="t1",
+                service_key="jellyfin/jellyfin",
+                stack="jellyfin",
+                service="jellyfin",
+                compose_path="",
+                image="jellyfin/jellyfin",
+                current_tag="10.10.4",
+                runtime_state="running",
+                tracking_health="exact-tag",
+                tracking_detail="",
+            )
+        ],
+    )
+    _install(
+        monkeypatch,
+        pending=_pending({}, unmatched=[unmatched]),
+        notes=[_note(1, "jellyfin/jellyfin", outcome="verified_critical_high")],
+        tracked=tracked,
+    )
+
+    summary = summary_module.integration_summary(SETTINGS)
+    detail = summary_module.integration_service(SETTINGS, "jellyfin", "jellyfin")
+
+    assert summary.updates.items[0].service == ""
+    assert summary.updates.items[0].image == "jellyfin/jellyfin"
+    assert "wudup:security-release:image:jellyfin/jellyfin:1.1" in {
+        issue.id for issue in summary.issues
+    }
+    assert detail.update_available is False
+    assert detail.current == "10.10.4"
+
+
+def test_ungrouped_updates_have_no_service(monkeypatch) -> None:
+    pending = _pending({"media": [_item(1, "repo/app", services=["app"])]})
+    pending.grouping.status = "unavailable"
+    _install(monkeypatch, pending=pending)
+
+    update = summary_module.integration_summary(SETTINGS).updates.items[0]
+
+    assert update.service == ""
+    assert update.image == "repo/app"
+    with pytest.raises(summary_module.IntegrationServiceNotFound):
+        summary_module.integration_service(SETTINGS, "repo", "app")
+
+
 def test_system_issues_survive_many_update_issues(monkeypatch) -> None:
     items = [_item(index, f"repo/app{index:02}", services=["app"]) for index in range(1, 9)]
     unmatched = _item(20, "repo/orphan", services=[])
@@ -656,7 +712,8 @@ def test_missed_auto_update_unplaced_and_broken_scans_are_digest(monkeypatch) ->
     summary = summary_module.integration_summary(SETTINGS)
 
     assert summary.updates.unplaced == 1
-    assert summary.updates.items[0].service == "repo/orphan"
+    assert summary.updates.items[0].service == ""
+    assert summary.updates.items[0].image == "repo/orphan"
     assert {issue.code: (issue.severity, issue.summary) for issue in summary.issues} == {
         "auto-update-missed": ("digest", "media/app: another update job was running"),
         "update-unplaced": (

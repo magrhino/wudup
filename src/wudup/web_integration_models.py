@@ -33,7 +33,11 @@ class IntegrationSeverityCounts(BaseModel):
 
 
 class IntegrationUpdate(BaseModel):
+    # `stack/service`, the stack alone for a stack-level match, or "" when the
+    # update matched no Compose stack. Image repos never appear here: they
+    # contain a slash and could be mistaken for a service key.
     service: str
+    image: str = ""
     current: str
     target: str
     kind: str = ""
