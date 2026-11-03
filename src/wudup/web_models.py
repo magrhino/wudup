@@ -357,6 +357,7 @@ class SecurityScanConfig:
 class WebSettings:
     config: UpdaterConfig
     auth_token: str
+    readonly_token: str = ""
     dev_no_auth: bool = False
     allowed_origins: frozenset[str] = frozenset()
     public_origin: str = ""
@@ -1184,11 +1185,38 @@ class ManagedSettingsUpdateResponse(BaseModel):
     managed: list[ManagedSettingEntry] = Field(default_factory=list)
     audit_run_id: int
 
+ReadonlyTokenSource = Literal["env", "webui", "none"]
+
+
+class ReadonlyTokenStatus(BaseModel):
+    source: ReadonlyTokenSource = "none"
+    fingerprint: str = ""
+    created_at: str = ""
+    editable: bool = False
+    revocable: bool = False
+    # A WebUI token kept while container config wins; it works again if the
+    # container setting is removed, so it stays visible and revocable.
+    stored_fingerprint: str = ""
+    disabled_reason: str = ""
+
+
+class ReadonlyTokenActionRequest(BaseModel):
+    action: Literal["rotate", "revoke"]
+
+
+class ReadonlyTokenActionResponse(BaseModel):
+    status: ReadonlyTokenStatus
+    # Only a rotate response carries the new token; it is never shown again.
+    token: str = ""
+    audit_run_id: int
+
+
 class SettingsResponse(BaseModel):
     updater: list[SettingsEntry] = Field(default_factory=list)
     webui: list[SettingsEntry] = Field(default_factory=list)
     secrets: list[SecretSettingStatus] = Field(default_factory=list)
     managed: list[ManagedSettingEntry] = Field(default_factory=list)
+    readonly_token: ReadonlyTokenStatus = Field(default_factory=ReadonlyTokenStatus)
 
 class DoctorSuggestionResponse(BaseModel):
     label: str

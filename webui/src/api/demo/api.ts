@@ -79,6 +79,7 @@ export function createDemoWebApi(): WebApi {
     status: async () => state.status(),
     settings: async () => state.settings(),
     updateManagedSettings: rejectStaticDemoMutationAsync,
+    readonlyToken: rejectStaticDemoMutationAsync,
     doctor: async (_csrfToken: string) => state.doctor(),
     onboardingChecklist: async (_csrfToken: string) => state.onboardingChecklist(),
     dismissOnboarding: rejectStaticDemoMutationAsync,

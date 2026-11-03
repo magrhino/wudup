@@ -55,6 +55,7 @@ export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
     navLink("settings-actions", "Actions"),
     navLink("settings-preferences", "Preferences"),
     navLink("settings-notifications", "Notifications"),
+    navLink("settings-integrations", "Integrations"),
   ]),
   navGroup("configuration", "Configuration", [
     navLink("settings-runtime", "Overview"),

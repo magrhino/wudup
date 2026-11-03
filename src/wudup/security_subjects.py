@@ -68,6 +68,12 @@ class PendingSecurityOptions:
 
 PENDING_SECURITY_DEFAULT_OPTIONS = PendingSecurityOptions()
 PENDING_SECURITY_READ_OPTIONS = PendingSecurityOptions(include_compose=False)
+# Like the read options, but never asks a registry for a missing digest, for
+# callers polled on a timer such as the integrations API.
+PENDING_SECURITY_CACHED_READ_OPTIONS = PendingSecurityOptions(
+    include_compose=False,
+    resolve_missing_digests=False,
+)
 PENDING_SECURITY_CACHE_OPTIONS = PendingSecurityOptions(
     include_compose=False,
     include_wud_metadata=False,

@@ -26,6 +26,8 @@ from . import (
     web_diagnostics,
     web_effective_settings,
     web_health,
+    web_integration_auth,
+    web_integrations,
     web_job_registry,
     web_jobs,
     web_models,
@@ -85,6 +87,7 @@ def create_app(
     app.state.web_login_pending = {}
     app.state.web_login_client_pending = {}
     app.state.web_bearer_throttle = {}
+    app.state.web_readonly_throttle = {}
     web_scheduler.initialize_auto_update_scheduler_state(app.state)
     web_wud_api.initialize_pending_observation_cache(active_settings)
     web_wud_api.startup_probe(active_settings)
@@ -247,6 +250,17 @@ def create_app(
     )
     router.add_api_route(
         "/settings/managed",
+        api_post_only_method_not_allowed,
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/settings/readonly-token",
+        web_integration_auth.api_readonly_token,
+        methods=["POST"],
+        response_model=web_models.ReadonlyTokenActionResponse,
+    )
+    router.add_api_route(
+        "/settings/readonly-token",
         api_post_only_method_not_allowed,
         methods=["GET"],
     )
@@ -566,6 +580,7 @@ def create_app(
         response_model=web_models.RunLogResponse,
     )
     app.include_router(router)
+    web_integrations.register_integration_routes(app)
     web_static.mount_static_spa_if_present(app, active_settings)
     return app
 
@@ -573,6 +588,8 @@ def create_app(
 def run_web_from_namespace(args: object) -> int:
     if getattr(args, "web_command", None) == "reset-admin":
         return run_web_reset_admin_from_namespace(args)
+    if getattr(args, "web_command", None) == "readonly-token":
+        return run_web_readonly_token_from_namespace(args)
     if getattr(args, "user", None):
         print("--user is only valid with web reset-admin", file=sys.stderr)
         return 1
@@ -650,6 +667,25 @@ def run_web_reset_admin_from_namespace(args: object) -> int:
             username=recovery.username,
         )
     )
+    return 0
+
+
+def run_web_readonly_token_from_namespace(args: object) -> int:
+    if getattr(args, "token_action", None) != "revoke":
+        print("usage: wudup web readonly-token revoke", file=sys.stderr)
+        return 1
+    env = _environment_with_cli_overrides(args, os.environ)
+    try:
+        settings = web_config.load_web_settings(env)
+        message = web_integration_auth.run_readonly_token_revoke_cli(settings)
+    except (
+        ConfigError,
+        web_auth.WebConfigError,
+        web_integration_auth.ReadonlyTokenError,
+    ) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(message)
     return 0
 
 

@@ -23,6 +23,7 @@ from tests.web_test_helpers import (
 )
 
 STACKS = 3
+READONLY_TOKEN = "r" * 40
 
 
 def _docker_call_kinds(fake_root: Path) -> Counter[str]:
@@ -66,6 +67,7 @@ def stacks_client(tmp_path: Path, monkeypatch):
             "WUD_WEB_DEV_NO_AUTH": "true",
             "WUD_PENDING_SOURCE": "api",
             "WUD_API_BASE_URL": "https://wud.call-budget.test:3000",
+            "WUD_WEB_READONLY_TOKEN": READONLY_TOKEN,
             **fake_env,
         },
     )
@@ -118,6 +120,31 @@ def test_plan_preview_shares_compose_renders_with_its_doctor_preflight(
     assert kinds["compose config json"] == STACKS
     assert kinds["compose config"] == 0
     assert sum(kinds.values()) == STACKS + 3
+
+
+def test_integration_summary_reuses_pending_lookups(stacks_client) -> None:
+    client, fake_root = stacks_client
+
+    response, kinds = _measure(
+        fake_root,
+        lambda: client.get(
+            "/api/integrations/v1/summary",
+            headers={"Authorization": f"Bearer {READONLY_TOKEN}"},
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updates"]["total"] == STACKS
+    # Release notes and security scans resolve the same pending source; the
+    # request scope reuses its Docker reads, so the summary costs one pending read.
+    assert kinds == Counter(
+        {
+            "compose config json": STACKS,
+            "compose ps": STACKS,
+            "inspect": STACKS,
+            "ps": 2,
+        }
+    )
 
 
 @pytest.mark.parametrize("path", ["/api/v1/tracked-containers", "/api/v1/update-targets"])

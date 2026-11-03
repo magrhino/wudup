@@ -104,8 +104,8 @@ protects `WUD_DB_PATH`.
 ## Secrets
 
 Prefer the `_FILE` forms in containers: mount a file that contains only the
-secret, read-only, and point the variable at it. Only the WUD API credentials
-have `_FILE` forms today.
+secret, read-only, and point the variable at it. The WUD API credentials and
+the read-only API token have `_FILE` forms.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -114,7 +114,8 @@ have `_FILE` forms today.
 | `WUD_API_AUTH_BEARER_TOKEN_FILE` / `WUD_API_AUTH_BEARER_TOKEN` | unset | Optional bearer token for WUDup's outbound WUD API calls. Prefer the `_FILE` form in containers; direct values are intended for local development. Do not combine bearer and basic auth. |
 | `WUD_API_AUTH_BASIC_USER` + `WUD_API_AUTH_BASIC_PASSWORD_FILE` / `WUD_API_AUTH_BASIC_PASSWORD` | unset | Optional basic auth credentials for WUDup's outbound WUD API calls. The user and one password source must be set together. Prefer the `_FILE` password form in containers. |
 | `WUD_API_HEADERS_FILE` | unset | Optional UTF-8 JSON object of static WUD API request headers, such as `{"X-Api-Key":"example"}`. Header names and values are validated, values are redacted, and an `Authorization` header cannot be combined with bearer or basic auth. |
-| `WUD_WEB_TOKEN` | unset | Optional bearer token for API clients after first-run setup. Use a long random value of at least 32 characters; startup warns about shorter tokens. Five wrong tokens from one client address lock out bearer requests from that address for a minute, including the correct token; password logins are unaffected. Behind a reverse proxy, list it in `WUD_WEB_TRUSTED_PROXIES` so clients are not grouped under the proxy address. This token is not accepted by the browser login form and does not bypass setup. |
+| `WUD_WEB_TOKEN` | unset | Optional bearer token for API clients after first-run setup. Use a long random value of at least 32 characters; startup warns about shorter tokens. Five wrong tokens from one client address lock out bearer requests from that address for a minute, including the correct token; password logins are unaffected. Behind a reverse proxy, list it in `WUD_WEB_TRUSTED_PROXIES` so clients are not grouped under the proxy address. This token is not accepted by the browser login form and does not bypass setup. It has full admin access to the WebUI API, including updates when `WUD_WEB_MUTATIONS_ENABLED=true`; give integrations the read-only API token instead. |
+| `WUD_WEB_READONLY_TOKEN_FILE` / `WUD_WEB_READONLY_TOKEN` | unset | Optional [read-only API token](INTEGRATIONS_API.md) for dashboards, bots, and scripts. It only works on `/api/integrations/v1` and cannot apply updates or change settings. Use at least 32 random characters, different from `WUD_WEB_TOKEN`, or WUDup refuses to start. When set, it replaces any token generated in WebUI Settings; that token stops working but stays stored until you revoke it in Settings or with `wudup web readonly-token revoke`. Rotate the container-config token by changing the value and restarting. Wrong tokens are throttled per client address like `WUD_WEB_TOKEN`. |
 | `GITHUB_TOKEN` | unset | Optional GitHub API token for higher release-note and public advisory lookup rate limits in WebUI notifications and metadata refreshes. |
 | `DISCORD_WEBHOOK` | unset | Discord webhook for WebUI-sent release-note notifications, including immediate verified Critical/High alerts. When set, it overrides and disables the WebUI-managed webhook field. |
 

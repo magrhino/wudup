@@ -9,6 +9,7 @@ import { useSettingsStore } from "../stores/settings";
 import SettingsActionsSection from "./settings/SettingsActionsSection.vue";
 import SettingsDiagnosticsSection from "./settings/SettingsDiagnosticsSection.vue";
 import SettingsDocsSection from "./settings/SettingsDocsSection.vue";
+import SettingsIntegrationsSection from "./settings/SettingsIntegrationsSection.vue";
 import SettingsJumpNav from "./settings/SettingsJumpNav.vue";
 import SettingsNotificationsSection from "./settings/SettingsNotificationsSection.vue";
 import SettingsPreferencesSection from "./settings/SettingsPreferencesSection.vue";
@@ -80,6 +81,7 @@ async function refreshSettings(): Promise<void> {
           v-if="settingsData"
           :compact="compactSettingsLayout"
         />
+        <SettingsIntegrationsSection v-if="settingsData" />
         <SettingsRuntimeSections :compact="compactSettingsLayout" />
         <SettingsDiagnosticsSection />
         <SettingsDocsSection />

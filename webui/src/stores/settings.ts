@@ -7,6 +7,8 @@ import {
   type CoreUpdateTourStatus,
   type CoreUpdateTourStep,
   type ManagedSettingsUpdateResponse,
+  type ReadonlyTokenAction,
+  type ReadonlyTokenActionResponse,
   type OnboardingChecklistResponse,
   type OnboardingDismissResponse,
   type ReleaseNotificationTestResponse,
@@ -100,6 +102,24 @@ export const useSettingsStore = defineStore("settings", () => {
       } catch {
         // The preference save succeeded; the checklist can refresh on the next view load.
       }
+    }
+    return response;
+  }
+
+  async function changeReadonlyToken(
+    action: ReadonlyTokenAction,
+  ): Promise<ReadonlyTokenActionResponse> {
+    const auth = useAuthStore();
+    let response: ReadonlyTokenActionResponse | null = null;
+    await loadWithState(async () => {
+      response = await webApi.readonlyToken(action, await auth.ensureCsrf());
+      if (settings.value) {
+        // Keep only the status: the one-time token stays with the caller.
+        settings.value = { ...settings.value, readonly_token: response.status };
+      }
+    });
+    if (response === null) {
+      throw new Error("Read-only API token change did not return a response");
     }
     return response;
   }
@@ -397,6 +417,7 @@ export const useSettingsStore = defineStore("settings", () => {
     pendingSafetyCueError,
     loadSettings,
     updateManagedSettings,
+    changeReadonlyToken,
     testReleaseNotificationWebhook,
     loadOnboarding,
     dismissOnboarding,

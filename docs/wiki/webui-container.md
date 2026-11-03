@@ -346,6 +346,20 @@ the named admin set a new password, revokes existing sessions for that admin,
 invalidates the old password immediately, and records local audit history
 without storing or printing the raw recovery claim.
 
+## Read-Only API Token Recovery
+
+To revoke a [read-only API token](../INTEGRATIONS_API.md) generated in WebUI
+Settings when WebUI changes are turned off, run:
+
+```bash
+docker compose run --rm wudup web readonly-token revoke
+```
+
+Integrations using that token get 401 responses until a new token is
+generated. The command also removes a generated token left over after you
+switched to `WUD_WEB_READONLY_TOKEN` or its `_FILE` form; the container-config
+token itself is changed in container config.
+
 ## Maintenance
 
 Pull the new image and recreate WUDup:

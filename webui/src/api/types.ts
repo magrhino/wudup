@@ -1118,11 +1118,34 @@ export interface ManagedSettingEntry {
   sensitive?: boolean;
 }
 
+export type ReadonlyTokenSource = "env" | "webui" | "none";
+
+export interface ReadonlyTokenStatus {
+  source: ReadonlyTokenSource;
+  fingerprint: string;
+  created_at: string;
+  editable: boolean;
+  revocable: boolean;
+  /** A WebUI token kept while container config wins; revoke it to retire it. */
+  stored_fingerprint: string;
+  disabled_reason: string;
+}
+
+export type ReadonlyTokenAction = "rotate" | "revoke";
+
+export interface ReadonlyTokenActionResponse {
+  status: ReadonlyTokenStatus;
+  /** Only a rotate response carries the new token; it is never shown again. */
+  token: string;
+  audit_run_id: number;
+}
+
 export interface SettingsResponse {
   updater: SettingsEntry[];
   webui: SettingsEntry[];
   secrets: SecretSettingStatus[];
   managed: ManagedSettingEntry[];
+  readonly_token: ReadonlyTokenStatus;
 }
 
 export interface ManagedSettingsUpdateResponse {

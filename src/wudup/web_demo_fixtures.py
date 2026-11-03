@@ -836,6 +836,12 @@ def _static_demo_settings(value: Any) -> None:
             "false",
             "derived",
         )
+    readonly_token = value.get("readonly_token")
+    if isinstance(readonly_token, dict):
+        from wudup.web_integration_auth import MUTATIONS_DISABLED_REASON
+
+        readonly_token["editable"] = False
+        readonly_token["disabled_reason"] = MUTATIONS_DISABLED_REASON
 
 
 def _static_demo_setting_entry(

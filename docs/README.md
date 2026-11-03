@@ -15,6 +15,7 @@ short; detailed setup and behavior notes live here.
 | WebUI container guide | [wiki/webui-container.md](wiki/webui-container.md) |
 | Command runner | [COMMAND_RUNNER.md](COMMAND_RUNNER.md) |
 | Configuration reference | [CONFIGURATION.md](CONFIGURATION.md) |
+| Read-only integrations API and token | [INTEGRATIONS_API.md](INTEGRATIONS_API.md) |
 | Generated helper configuration | [COMMAND_RUNNER.md#init-wizard](COMMAND_RUNNER.md#init-wizard) |
 | Development, CI, and release automation | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | SonarQube installation findings and gate policy | [SONAR_TRIAGE.md](SONAR_TRIAGE.md) |

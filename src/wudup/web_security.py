@@ -28,6 +28,7 @@ from .security_store import (
 )
 from .security_subjects import (
     PENDING_SECURITY_CACHE_OPTIONS,
+    PENDING_SECURITY_CACHED_READ_OPTIONS,
     PENDING_SECURITY_READ_OPTIONS,
     PendingSecurityContext,
     PendingSecurityRequest,
@@ -207,11 +208,21 @@ def api_security_scan_job(job_id: str, request: Request) -> SecurityScanJobRespo
         return _job_response(job)
 
 
-def security_scans_response(settings: WebSettings) -> SecurityScansResponse:
+def security_scans_response(
+    settings: WebSettings,
+    *,
+    resolve_missing_digests: bool = True,
+) -> SecurityScansResponse:
+    """Cached scan results; registry digest lookups only when asked for."""
+    read_options = (
+        PENDING_SECURITY_READ_OPTIONS
+        if resolve_missing_digests
+        else PENDING_SECURITY_CACHED_READ_OPTIONS
+    )
     context = pending_security_context(
         settings,
         options=(
-            PENDING_SECURITY_READ_OPTIONS
+            read_options
             if settings.security_scan.enabled
             else PENDING_SECURITY_CACHE_OPTIONS
         ),

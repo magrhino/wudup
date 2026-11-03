@@ -44,6 +44,7 @@ def test_immediate_transaction_preserves_order_and_failure_identity(outcome):
 def test_recursive_redaction_preserves_input_and_exact_replacements(tmp_path: Path):
     settings = SimpleNamespace(
         auth_token="example-token-value",
+        readonly_token="",
         wud_api_client=SimpleNamespace(secret_values=("example-password",)),
         command_env={"DISCORD_WEBHOOK": "https://discord.test/secret-webhook-fragment"},
         config=SimpleNamespace(
@@ -80,6 +81,7 @@ def test_recursive_redaction_preserves_input_and_exact_replacements(tmp_path: Pa
 def test_wud_bootstrap_password_is_redacted_but_not_a_listed_setting():
     settings = SimpleNamespace(
         auth_token="",
+        readonly_token="",
         wud_api_client=SimpleNamespace(secret_values=()),
         command_env={"WUD_AUTH_ADMIN_PASSWORD": "example-wud-admin-password"},
     )
@@ -93,6 +95,7 @@ def test_wud_bootstrap_password_is_redacted_but_not_a_listed_setting():
 def test_secret_that_is_not_a_valid_url_is_still_redacted():
     settings = SimpleNamespace(
         auth_token="",
+        readonly_token="",
         wud_api_client=SimpleNamespace(secret_values=()),
         command_env={"WUD_AUTH_ADMIN_PASSWORD": "//[ExamplePassword123!"},
     )
