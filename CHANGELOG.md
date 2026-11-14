@@ -4,6 +4,13 @@ All notable changes to WUD-Updater are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com) and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.68.1](https://github.com/magrhino/wudup/compare/v0.68.0...v0.68.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **webui:** unpin running apply-job panel so live log can scroll ([#966](https://github.com/magrhino/wudup/issues/966)) ([e2be899](https://github.com/magrhino/wudup/commit/e2be899136632e8c34a1748994bdb3d9cc6aa7fd))
+
 ## [0.68.0](https://github.com/magrhino/wudup/compare/v0.67.0...v0.68.0) (2026-11-10)
 
 
