@@ -388,9 +388,6 @@ function snapshotLineScope(
 }
 
 .apply-job-panel-active {
-  position: sticky;
-  top: 12px;
-  z-index: 8;
   border-color: var(--color-border-hover);
 }
 
@@ -784,10 +781,6 @@ function snapshotLineScope(
 }
 
 @media (--wud-app-shell) {
-  .apply-job-panel-active {
-    top: 76px;
-  }
-
   .apply-job-grid {
     grid-template-columns: 1fr;
   }
