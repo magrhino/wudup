@@ -229,10 +229,13 @@ def _request_for_target(
     if compose_platform_conflict:
         identity_status = "mismatch"
         error = "Multiple Compose platforms matched WUD line"
-    elif compose_platform is not None and wud_platform is not None:
-        if compose_platform != wud_platform:
-            identity_status = "mismatch"
-            error = "Compose platform conflicts with WUD platform"
+    elif (
+        compose_platform is not None
+        and wud_platform is not None
+        and compose_platform != wud_platform
+    ):
+        identity_status = "mismatch"
+        error = "Compose platform conflicts with WUD platform"
     missing_reported_digest_resolvable = False
     if not target.digest and identity_status == "pending":
         identity_status = "unsupported"

@@ -14,6 +14,11 @@ const vSelectTriggerDescription: Directive<HTMLElement, string> = {
   },
 };
 
+// Bound from script: vue-tsc 3.3.14 mis-parses `//` inside a static template
+// attribute and breaks type checking for the rest of the template
+// (vuejs/language-tools#6322).
+const discordWebhookPlaceholder = "https://discord.com/api/webhooks/...";
+
 defineProps<{
   compact: boolean;
 }>();
@@ -175,7 +180,7 @@ const {
                   type="password"
                   show-password-on="click"
                   :disabled="notificationControlsDisabled || !discordWebhookEditable"
-                  placeholder="https://discord.com/api/webhooks/..."
+                  :placeholder="discordWebhookPlaceholder"
                   aria-label="Discord webhook URL"
                 />
                 <n-flex
