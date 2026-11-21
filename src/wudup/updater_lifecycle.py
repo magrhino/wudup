@@ -589,6 +589,9 @@ class StackLifecycleExecutor(
                 stack.file,
                 state.pull_services,
                 project_directory=stack.project_directory,
+                on_rate_limit_retry=lambda message: self.log.warning(
+                    f"[{stack.name}] {message}"
+                ),
             )
         except CommandError as exc:
             if state.compose_rewrite_applied and state.compose_backup is not None:
