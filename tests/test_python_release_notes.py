@@ -536,18 +536,23 @@ class ReleaseNotesTests(unittest.TestCase):
     def test_lsio_rebuild_ignores_repeated_upstream_security_notes(self) -> None:
         calls: list[str] = []
         client = GitHubClient(fetch_json=lambda url: calls.append(url))
-        remote_changes = (
-            "**Remote Changes:**\n\n"
+        upstream_notes = (
             "From newest to oldest:\n"
             "- Fixed napiprojekt to use SSL\n\n"
             "**Bug Fixes:**\n"
             "- Refactored post-processing to prevent shell injection. CVE-2026-12345\n"
         )
 
+        def lsio_body(lsio_changes: str, remote_header: str) -> str:
+            return (
+                f"**LinuxServer Changes:**\n\n{lsio_changes}\n\n"
+                f"{remote_header}\n\n{upstream_notes}"
+            )
+
         def assess(
             current_tag: str,
             target_tag: str,
-            lsio_changes: str,
+            body: str,
         ) -> ReleaseSecurityAssessment:
             context = release_note_contexts(
                 parse_wud_text(
@@ -564,7 +569,7 @@ class ReleaseNotesTests(unittest.TestCase):
                 upstream_repo=context.upstream_repo,
                 release_tag=target_tag,
                 title=target_tag,
-                body=f"**LinuxServer Changes:**\n\n{lsio_changes}\n\n{remote_changes}",
+                body=body,
                 classification=classify_lsio_update(
                     image_repo=context.image_repo,
                     current_tag=current_tag,
@@ -578,22 +583,60 @@ class ReleaseNotesTests(unittest.TestCase):
             )
             return assessment
 
-        rebuild = assess("v1.6.2-ls372", "v1.6.2-ls373", "Rebuilt image.")
-        self.assertEqual(rebuild.outcome, "ordinary")
+        for remote_header in (
+            "**Remote Changes:**",
+            "### Remote Changes:",
+            "Remote Changes:\r",
+        ):
+            with self.subTest(remote_header=remote_header):
+                rebuild = assess(
+                    "v1.6.2-ls372",
+                    "v1.6.2-ls373",
+                    lsio_body("Rebuilt image.", remote_header),
+                )
+                self.assertEqual(rebuild.outcome, "ordinary")
         self.assertEqual(calls, [])
 
         security_rebuild = assess(
             "v1.6.2-ls372",
             "v1.6.2-ls373",
-            "Rebase to a patched base image to fix a CVE.",
+            lsio_body(
+                "Rebase to a patched base image to fix a CVE.",
+                "**Remote Changes:**",
+            ),
         )
         self.assertEqual(security_rebuild.outcome, "needs_review")
         self.assertEqual(security_rebuild.reason_code, "security_signal_only")
         self.assertEqual(calls, [])
 
-        upstream_update = assess("v1.6.1-ls365", "v1.6.2-ls366", "Rebuilt image.")
+        # Without a recognizable section header the whole body is still scanned.
+        unrecognized_header = assess(
+            "v1.6.2-ls372",
+            "v1.6.2-ls373",
+            lsio_body("Rebuilt image.", "**Upstream notes**"),
+        )
+        self.assertEqual(unrecognized_header.outcome, "needs_review")
+        self.assertIn("CVE-2026-12345", unrecognized_header.advisory_ids)
+
+        # A version change puts the upstream release first, then the LSIO body.
+        upstream_update = assess(
+            "v1.6.1-ls365",
+            "v1.6.2-ls366",
+            "\n\n".join(
+                [upstream_notes, lsio_body("Rebuilt image.", "**Remote Changes:**")]
+            ),
+        )
         self.assertEqual(upstream_update.outcome, "needs_review")
         self.assertIn("CVE-2026-12345", upstream_update.advisory_ids)
+
+        # Only the upstream section of the LSIO body names the fix.
+        remote_only_update = assess(
+            "v1.6.1-ls365",
+            "v1.6.2-ls366",
+            lsio_body("Rebuilt image.", "**Remote Changes:**"),
+        )
+        self.assertEqual(remote_only_update.outcome, "needs_review")
+        self.assertIn("CVE-2026-12345", remote_only_update.advisory_ids)
 
     def test_security_assessment_caps_advisory_lookups(self) -> None:
         advisory_ids = [f"GHSA-aaaa-bbbb-{index:04d}" for index in range(5)]
