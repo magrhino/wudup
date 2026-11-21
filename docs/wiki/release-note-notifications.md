@@ -71,9 +71,18 @@ summary notification.
 ## Security Evidence
 
 WUDup scans the resolved release title and body for bounded urgency signals,
-including `UPDATE ASAP`, `critical`, `security`, GHSA IDs, CVE IDs, and GitHub
-advisory links. A keyword is only a reason to review or fetch structured
+including `UPDATE ASAP`, `critical`, `security`, GHSA IDs, CVE IDs, a bare
+`CVE` mention, GitHub advisory links, and common vulnerability wording such as
+`vulnerability`, `exploit`, `authentication bypass`, `SMTP injection`, `remote
+code execution`, `XSS`, `SSRF`, `path traversal`, and `privilege escalation`. A
+keyword is only a reason to review or fetch structured
 advisory data; it never proves that the running image is affected.
+
+A LinuxServer.io rebuild keeps the upstream version and repeats the upstream
+notes you already run under `Remote Changes`. For those rebuilds WUDup scans
+only the rest of the release, such as `LinuxServer Changes`, so a rebuild is
+flagged when LinuxServer's own changes mention a security fix and not because
+of an upstream fix that is already installed.
 
 Each release has one of three outcomes:
 

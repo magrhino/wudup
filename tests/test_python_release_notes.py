@@ -13,6 +13,8 @@ except ModuleNotFoundError:
     from test_python_db import V4_SCHEMA_SQL
 
 from wudup.db import SCHEMA_VERSION, init_db, open_db
+from wudup.lsio_updates import classify_lsio_update
+from wudup.release_note_models import ReleaseSecurityAssessment
 from wudup.release_note_providers import (
     GITHUB_TOKEN_REJECTED_MESSAGE,
     GitHubAuthenticationError,
@@ -478,6 +480,178 @@ class ReleaseNotesTests(unittest.TestCase):
 
         self.assertEqual(first[0].security.reason_code, "security_signal_only")
         self.assertEqual(calls, 2)
+
+    def test_security_wording_without_security_keyword_needs_review(self) -> None:
+        context = release_note_contexts(
+            parse_wud_text("ghcr.io/acme/app:1.2.0 tag=1.2.1\n").targets,
+            {},
+        )[0]
+        calls: list[str] = []
+        client = GitHubClient(fetch_json=lambda url: calls.append(url))
+
+        def assess(body: str) -> ReleaseSecurityAssessment:
+            info = ReleaseNoteInfo(
+                line_no=1,
+                status="ready",
+                provider="github",
+                image_repo="acme/app",
+                upstream_repo="acme/app",
+                release_tag="v1.2.1",
+                title="v1.2.1",
+                body=body,
+            )
+            assessment, _links = release_notes_module.assess_release_security(
+                context,
+                info,
+                client,
+            )
+            return assessment
+
+        flagged = [
+            "* update nginx to fix todays published CVEs",
+            "updated dependency of nodejs to fix a CVE of them",
+            "WEBUI: Fix authentication bypass via X-Forwarded-For spoofing",
+            "BUGFIX: Prevent SMTP injection from unsanitized mail content",
+            "Fixes a vulnerability in the upload handler",
+            "Fixed stored XSS in the comment field",
+            "Prevent path traversal when extracting archives",
+            "Fixes a flaw that attackers were exploiting in the wild",
+            "Mitigate active exploitation of the upload endpoint",
+        ]
+        for body in flagged:
+            with self.subTest(body=body):
+                assessment = assess(body)
+                self.assertEqual(assessment.outcome, "needs_review")
+                self.assertEqual(assessment.reason_code, "security_signal_only")
+
+        ordinary = [
+            "Routine bug fixes.",
+            "Refactor services to use dependency injection",
+            "Bypass the cache when the reload flag is set",
+            "Improve source file handling and add a new exploration view",
+        ]
+        for body in ordinary:
+            with self.subTest(body=body):
+                self.assertEqual(assess(body).outcome, "ordinary")
+        self.assertEqual(calls, [])
+
+    def test_lsio_rebuild_ignores_repeated_upstream_security_notes(self) -> None:
+        calls: list[str] = []
+        client = GitHubClient(fetch_json=lambda url: calls.append(url))
+        upstream_notes = (
+            "From newest to oldest:\n"
+            "- Fixed napiprojekt to use SSL\n\n"
+            "**Bug Fixes:**\n"
+            "- Refactored post-processing to prevent shell injection. CVE-2026-12345\n"
+        )
+
+        def lsio_body(lsio_changes: str, remote_header: str) -> str:
+            return (
+                f"**LinuxServer Changes:**\n\n{lsio_changes}\n\n"
+                f"{remote_header}\n\n{upstream_notes}"
+            )
+
+        def assess(
+            current_tag: str,
+            target_tag: str,
+            body: str,
+        ) -> ReleaseSecurityAssessment:
+            context = release_note_contexts(
+                parse_wud_text(
+                    f"lscr.io/linuxserver/bazarr:{current_tag} tag={target_tag}\n"
+                ).targets,
+                {},
+            )[0]
+            self.assertEqual(context.provider, "lsio")
+            info = ReleaseNoteInfo(
+                line_no=1,
+                status="ready",
+                provider="lsio",
+                image_repo=context.image_repo,
+                upstream_repo=context.upstream_repo,
+                release_tag=target_tag,
+                title=target_tag,
+                body=body,
+                classification=classify_lsio_update(
+                    image_repo=context.image_repo,
+                    current_tag=current_tag,
+                    target_tag=target_tag,
+                ),
+            )
+            assessment, _links = release_notes_module.assess_release_security(
+                context,
+                info,
+                client,
+            )
+            return assessment
+
+        for remote_header in (
+            "**Remote Changes:**",
+            "### Remote Changes:",
+            "Remote Changes:\r",
+        ):
+            with self.subTest(remote_header=remote_header):
+                rebuild = assess(
+                    "v1.6.2-ls372",
+                    "v1.6.2-ls373",
+                    lsio_body("Rebuilt image.", remote_header),
+                )
+                self.assertEqual(rebuild.outcome, "ordinary")
+        self.assertEqual(calls, [])
+
+        security_rebuild = assess(
+            "v1.6.2-ls372",
+            "v1.6.2-ls373",
+            lsio_body(
+                "Rebase to a patched base image to fix a CVE.",
+                "**Remote Changes:**",
+            ),
+        )
+        self.assertEqual(security_rebuild.outcome, "needs_review")
+        self.assertEqual(security_rebuild.reason_code, "security_signal_only")
+        self.assertEqual(calls, [])
+
+        # LinuxServer's own changes are scanned even when they come last.
+        reordered_rebuild = assess(
+            "v1.6.2-ls372",
+            "v1.6.2-ls373",
+            f"**Remote Changes:**\n\n{upstream_notes}\n"
+            "**LinuxServer Changes:**\n\n"
+            "Rebase to a patched base image to fix a CVE.\n",
+        )
+        self.assertEqual(reordered_rebuild.outcome, "needs_review")
+        self.assertEqual(reordered_rebuild.reason_code, "security_signal_only")
+        self.assertEqual(reordered_rebuild.advisory_ids, [])
+        self.assertEqual(calls, [])
+
+        # Without a recognizable section header the whole body is still scanned.
+        unrecognized_header = assess(
+            "v1.6.2-ls372",
+            "v1.6.2-ls373",
+            lsio_body("Rebuilt image.", "**Upstream notes**"),
+        )
+        self.assertEqual(unrecognized_header.outcome, "needs_review")
+        self.assertIn("CVE-2026-12345", unrecognized_header.advisory_ids)
+
+        # A version change puts the upstream release first, then the LSIO body.
+        upstream_update = assess(
+            "v1.6.1-ls365",
+            "v1.6.2-ls366",
+            "\n\n".join(
+                [upstream_notes, lsio_body("Rebuilt image.", "**Remote Changes:**")]
+            ),
+        )
+        self.assertEqual(upstream_update.outcome, "needs_review")
+        self.assertIn("CVE-2026-12345", upstream_update.advisory_ids)
+
+        # Only the upstream section of the LSIO body names the fix.
+        remote_only_update = assess(
+            "v1.6.1-ls365",
+            "v1.6.2-ls366",
+            lsio_body("Rebuilt image.", "**Remote Changes:**"),
+        )
+        self.assertEqual(remote_only_update.outcome, "needs_review")
+        self.assertIn("CVE-2026-12345", remote_only_update.advisory_ids)
 
     def test_security_assessment_caps_advisory_lookups(self) -> None:
         advisory_ids = [f"GHSA-aaaa-bbbb-{index:04d}" for index in range(5)]
