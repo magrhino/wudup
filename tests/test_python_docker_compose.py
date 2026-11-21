@@ -887,6 +887,80 @@ class ComposeCliTests(FakeDockerCase):
             ],
         )
 
+class _ScriptedPullRunner:
+    """Runner whose successive pulls fail with the given outputs, then succeed."""
+
+    def __init__(self, failure_outputs: list[str]) -> None:
+        self.failure_outputs = list(failure_outputs)
+        self.calls = 0
+
+    def run_in_pty(self, args, *, cwd, check):
+        self.calls += 1
+        if self.failure_outputs:
+            raise CommandError(CommandResult(
+                args=tuple(str(arg) for arg in args),
+                cwd=Path(cwd),
+                returncode=1,
+                stdout=self.failure_outputs.pop(0),
+            ))
+        return CommandResult(args=tuple(str(arg) for arg in args), cwd=Path(cwd), returncode=0)
+
+
+GHCR_THROTTLE = "Error response from daemon: toomanyrequests: retry-after: 471.711µs, allowed: 44000/minute"
+DOCKER_HUB_QUOTA = (
+    "toomanyrequests: You have reached your pull rate limit. "
+    "You may increase the limit by authenticating and upgrading"
+)
+
+
+class ComposePullRateLimitRetryTests(unittest.TestCase):
+    def _compose(self, runner: _ScriptedPullRunner) -> tuple[ComposeCli, list[float]]:
+        sleeps: list[float] = []
+        compose = ComposeCli(
+            runner=runner,  # type: ignore[arg-type]
+            pull_rate_limit_retry_delays=(15.0, 30.0),
+            sleep=sleeps.append,
+        )
+        return compose, sleeps
+
+    def test_retries_registry_throttle_then_succeeds(self) -> None:
+        runner = _ScriptedPullRunner([GHCR_THROTTLE])
+        compose, sleeps = self._compose(runner)
+        messages: list[str] = []
+
+        result = compose.pull("/srv/app", "docker-compose.yml", ["app"], on_rate_limit_retry=messages.append)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(runner.calls, 2)
+        self.assertEqual(sleeps, [15.0])
+        self.assertEqual(len(messages), 1)
+        self.assertIn("rate-limiting pulls", messages[0])
+        self.assertIn("retry 1 of 2", messages[0])
+
+    def test_gives_up_after_configured_retries(self) -> None:
+        runner = _ScriptedPullRunner([GHCR_THROTTLE, GHCR_THROTTLE, GHCR_THROTTLE])
+        compose, sleeps = self._compose(runner)
+
+        with self.assertLogs("wudup.compose", level="WARNING"), self.assertRaises(CommandError) as raised:
+            compose.pull("/srv/app", "docker-compose.yml", ["app"])
+
+        self.assertEqual(runner.calls, 3)
+        self.assertEqual(sleeps, [15.0, 30.0])
+        self.assertIn("toomanyrequests", raised.exception.result.stdout)
+
+    def test_does_not_retry_other_pull_failures(self) -> None:
+        for output in ("manifest unknown", DOCKER_HUB_QUOTA):
+            with self.subTest(output=output):
+                runner = _ScriptedPullRunner([output])
+                compose, sleeps = self._compose(runner)
+
+                with self.assertRaises(CommandError):
+                    compose.pull("/srv/app", "docker-compose.yml", ["app"])
+
+                self.assertEqual(runner.calls, 1)
+                self.assertEqual(sleeps, [])
+
+
 class ComposeRuntimeExtraConfigFilesTests(unittest.TestCase):
     def test_reports_files_loaded_beyond_discovered_compose_file(self) -> None:
         keys = compose_runtime_service_keys([

@@ -7,7 +7,8 @@ import logging
 import os
 import re
 import shlex
-from collections.abc import Collection, Iterable, Sequence
+import time
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,6 +39,12 @@ COMPOSE_RUNTIME_FORMAT = (
     '{{.Label "com.docker.compose.oneoff"}}'
 )
 COMPOSE_RUNTIME_STATE_FORMAT = f"{COMPOSE_RUNTIME_FORMAT}\t{{{{.State}}}}"
+# GHCR throttles busy namespaces (LinuxServer images) in bursts lasting
+# seconds, so a short wait usually lets the same pull succeed.
+PULL_RATE_LIMIT_RETRY_DELAYS_SECONDS = (15.0, 30.0)
+_REGISTRY_RATE_LIMIT_RE = re.compile(r"toomanyrequests", re.IGNORECASE)
+# Docker Hub's quota resets over hours; waiting seconds cannot help.
+_REGISTRY_PULL_QUOTA_RE = re.compile(r"pull rate limit", re.IGNORECASE)
 
 ComposeRuntimeServiceKey = tuple[frozenset[Path], str, str]
 ComposeRuntimeServiceState = tuple[ComposeRuntimeServiceKey, str]
@@ -306,9 +313,13 @@ class ComposeCli:
         *,
         runner: CommandRunner | None = None,
         docker_executable: str = "docker",
+        pull_rate_limit_retry_delays: Sequence[float] = PULL_RATE_LIMIT_RETRY_DELAYS_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.runner = runner or CommandRunner()
         self.docker_executable = docker_executable
+        self.pull_rate_limit_retry_delays = tuple(pull_rate_limit_retry_delays)
+        self._sleep = sleep
 
     def config_images(
         self,
@@ -612,14 +623,37 @@ class ComposeCli:
         services: Sequence[str] | None = None,
         *,
         project_directory: str | Path | None = None,
+        on_rate_limit_retry: Callable[[str], None] | None = None,
     ) -> CommandResult:
-        return self.run_with_services(
-            directory,
-            file,
-            services,
-            "pull",
-            project_directory=project_directory,
-        )
+        """Pull images, retrying briefly when the registry rate-limits the pull.
+
+        Pulling is safe to repeat. Only short registry throttling is retried;
+        Docker Hub's hourly pull quota and every other failure raise at once.
+        """
+        delays = tuple(self.pull_rate_limit_retry_delays)
+        for attempt in range(len(delays) + 1):
+            try:
+                return self.run_with_services(
+                    directory,
+                    file,
+                    services,
+                    "pull",
+                    project_directory=project_directory,
+                )
+            except CommandError as exc:
+                if attempt >= len(delays) or not is_short_registry_rate_limit(exc.result):
+                    raise
+                delay = delays[attempt]
+                message = (
+                    "The image registry is rate-limiting pulls (too many requests). "
+                    f"Waiting {delay:g}s before pull retry {attempt + 1} of {len(delays)}."
+                )
+                if on_rate_limit_retry is not None:
+                    on_rate_limit_retry(message)
+                else:
+                    LOGGER.warning("%s: %s", Path(directory) / file, message)
+                self._sleep(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def stop(
         self,
@@ -936,6 +970,12 @@ def _ignored_compose_path(
         if len(ignored_parts) > 1 and relative_parts[: len(ignored_parts)] == ignored_parts:
             return True
     return False
+
+
+def is_short_registry_rate_limit(result: CommandResult) -> bool:
+    """Return whether a failed pull was briefly throttled by the registry."""
+    output = f"{result.stdout}\n{result.stderr}"
+    return bool(_REGISTRY_RATE_LIMIT_RE.search(output)) and not _REGISTRY_PULL_QUOTA_RE.search(output)
 
 
 def _service_args(services: Sequence[str] | None) -> tuple[str, ...]:
