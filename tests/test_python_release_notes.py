@@ -515,6 +515,8 @@ class ReleaseNotesTests(unittest.TestCase):
             "Fixes a vulnerability in the upload handler",
             "Fixed stored XSS in the comment field",
             "Prevent path traversal when extracting archives",
+            "Fixes a flaw that attackers were exploiting in the wild",
+            "Mitigate active exploitation of the upload endpoint",
         ]
         for body in flagged:
             with self.subTest(body=body):
@@ -607,6 +609,19 @@ class ReleaseNotesTests(unittest.TestCase):
         )
         self.assertEqual(security_rebuild.outcome, "needs_review")
         self.assertEqual(security_rebuild.reason_code, "security_signal_only")
+        self.assertEqual(calls, [])
+
+        # LinuxServer's own changes are scanned even when they come last.
+        reordered_rebuild = assess(
+            "v1.6.2-ls372",
+            "v1.6.2-ls373",
+            f"**Remote Changes:**\n\n{upstream_notes}\n"
+            "**LinuxServer Changes:**\n\n"
+            "Rebase to a patched base image to fix a CVE.\n",
+        )
+        self.assertEqual(reordered_rebuild.outcome, "needs_review")
+        self.assertEqual(reordered_rebuild.reason_code, "security_signal_only")
+        self.assertEqual(reordered_rebuild.advisory_ids, [])
         self.assertEqual(calls, [])
 
         # Without a recognizable section header the whole body is still scanned.

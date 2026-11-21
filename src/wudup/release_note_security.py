@@ -40,7 +40,7 @@ SECURITY_SIGNAL_RE = re.compile(
     # Security fixes are often described without the word "security" or an
     # advisory ID ("fix today's published CVEs", "fix authentication bypass").
     r"\bCVEs?\b|\bvulnerabilit(?:y|ies)\b|\bvulnerable\b|"
-    r"\bexploit(?:s|ed|able)?\b|"
+    r"\bexploit(?:s|ed|ing|able|ation)?\b|"
     r"\b(?:auth|authentication|authorization|login)\s+bypass\b|"
     r"\b(?:sql|shell|command|code|smtp|header|html|script|template)\s+injection\b|"
     r"\bremote\s+code\s+execution\b|\bRCE\b|\bXSS\b|\bcross-site\s+scripting\b|"
@@ -191,20 +191,27 @@ def _security_signal_body(context: ReleaseNoteContext, info: ReleaseNoteInfo) ->
 
     A LinuxServer rebuild keeps the upstream version, and its release repeats
     the upstream notes the running container already has under "Remote
-    Changes", the last section of a LinuxServer release. Scanning them would
-    flag every rebuild for a fix that is already installed, so only the text
-    before that section (LinuxServer's own changes) is scanned. The whole body
-    is still scanned when the section cannot be found.
+    Changes", normally the last section of a LinuxServer release. Scanning
+    them would flag every rebuild for a fix that is already installed, so that
+    section is skipped. Everything else is scanned: the text before it, and a
+    "LinuxServer Changes" section that follows it. The whole body is still
+    scanned when the section cannot be found.
     """
 
     if context.provider != "lsio" or info.classification.change_type != "image_rebuild":
         return info.body
     kept: list[str] = []
+    in_remote_changes = False
     for line in info.body.replace("\r", "").splitlines():
-        # Upstream notes carry their own headers, so the section runs to the end.
-        if _block_header_text(line).lower() == "remote changes:":
-            break
-        kept.append(line)
+        header = _block_header_text(line).lower()
+        # Upstream notes carry their own headers, so only LinuxServer's own
+        # section header ends the skipped section.
+        if header == "remote changes:":
+            in_remote_changes = True
+        elif header == "linuxserver changes:":
+            in_remote_changes = False
+        if not in_remote_changes:
+            kept.append(line)
     return "\n".join(kept)
 
 
