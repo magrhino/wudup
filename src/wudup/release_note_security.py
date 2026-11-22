@@ -25,6 +25,7 @@ from .release_note_providers import (
     SECURITY_ADVISORY_FETCH_MAX,
     GitHubAuthenticationError,
     GitHubClient,
+    _block_header_text,
     _github_repo_valid,
     _github_source_repo,
     _object_list,
@@ -35,7 +36,15 @@ SECURITY_SIGNAL_RE = re.compile(
     r"\bupdate\s+asap\b|\bcritical\b|\bsecurity\b|"
     r"\bGHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}\b|"
     r"\bCVE-[0-9]{4}-[0-9]{4,}\b|"
-    r"github\.com/(?:[^\s/]+/[^\s/]+/security/advisories|advisories)/",
+    r"github\.com/(?:[^\s/]+/[^\s/]+/security/advisories|advisories)/|"
+    # Security fixes are often described without the word "security" or an
+    # advisory ID ("fix today's published CVEs", "fix authentication bypass").
+    r"\bCVEs?\b|\bvulnerabilit(?:y|ies)\b|\bvulnerable\b|"
+    r"\bexploit(?:s|ed|ing|able|ation)?\b|"
+    r"\b(?:auth|authentication|authorization|login)\s+bypass\b|"
+    r"\b(?:sql|shell|command|code|smtp|header|html|script|template)\s+injection\b|"
+    r"\bremote\s+code\s+execution\b|\bRCE\b|\bXSS\b|\bcross-site\s+scripting\b|"
+    r"\bSSRF\b|\b(?:path|directory)\s+traversal\b|\bprivilege\s+escalation\b",
     re.IGNORECASE | re.ASCII,
 )
 ADVISORY_ID_RE = re.compile(
@@ -77,7 +86,7 @@ def assess_release_security(
     """Classify security urgency without treating release prose as exposure proof."""
 
     signal_text = "\n".join(
-        [info.title, info.body, *(link.url for link in info.links)]
+        [info.title, _security_signal_body(context, info), *(link.url for link in info.links)]
     )
     scanned_text = signal_text[:SECURITY_SIGNAL_SCAN_MAX_CHARS]
     if not SECURITY_SIGNAL_RE.search(scanned_text):
@@ -175,6 +184,35 @@ def assess_release_security(
         ),
         links,
     )
+
+
+def _security_signal_body(context: ReleaseNoteContext, info: ReleaseNoteInfo) -> str:
+    """Return the release text that describes what this update changes.
+
+    A LinuxServer rebuild keeps the upstream version, and its release repeats
+    the upstream notes the running container already has under "Remote
+    Changes", normally the last section of a LinuxServer release. Scanning
+    them would flag every rebuild for a fix that is already installed, so that
+    section is skipped. Everything else is scanned: the text before it, and a
+    "LinuxServer Changes" section that follows it. The whole body is still
+    scanned when the section cannot be found.
+    """
+
+    if context.provider != "lsio" or info.classification.change_type != "image_rebuild":
+        return info.body
+    kept: list[str] = []
+    in_remote_changes = False
+    for line in info.body.replace("\r", "").splitlines():
+        header = _block_header_text(line).lower()
+        # Upstream notes carry their own headers, so only LinuxServer's own
+        # section header ends the skipped section.
+        if header == "remote changes:":
+            in_remote_changes = True
+        elif header == "linuxserver changes:":
+            in_remote_changes = False
+        if not in_remote_changes:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 def _unverified_security_reason(
