@@ -30,13 +30,14 @@ from .release_note_security import (
     SECURITY_RETRYABLE_REASON_CODES,
     security_assessment_from_mapping,
 )
+from .release_note_upstreams import LINK_ONLY_PROVIDER, link_only_info
 
 SUCCESS_CACHE_TTL_SECONDS = 21_600
 ERROR_CACHE_TTL_SECONDS = 900
 
 
 def _cached_info(conn: sqlite3.Connection, context: ReleaseNoteContext) -> ReleaseNoteInfo:
-    if context.provider == "unsupported":
+    if context.provider in {"unsupported", LINK_ONLY_PROVIDER}:
         return _placeholder_info(context)
     row = conn.execute(
         """
@@ -52,6 +53,8 @@ def _cached_info(conn: sqlite3.Connection, context: ReleaseNoteContext) -> Relea
 
 
 def _placeholder_info(context: ReleaseNoteContext) -> ReleaseNoteInfo:
+    if context.provider == LINK_ONLY_PROVIDER:
+        return link_only_info(context)
     if context.provider == "unsupported":
         return ReleaseNoteInfo(
             line_no=context.line_no,

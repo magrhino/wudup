@@ -572,6 +572,28 @@ def test_digest_reason_priority_uses_deterministic_metadata() -> None:
             code,
             f"LSIO image update: {label}",
         )
+    assert reason(provider="link", status="not_found", semver_diff="minor") == (
+        "needs_review",
+        "release_notes_link_only",
+        "release notes on upstream site",
+    )
+    # Breaking and major-bump signals still outrank the link-only reason.
+    assert reason(provider="link", status="not_found", semver_diff="major")[:2] == (
+        "needs_review",
+        "major_bump",
+    )
+    link_only_note = notifications_module.ReleaseNoteInfo(
+        line_no=1,
+        status="not_found",
+        provider="link",
+        image_repo="postgres",
+        upstream_repo="postgresql.org",
+        error="postgresql.org publishes its release notes outside GitHub Releases.",
+    )
+    # Link-only rows never ran a GitHub lookup, so they must not say one failed.
+    assert discord_module._status_line(None, link_only_note) == (
+        "Release notes are published on the upstream site; the link is included."
+    )
     assert reason(
         provider="lsio",
         status="error",

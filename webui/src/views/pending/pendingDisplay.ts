@@ -147,7 +147,7 @@ export function releaseNoteReason(note: ReleaseNoteInfo | null): string {
     return `Add a LinuxServer.io upstream map entry for ${missingMapping[1]}.`;
   }
   if (error === "no supported GitHub release source found") {
-    return "Only GHCR and mapped LinuxServer.io images have release-note links.";
+    return "Only GHCR images, images with a GitHub source label, and mapped images have release-note links.";
   }
   return error;
 }

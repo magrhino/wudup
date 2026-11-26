@@ -44,6 +44,6 @@ short; detailed setup and behavior notes live here.
 |---|---|
 | `bin/` | `docker-update-from-wud` updater wrapper. |
 | `src/wudup/` | Python updater package and CLI entrypoints. |
-| `wud/` | LinuxServer.io upstream map (`upstreams.txt`) used for release-note lookups. |
+| `wud/` | LinuxServer.io upstream map (`upstreams.txt`) and the packaging-repo and official-image map (`release-note-upstreams.txt`) used for release-note lookups. |
 | `docs/examples/` | Copyable deployment examples. |
 | `tests/` | Shell and Python validation using fakes and temp directories. |

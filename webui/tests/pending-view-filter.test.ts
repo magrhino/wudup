@@ -330,7 +330,7 @@ describe("pending view search filter", () => {
     await setPendingSearch(wrapper, "Only GHCR");
 
     expect(wrapper.text()).toContain("postgres:16");
-    expect(wrapper.text()).toContain("Only GHCR and mapped LinuxServer.io images");
+    expect(wrapper.text()).toContain("Only GHCR images, images with a GitHub source label, and mapped images");
     expect(wrapper.text()).not.toContain("linuxserver/radarr:4.0");
   });
 });

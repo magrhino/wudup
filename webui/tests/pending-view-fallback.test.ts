@@ -905,7 +905,7 @@ describe("pending view fallback and release notes", () => {
     })]);
     await nextTick();
     expect(releaseRow.text()).toContain("Unavailable");
-    expect(panel.text()).toContain("Only GHCR and mapped LinuxServer.io images have release-note links.");
+    expect(panel.text()).toContain("Only GHCR images, images with a GitHub source label, and mapped images have release-note links.");
 
     updates.releaseNotes = releaseNotesResponse([releaseNoteInfo()]);
     await nextTick();
@@ -1171,7 +1171,7 @@ describe("pending view fallback and release notes", () => {
 
     expect(wrapper.text()).toContain("Unavailable");
     expect(wrapper.text()).toContain(
-      "Only GHCR and mapped LinuxServer.io images have release-note links.",
+      "Only GHCR images, images with a GitHub source label, and mapped images have release-note links.",
     );
     await wrapper.find('button[aria-label^="Release notes for "][aria-label*="linuxserver/calibre"]').trigger("click");
     expect(wrapper.find(".release-panel").text()).toContain("LSIO release");
