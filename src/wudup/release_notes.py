@@ -71,6 +71,15 @@ from .release_note_security import (
     assess_release_security,
     security_assessment_from_mapping,  # noqa: F401 - compatibility re-export
 )
+from .release_note_upstreams import (
+    LINK_ONLY_PROVIDER,
+    ReleaseNoteUpstream,
+    link_only_notes_link,
+    link_only_source,
+    load_release_note_upstream_map,
+    packaging_repo_link,
+    resolve_release_note_upstream,
+)
 from .wud_file import WudTarget
 
 OCI_SOURCE_LABEL = "org.opencontainers.image.source"
@@ -145,7 +154,7 @@ def refresh_release_notes(
             cached.status != "missing"
             and _cache_metadata_incomplete(conn, context)
         )
-        if context.provider == "unsupported":
+        if context.provider in {"unsupported", LINK_ONLY_PROVIDER}:
             infos.append(cached)
             continue
         if (
@@ -208,6 +217,7 @@ def release_note_contexts(
     target_tag_resolver: ReleaseNoteTargetTagResolver | None = None,
 ) -> list[ReleaseNoteContext]:
     upstreams = _load_upstream_map(environ)
+    notes_upstreams = load_release_note_upstream_map(environ)
     contexts: list[ReleaseNoteContext] = []
     for target in targets:
         current_tag = image_tag(target.first)
@@ -244,7 +254,25 @@ def release_note_contexts(
 
         source_repo = github_repo_from_source(
             source_resolver(target) if source_resolver is not None else ""
+        ) or github_repo_from_ghcr_image(target.first)
+        # The map runs after discovery so it can correct a packaging repo too.
+        notes_upstream = resolve_release_note_upstream(
+            notes_upstreams,
+            image=target.first,
+            source_repo=source_repo,
         )
+        if notes_upstream is not None:
+            contexts.append(
+                _mapped_context(
+                    target,
+                    notes_upstream,
+                    source_repo=source_repo,
+                    current_tag=current_tag,
+                    target_tag=target_tag,
+                )
+            )
+            continue
+
         if source_repo:
             contexts.append(
                 _context(
@@ -252,20 +280,6 @@ def release_note_contexts(
                     provider="github",
                     image_repo=source_repo,
                     upstream_repo=source_repo,
-                    current_tag=current_tag,
-                    target_tag=target_tag,
-                )
-            )
-            continue
-
-        ghcr_repo = github_repo_from_ghcr_image(target.first)
-        if ghcr_repo:
-            contexts.append(
-                _context(
-                    target,
-                    provider="github",
-                    image_repo=ghcr_repo,
-                    upstream_repo=ghcr_repo,
                     current_tag=current_tag,
                     target_tag=target_tag,
                 )
@@ -334,6 +348,41 @@ def github_latest_candidate_from_info(
     )
 
 
+def _mapped_context(
+    target: WudTarget,
+    upstream: ReleaseNoteUpstream,
+    *,
+    source_repo: str,
+    current_tag: str,
+    target_tag: str,
+) -> ReleaseNoteContext:
+    """Point a context at the mapped upstream, keeping a packaging repo link."""
+
+    image_repo = source_repo or image_repo_ref(target.first)
+    packaging_links: tuple[ReleaseNoteLink, ...] = ()
+    if source_repo and source_repo.lower() != upstream.repo.lower():
+        packaging_links = (packaging_repo_link(source_repo),)
+    if upstream.notes_url:
+        return _context(
+            target,
+            provider=LINK_ONLY_PROVIDER,
+            image_repo=image_repo,
+            upstream_repo=link_only_source(upstream.notes_url),
+            current_tag=current_tag,
+            target_tag=target_tag,
+            links=(link_only_notes_link(upstream.notes_url), *packaging_links),
+        )
+    return _context(
+        target,
+        provider="github",
+        image_repo=image_repo,
+        upstream_repo=upstream.repo,
+        current_tag=current_tag,
+        target_tag=target_tag,
+        links=packaging_links,
+    )
+
+
 def _context(
     target: WudTarget,
     *,
@@ -343,6 +392,7 @@ def _context(
     current_tag: str,
     target_tag: str,
     error: str = "",
+    links: tuple[ReleaseNoteLink, ...] = (),
 ) -> ReleaseNoteContext:
     key_payload = {
         "provider": provider,
@@ -366,6 +416,7 @@ def _context(
         target_tag=target_tag,
         target_digest=target.digest,
         error=error,
+        links=links,
     )
 
 
@@ -378,6 +429,8 @@ def _fetch_release_note(
         info = _fetch_lsio_release_note(context, client, timestamp)
     else:
         info = _fetch_github_release_note(context, client, timestamp)
+    if context.links:
+        info = replace(info, links=_unique_links([*info.links, *context.links]))
     if info.status != "ready":
         return info
     security, advisory_links = assess_release_security(context, info, client)

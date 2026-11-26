@@ -76,6 +76,7 @@ EOF
     tests/wud-segment-count-probe.sh \
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
+    tests/test-release-note-upstreams-map.sh \
     tests/test-publish-release-image.sh \
     tests/test-edge-catch-up.sh \
     tests/test-prune-edge-images.sh \
@@ -99,6 +100,7 @@ EOF
     tests/wud-segment-count-probe.sh \
     tests/test-entrypoint.sh \
     tests/test-upstreams-map.sh \
+    tests/test-release-note-upstreams-map.sh \
     tests/test-publish-release-image.sh \
     tests/test-edge-catch-up.sh \
     tests/test-prune-edge-images.sh \

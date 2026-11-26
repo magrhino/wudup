@@ -1,0 +1,31 @@
+# /wud/release-note-upstreams.txt
+# Maps an image, or the GitHub repo its source label names, to the upstream
+# that publishes its release notes. WUDup applies it after source discovery,
+# so it corrects a packaging repo and fills in images with no source label.
+#
+# Format: <key>: <value>
+#   key    github.com/<owner>/<repo>  packaging repo found by source discovery
+#          <image>                    Docker Hub image without docker.io/ or
+#                                     library/ (caddy, curlimages/curl), or
+#                                     <registry>/<path> for other registries
+#   value  <Owner>/<Repo>             read GitHub releases from this repo
+#          https://<url>              link only, for upstreams that do not
+#                                     publish GitHub releases
+# A packaging-repo key applies to the GitHub repo that source discovery found
+# (the image's source label, a GitHub WUD link, or a GHCR image). An image key
+# applies only when discovery found no GitHub repo, so a per-container WUD
+# link still wins. Keys are lowercase and sorted. LinuxServer.io images use
+# upstreams.txt instead.
+
+caddy: caddyserver/caddy
+github.com/caddyserver/caddy-docker: caddyserver/caddy
+github.com/curl/curl-container: curl/curl
+github.com/docker-library/postgres: https://www.postgresql.org/docs/release/
+github.com/nextcloud/docker: nextcloud-releases/server
+github.com/nginx/docker-nginx: nginx/nginx
+github.com/nginxinc/docker-nginx-unprivileged: nginx/nginx
+github.com/redis/docker-library-redis: redis/redis
+nextcloud: nextcloud-releases/server
+nginx: nginx/nginx
+postgres: https://www.postgresql.org/docs/release/
+redis: redis/redis

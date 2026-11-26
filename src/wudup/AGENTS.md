@@ -64,6 +64,7 @@ reviewing module growth.
 | Docker tag-stream parsing and WebUI decision planning | `tag_streams.py` | Keep detection strict, manifest-verified, LinuxServer-aware, and free of GET-time registry calls. |
 | Release-note API and context orchestration | `release_notes.py`, `release_note_models.py` | Preserve public imports, shared record defaults, context cache keys, candidate selection, and backfill fallback. Provider, security, and cache owners must not import the facade. |
 | GitHub/LSIO release-note providers | `release_note_providers.py` | Own the shared GitHub client, source discovery, bounded release lookup, breaking detection, and LSIO classification; preserve request/fallback order and upstream mappings. |
+| Release-note upstream map | `release_note_upstreams.py` | Owns `wud/release-note-upstreams.txt` parsing, image-key normalization, and the post-discovery lookup (a found repo uses only its packaging-repo key; image keys fill images with no GitHub source). Link-only entries are network-free and never cached. Never applies to LinuxServer.io images. |
 | Release-note security assessment | `release_note_security.py` | Own advisory matching, version-range evidence, severity, scan/fetch limits, and retryable reasons; use the same provider client without adding cache writes. |
 | Release-note cache persistence | `release_note_cache.py` | Own legacy row decoding, digest pruning, upserts, and TTL decisions; preserve SQL/serialization and keep cached reads network-free. |
 

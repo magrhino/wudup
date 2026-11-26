@@ -171,6 +171,55 @@ The WebUI also treats LinuxServer.io `version-*` tags, including branch-specific
 tags such as `libtorrentv1-version-*`, as upstream-tracking aliases that still
 receive LinuxServer.io image rebuilds.
 
+## Packaging Repo And Official Image Mapping
+
+Some images name a packaging repo as their source, and that repo publishes stub
+release notes or none. Docker Official Images such as `caddy` or `postgres`
+usually have no source label at all. `wud/release-note-upstreams.txt` points
+these at the upstream that publishes the notes:
+
+```text
+github.com/curl/curl-container: curl/curl
+caddy: caddyserver/caddy
+postgres: https://www.postgresql.org/docs/release/
+```
+
+WUDup applies the map after it has found a source. A `github.com/<owner>/<repo>`
+key applies when the found repo is that packaging repo. An image key, such as
+`caddy` or `ghcr.io/<owner>/<image>`, applies only when WUDup found no GitHub
+repo for the image. The value is either the GitHub repo to read releases from,
+or an `https://` link for an upstream that does not publish GitHub releases.
+WUDup shows the upstream as the source and adds a `Packaging repo` link. A
+link-only entry is shown as an `Upstream release notes` link without a GitHub
+lookup.
+
+WUDup looks for a GitHub release whose tag matches the image tag (`2.11.9` or
+`v2.11.9`). Upstreams that tag releases differently, such as `nginx/nginx`
+(`release-1.29.4`) or `curl/curl` (`curl-8_23_0`), show the project link until
+tag matching supports their scheme.
+
+To change the map, add a sorted entry and run
+`tests/test-release-note-upstreams-map.sh`. LinuxServer.io images use
+`upstreams.txt` instead.
+
+### Per-Container Override With `wud.link.template`
+
+For an image that has no GitHub source label, you can set WUD's
+`wud.link.template` label on the container to a GitHub URL. WUD renders that
+template into the container's `link` field in its API, and WUDup takes the
+`owner/repo` from it as the release-note source:
+
+```yaml
+labels:
+  - wud.link.template=https://github.com/redis/redis/releases
+```
+
+WUDup uses the link only when the image's `org.opencontainers.image.source`
+label is missing or is not a GitHub URL. It does not replace a GitHub source
+label; add a `github.com/<owner>/<repo>` map entry for that case. A link to a
+site other than GitHub is ignored for release notes. Template variables such as
+`${major}` need `$$` escaping in Compose files.
+
 ## WebUI Release Links
 
 The WebUI uses a separate Python service for structured release-note metadata.

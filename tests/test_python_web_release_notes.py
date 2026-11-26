@@ -464,7 +464,8 @@ def test_release_notes_refresh_works_when_mutations_are_enabled(
             "WUD_WEB_MUTATIONS_ENABLED": "true",
         },
     )
-    wud_file.write_text("docker.io/library/redis:latest\n", encoding="utf-8")
+    # busybox has no release-note upstream map entry, so no GitHub lookup runs.
+    wud_file.write_text("docker.io/library/busybox:latest\n", encoding="utf-8")
 
     response = client.post(
         "/api/v1/release-notes/refresh",

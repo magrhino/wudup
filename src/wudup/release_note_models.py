@@ -88,6 +88,8 @@ class ReleaseNoteContext:
     target_tag: str
     target_digest: str = ""
     error: str = ""
+    # Links WUDup adds itself, such as the packaging repo of a mapped upstream.
+    links: tuple[ReleaseNoteLink, ...] = ()
 
 
 @dataclass(frozen=True)
