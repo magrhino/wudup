@@ -577,6 +577,11 @@ def test_digest_reason_priority_uses_deterministic_metadata() -> None:
         "release_notes_link_only",
         "release notes on upstream site",
     )
+    # Breaking and major-bump signals still outrank the link-only reason.
+    assert reason(provider="link", status="not_found", semver_diff="major")[:2] == (
+        "needs_review",
+        "major_bump",
+    )
     link_only_note = notifications_module.ReleaseNoteInfo(
         line_no=1,
         status="not_found",
