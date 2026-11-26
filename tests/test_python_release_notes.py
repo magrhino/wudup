@@ -1207,6 +1207,7 @@ class ReleaseNotesTests(unittest.TestCase):
                 "https://api.github.com/repos/Radarr/Radarr/releases/tags/5.1.0": {
                     "message": "Not Found"
                 },
+                "https://api.github.com/repos/Radarr/Radarr/releases?per_page=100": [],
             }
             calls: list[str] = []
 
