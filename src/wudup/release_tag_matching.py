@@ -56,9 +56,10 @@ def match_release_by_version(
     """Return the one release whose tag names the image tag's version.
 
     An exact version match wins. Only when none exists is a release accepted
-    whose version adds a numeric build stamp (``12.4`` -> ``v12.4-202610261649``).
-    Two matches at the same level, a tag with no version, or a draft release
-    yield ``None``."""
+    whose version adds a numeric build stamp (``12.4`` -> ``v12.4-202610261649``);
+    a prerelease never counts as a build stamp, since ``1.0.0-1`` can be a
+    semver prerelease. Two matches at the same level, a tag with no version, or
+    a draft release yield ``None``."""
     version = image_tag_version(image_tag).lower()
     if not version:
         return None
@@ -70,8 +71,10 @@ def match_release_by_version(
         candidate = release_tag_version(str(release.get("tag_name") or ""), repo).lower()
         if candidate == version:
             exact.append(release)
-        elif candidate.startswith(version) and BUILD_SUFFIX_RE.match(
-            candidate[len(version):]
+        elif (
+            not release.get("prerelease")
+            and candidate.startswith(version)
+            and BUILD_SUFFIX_RE.match(candidate[len(version):])
         ):
             build.append(release)
     for matches in (exact, build):

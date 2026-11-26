@@ -24,11 +24,14 @@ def fixture_cases() -> list[dict[str, object]]:
     return json.loads(FIXTURES.read_text(encoding="utf-8"))["cases"]
 
 
-def release(tag: str, *, draft: bool = False) -> dict[str, object]:
+def release(
+    tag: str, *, draft: bool = False, prerelease: bool = False
+) -> dict[str, object]:
     return {
         "tag_name": tag,
         "name": tag,
         "draft": draft,
+        "prerelease": prerelease,
         "html_url": f"https://github.com/acme/app/releases/tag/{tag}",
         "body": f"Notes for {tag}.",
     }
@@ -120,6 +123,10 @@ class MatchReleaseByVersionTests(unittest.TestCase):
     def test_build_stamp_must_be_numeric_and_separated(self) -> None:
         releases = [release("v1.2-rc1"), release("v1.2.1"), release("v1.20")]
         self.assertIsNone(match_release_by_version(releases, "1.2", "acme/app"))
+
+    def test_numeric_prerelease_is_not_a_build_stamp(self) -> None:
+        releases = [release("v1.0.0-1", prerelease=True)]
+        self.assertIsNone(match_release_by_version(releases, "1.0.0", "acme/app"))
 
     def test_draft_releases_are_ignored(self) -> None:
         releases = [release("release-1.2.3", draft=True), release("app-1.2.3")]
