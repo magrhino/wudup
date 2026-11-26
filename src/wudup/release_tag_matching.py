@@ -18,7 +18,10 @@ IMAGE_VARIANT_SUFFIX_RE = re.compile(
 )
 RELEASE_PREFIX_RE = re.compile(r"^release[-_]", re.IGNORECASE | re.ASCII)
 DOTTED_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)+(?![0-9A-Za-z])", re.ASCII)
-BUILD_SUFFIX_RE = re.compile(r"^[-+][0-9]+$", re.ASCII)
+# A build stamp is semver build metadata (``+5``) or a date-like stamp of at
+# least eight digits (``-202610261649``); shorter ``-1`` suffixes are numeric
+# semver prereleases, not builds of the same version.
+BUILD_SUFFIX_RE = re.compile(r"^(?:-[0-9]{8,}|\+[0-9]+)$", re.ASCII)
 
 
 def image_tag_version(tag: str) -> str:
@@ -56,10 +59,10 @@ def match_release_by_version(
     """Return the one release whose tag names the image tag's version.
 
     An exact version match wins. Only when none exists is a release accepted
-    whose version adds a numeric build stamp (``12.4`` -> ``v12.4-202610261649``);
-    a prerelease never counts as a build stamp, since ``1.0.0-1`` can be a
-    semver prerelease. Two matches at the same level, a tag with no version, or
-    a draft release yield ``None``."""
+    whose version adds a build stamp (``12.4`` -> ``v12.4-202610261649``, see
+    ``BUILD_SUFFIX_RE``); a release marked as a prerelease never counts as a
+    build. Two matches at the same level, a tag with no version, or a draft
+    release yield ``None``."""
     version = image_tag_version(image_tag).lower()
     if not version:
         return None

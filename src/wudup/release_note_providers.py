@@ -6,6 +6,7 @@ module does not access SQLite or decide cache freshness or security urgency."""
 from __future__ import annotations
 
 import json
+import logging
 import re
 import urllib.error
 import urllib.parse
@@ -31,6 +32,7 @@ from .release_tag_matching import image_tag_version, match_release_by_version
 DEFAULT_GITHUB_TIMEOUT_SECONDS = 6.0
 LSIO_RELEASE_SCAN_MAX_PAGES = 10
 GITHUB_RELEASE_MATCH_PER_PAGE = 100
+LOGGER = logging.getLogger(__name__)
 GITHUB_HOST = "github.com"
 UPSTREAM_MAP_FILENAME = "upstreams.txt"
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -410,15 +412,29 @@ def _fetch_lsio_upstream_release(
     repo: str,
     tag: str,
 ) -> dict[str, Any] | None:
-    if tag.lower() == "latest" or not tag:
-        return _fetch_latest(client, repo)
-    fallback = _composite_upstream_base(tag)
-    tags = [tag, fallback] if fallback and fallback != tag else [tag]
-    for candidate in tags:
-        release = _fetch_exact_release(client, repo, candidate)
-        if release is not None:
-            return release
-    return _match_listed_release(client, repo, tags)
+    # The upstream release only enriches an LSIO note that was already found,
+    # so a failed GitHub request must not replace that note with an error.
+    # A rejected GITHUB_TOKEN is a RuntimeError and still propagates.
+    try:
+        if tag.lower() == "latest" or not tag:
+            return _fetch_latest(client, repo)
+        fallback = _composite_upstream_base(tag)
+        tags = [tag, fallback] if fallback and fallback != tag else [tag]
+        for candidate in tags:
+            release = _fetch_exact_release(client, repo, candidate)
+            if release is not None:
+                return release
+        return _match_listed_release(client, repo, tags)
+    except (OSError, ValueError) as exc:
+        LOGGER.warning(
+            "Could not look up the GitHub release for %s upstream version %s; "
+            "showing the LinuxServer release notes without upstream notes. "
+            "Detail: %s",
+            repo,
+            tag,
+            exc,
+        )
+        return None
 
 
 def _classify_context(

@@ -6,8 +6,10 @@ from pathlib import Path
 
 from wudup.release_note_models import ReleaseNoteContext
 from wudup.release_note_providers import (
+    GitHubAuthenticationError,
     GitHubClient,
     _fetch_github_release_note,
+    _fetch_lsio_release_note,
     _fetch_lsio_upstream_release,
 )
 from wudup.release_tag_matching import (
@@ -124,9 +126,17 @@ class MatchReleaseByVersionTests(unittest.TestCase):
         releases = [release("v1.2-rc1"), release("v1.2.1"), release("v1.20")]
         self.assertIsNone(match_release_by_version(releases, "1.2", "acme/app"))
 
-    def test_numeric_prerelease_is_not_a_build_stamp(self) -> None:
-        releases = [release("v1.0.0-1", prerelease=True)]
+    def test_short_numeric_suffix_is_a_prerelease_not_a_build_stamp(self) -> None:
+        releases = [release("v1.0.0-1"), release("v1.0.0-12")]
         self.assertIsNone(match_release_by_version(releases, "1.0.0", "acme/app"))
+
+    def test_release_marked_prerelease_is_not_a_build_stamp(self) -> None:
+        releases = [release("v1.0.0-202610261649", prerelease=True)]
+        self.assertIsNone(match_release_by_version(releases, "1.0.0", "acme/app"))
+
+    def test_semver_build_metadata_is_a_build_stamp(self) -> None:
+        match = match_release_by_version([release("v1.0.0+5")], "1.0.0", "acme/app")
+        self.assertEqual(match and match["tag_name"], "v1.0.0+5")
 
     def test_draft_releases_are_ignored(self) -> None:
         releases = [release("release-1.2.3", draft=True), release("app-1.2.3")]
@@ -185,7 +195,12 @@ class GitHubReleaseFallbackTests(unittest.TestCase):
 
     def test_ambiguous_listing_reports_not_found(self) -> None:
         client, _calls = recording_client(
-            {list_url("acme/app"): [release("v1.2.3-1"), release("v1.2.3-2")]}
+            {
+                list_url("acme/app"): [
+                    release("v1.2.3-20261101"),
+                    release("v1.2.3-20261102"),
+                ]
+            }
         )
 
         info = _fetch_github_release_note(
@@ -215,6 +230,85 @@ class GitHubReleaseFallbackTests(unittest.TestCase):
 
         self.assertEqual(match and match["tag_name"], "release-5.2.2")
         self.assertEqual(calls.count(list_url(repo)), 1)
+
+    def test_lsio_upstream_listing_failure_returns_no_upstream_release(self) -> None:
+        repo = "Radarr/Radarr"
+
+        def fetch_json(url: str) -> object:
+            if url == list_url(repo):
+                raise TimeoutError("timed out")
+            return NOT_FOUND
+
+        with self.assertLogs("wudup.release_note_providers", "WARNING") as logs:
+            match = _fetch_lsio_upstream_release(
+                GitHubClient(fetch_json=fetch_json), repo, "5.1.0"
+            )
+
+        self.assertIsNone(match)
+        self.assertIn("without upstream notes", logs.output[0])
+
+    def test_lsio_upstream_exact_lookup_failure_returns_no_upstream_release(
+        self,
+    ) -> None:
+        def fetch_json(url: str) -> object:
+            raise ValueError("invalid JSON")
+
+        with self.assertLogs("wudup.release_note_providers", "WARNING"):
+            match = _fetch_lsio_upstream_release(
+                GitHubClient(fetch_json=fetch_json), "Radarr/Radarr", "5.1.0"
+            )
+
+        self.assertIsNone(match)
+
+    def test_lsio_note_survives_failed_upstream_lookup(self) -> None:
+        lsio_release = {
+            "tag_name": "5.1.0-ls1",
+            "name": "5.1.0-ls1",
+            "html_url": (
+                "https://github.com/linuxserver/docker-radarr/releases/tag/5.1.0-ls1"
+            ),
+            "body": "Remote Changes:\n- Updating to 5.1.0",
+        }
+
+        def fetch_json(url: str) -> object:
+            if url.endswith("/linuxserver/docker-radarr/releases/tags/5.1.0-ls1"):
+                return lsio_release
+            raise TimeoutError("timed out")
+
+        lsio_context = ReleaseNoteContext(
+            line_no=1,
+            cache_key="radarr",
+            provider="lsio",
+            image_repo="linuxserver/docker-radarr",
+            upstream_repo="Radarr/Radarr",
+            current_tag="4.0.0-ls1",
+            target_tag="5.1.0-ls1",
+        )
+        with self.assertLogs("wudup.release_note_providers", "WARNING"):
+            info = _fetch_lsio_release_note(
+                lsio_context,
+                GitHubClient(fetch_json=fetch_json),
+                "2026-11-26T00:00:00Z",
+            )
+
+        self.assertEqual(info.status, "ready")
+        self.assertEqual(info.release_tag, "5.1.0-ls1")
+        self.assertEqual(
+            [link.kind for link in info.links], ["lsio_release"]
+        )
+
+    def test_lsio_upstream_listing_keeps_rejected_token_error(self) -> None:
+        repo = "Radarr/Radarr"
+
+        def fetch_json(url: str) -> object:
+            if url == list_url(repo):
+                raise GitHubAuthenticationError("token rejected")
+            return NOT_FOUND
+
+        with self.assertRaises(GitHubAuthenticationError):
+            _fetch_lsio_upstream_release(
+                GitHubClient(fetch_json=fetch_json), repo, "5.1.0"
+            )
 
 
 if __name__ == "__main__":
