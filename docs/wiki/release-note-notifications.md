@@ -184,10 +184,12 @@ caddy: caddyserver/caddy
 postgres: https://www.postgresql.org/docs/release/
 ```
 
-WUDup applies the map after it has found a source. A `github.com/<owner>/<repo>`
-key applies when the found repo is that packaging repo. An image key, such as
-`caddy` or `ghcr.io/<owner>/<image>`, applies only when WUDup found no GitHub
-repo for the image. The value is either the GitHub repo to read releases from,
+WUDup applies the map after it has found a source: the image's
+`org.opencontainers.image.source` label, a GitHub WUD link, or the repo behind a
+`ghcr.io/<owner>/<image>` image. A `github.com/<owner>/<repo>` key applies when
+the found repo is that packaging repo, so map a GHCR image by its
+`github.com/` key. An image key, such as `caddy` or `quay.io/<owner>/<image>`,
+applies only when WUDup found no GitHub repo for the image. The value is either the GitHub repo to read releases from,
 or an `https://` link for an upstream that does not publish GitHub releases.
 WUDup shows the upstream as the source and adds a `Packaging repo` link. A
 link-only entry is shown as an `Upstream release notes` link without a GitHub

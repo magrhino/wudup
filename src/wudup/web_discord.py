@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from . import web_wud_api
 from .images import image_repo_ref, image_tag
+from .release_note_upstreams import LINK_ONLY_PROVIDER
 from .web_effective_settings import effective_release_notification_webhook
 from .web_models import (
     ReleaseNoteInfo,
@@ -162,6 +163,8 @@ def _notification_digest_reason(
         )
     if semver_diff == "major":
         return "needs_review", "major_bump", f"{provider_prefix}major version bump"
+    if note.provider == LINK_ONLY_PROVIDER:
+        return "needs_review", "release_notes_link_only", "release notes on upstream site"
     status_reasons = {
         "error": ("release_notes_error", "release-note lookup failed"),
         "unsupported": ("release_notes_unsupported", "release notes unsupported"),
@@ -434,6 +437,8 @@ def _notification_description_lines(
 def _status_line(settings: WebSettings, note: ReleaseNoteInfo) -> str:
     if note.status == "ready":
         return "Release metadata is ready in WUDup."
+    if note.provider == LINK_ONLY_PROVIDER:
+        return "Release notes are published on the upstream site; the link is included."
     if note.status == "not_found":
         return "A matching GitHub release was not found; project links are included."
     if note.status == "missing":
