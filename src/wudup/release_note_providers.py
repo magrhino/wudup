@@ -26,9 +26,11 @@ from .release_note_models import (
     ReleaseNoteInfo,
     ReleaseNoteLink,
 )
+from .release_tag_matching import image_tag_version, match_release_by_version
 
 DEFAULT_GITHUB_TIMEOUT_SECONDS = 6.0
 LSIO_RELEASE_SCAN_MAX_PAGES = 10
+GITHUB_RELEASE_MATCH_PER_PAGE = 100
 GITHUB_HOST = "github.com"
 UPSTREAM_MAP_FILENAME = "upstreams.txt"
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -408,13 +410,15 @@ def _fetch_lsio_upstream_release(
     repo: str,
     tag: str,
 ) -> dict[str, Any] | None:
-    release = _fetch_release(client, repo, tag)
-    if release is not None:
-        return release
+    if tag.lower() == "latest" or not tag:
+        return _fetch_latest(client, repo)
     fallback = _composite_upstream_base(tag)
-    if fallback and fallback != tag:
-        return _fetch_release(client, repo, fallback)
-    return None
+    tags = [tag, fallback] if fallback and fallback != tag else [tag]
+    for candidate in tags:
+        release = _fetch_exact_release(client, repo, candidate)
+        if release is not None:
+            return release
+    return _match_listed_release(client, repo, tags)
 
 
 def _classify_context(
@@ -437,18 +441,52 @@ def _fetch_release(
     repo: str,
     tag: str,
 ) -> dict[str, Any] | None:
-    if tag.lower() == "latest":
+    if tag.lower() == "latest" or not tag:
         return _fetch_latest(client, repo)
-    if tag:
-        candidates = [tag] if tag[:1].lower() == "v" else [f"v{tag}", tag]
-        for candidate in candidates:
-            release = _object_or_none(
-                client.get_json(f"https://api.github.com/repos/{repo}/releases/tags/{candidate}")
-            )
-            if release is not None:
-                return release
+    release = _fetch_exact_release(client, repo, tag)
+    if release is not None:
+        return release
+    return _match_listed_release(client, repo, [tag])
+
+
+def _fetch_exact_release(
+    client: GitHubClient,
+    repo: str,
+    tag: str,
+) -> dict[str, Any] | None:
+    candidates = [tag] if tag[:1].lower() == "v" else [f"v{tag}", tag]
+    for candidate in candidates:
+        release = _object_or_none(
+            client.get_json(f"https://api.github.com/repos/{repo}/releases/tags/{candidate}")
+        )
+        if release is not None:
+            return release
+    return None
+
+
+def _match_listed_release(
+    client: GitHubClient,
+    repo: str,
+    tags: list[str],
+) -> dict[str, Any] | None:
+    """List recent releases once and match the first tag naming a version.
+
+    Skips the listing when no tag names a version, so tags such as ``stable``
+    cost no extra request."""
+    versioned = [tag for tag in tags if image_tag_version(tag)]
+    if not versioned:
         return None
-    return _fetch_latest(client, repo)
+    releases = _object_list(
+        client.get_json(
+            f"https://api.github.com/repos/{repo}/releases"
+            f"?per_page={GITHUB_RELEASE_MATCH_PER_PAGE}"
+        )
+    )
+    for tag in versioned:
+        release = match_release_by_version(releases, tag, repo)
+        if release is not None:
+            return dict(release)
+    return None
 
 
 def _fetch_latest(client: GitHubClient, repo: str) -> dict[str, Any] | None:
